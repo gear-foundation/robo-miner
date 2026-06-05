@@ -83,10 +83,12 @@ export class ChainSource {
     throw new Error('[ChainSource] connect: wire @vara-eth/api once the World contract is deployed (chain/source.js)');
   }
 
-  // 2) Load the world grid + agents from the World queries (world.idl).
-  //    MapSnapshot() -> [u32] grid bytes; Config() -> dims; Agents()/AgentOf() ->
-  //    miners. (Alternatively read just the seed and generateWorld() locally —
-  //    see WORLDGEN_PORTING.md — then apply deltas.)
+  // 2) Load the world for display. The map is generated OFF-CHAIN by us
+  //    (generateWorld(seed)) and uploaded into the contract via Admin.UploadMap;
+  //    the contract just stores it. To render we can either read it back —
+  //    MapSnapshot() -> [u32] grid, Config() -> dims, Agents()/AgentOf() ->
+  //    miners — or regenerate locally from the same seed; either way we then
+  //    apply the event deltas. (No on-chain generation, so no Rust generator port.)
   async load() {
     // const SRC = await this._signer.getAddress(); // or any read source
     // const snapReply = await this._api.call.program.calculateReplyForHandle(SRC, CHAIN.worldProgramId, this._q.mapSnapshot());

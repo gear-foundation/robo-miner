@@ -1,8 +1,8 @@
 import Phaser from 'phaser';
-import { TILE, BLOCK } from '../config.js';
+import { TILE, BLOCK, BLOCK_DATA, SURFACE_Y } from '../config.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
-import { RealtimeWorld } from '../engine/realtime.js';
+import { createWorldSource } from '../chain/source.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { btnCss, wireBtn } from './arenaUI.js';
@@ -34,7 +34,9 @@ export default class SpectatorScene extends GameScene {
     this.spectator = true;
     this.mode = GAME_MODES[this.specMode] || GAME_MODES['coop-gem'];
     this.bots = createSquad(squadCounts(this.mode.miners));
-    this.rt = new RealtimeWorld({
+    // Data source: local engine today, Vara.eth ChainSource once the World
+    // contract is live (chain/source.js decides from env). Same surface either way.
+    this.rt = createWorldSource({
       seed: this.specSeed,
       spec: this.mode.spec,
       spawn: this.mode.spawn,
@@ -55,6 +57,8 @@ export default class SpectatorScene extends GameScene {
     this.tilePool = []; this.tilePoolCursor = 0;
     this.fallingStones = []; this.digging = null; this.failedDig = null;
     this.debris = []; this.flashes = []; this.bankPops = [];
+    // On-chain TX console: rolling log of agent actions as if they were txs.
+    this.eventLog = []; this.txCount = 0; this.consoleOpen = false; this.consoleTimer = 0;
 
     const cam = this.cameras.main;
     cam.setBounds(0, 0, this.world.W * TILE, this.world.H * TILE);
@@ -98,6 +102,7 @@ export default class SpectatorScene extends GameScene {
           this.cameras.main.shake(160, 0.004 * (e.radius + 1));
         }
         else if (e.type === 'sold') this.spawnBankPop(e.id, e.amount);
+        this.pushEvent(e);
       }
       if (this.rt.worldDirty) { this.worldDirty = true; this.rt.worldDirty = false; }
     }
@@ -119,6 +124,10 @@ export default class SpectatorScene extends GameScene {
     this.drawSpecRobots(time);
     this.drawFx(time);
     this.updateBankPops(dt);
+    if (this.consoleOpen) {
+      this.consoleTimer += dt;
+      if (this.consoleTimer >= 120) { this.consoleTimer = 0; this.renderConsole(); }
+    }
 
     this.statsTimer += dt;
     if (this.statsTimer >= 200) { this.statsTimer = 0; this.updateHUD(); if (this.rt.finished) this.showFinish(); }
@@ -243,9 +252,102 @@ export default class SpectatorScene extends GameScene {
     stats.style.cssText = 'margin-left:auto;font-size:14px';
     bar.appendChild(stats);
 
+    // On-chain TX-log toggle (terminal-style side console).
+    const logBtn = wireBtn(document.createElement('button'));
+    logBtn.id = 'spec-logbtn';
+    logBtn.textContent = '⛓ TX LOG';
+    logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;margin-left:14px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    logBtn.onclick = () => this.toggleConsole();
+    bar.appendChild(logBtn);
+    this.logBtn = logBtn;
+
     document.body.appendChild(bar);
     this.statsEl = stats;
+    this.buildConsole();
     this.updateHUD();
+  }
+
+  // Slide-out terminal that streams agent actions as if they were on-chain txs.
+  buildConsole() {
+    const c = document.createElement('div');
+    c.id = 'spec-console';
+    c.style.cssText = `position:fixed;right:0;top:46px;bottom:0;width:360px;z-index:19;
+      transform:translateX(100%);transition:transform .18s ease;
+      background:rgba(7,11,9,.86);backdrop-filter:blur(2px);border-left:2px solid #2f6a3f;
+      box-shadow:-6px 0 24px rgba(0,0,0,.4);font-family:'Courier New',monospace;
+      display:flex;flex-direction:column`;
+    c.innerHTML = `
+      <div style="padding:8px 10px;border-bottom:1px solid #2f6a3f;color:#7CFFB0;
+        font-size:12px;font-weight:bold;letter-spacing:.5px;display:flex;justify-content:space-between">
+        <span>▮ VARA.ETH · LIVE TX</span><span id="spec-tx-count" style="color:#5a8a6a">0 tx</span>
+      </div>
+      <div id="spec-console-body" style="flex:1;overflow:hidden;padding:6px 9px;
+        font-size:11px;line-height:1.55"></div>
+      <div style="padding:5px 10px;border-top:1px solid #1f3a28;color:#3a6a4a;font-size:10px">
+        pre-confirmed ~200ms · injected tx · reverse-gas
+      </div>`;
+    document.body.appendChild(c);
+    this.consoleEl = c;
+  }
+
+  toggleConsole() {
+    this.consoleOpen = !this.consoleOpen;
+    if (this.consoleEl) this.consoleEl.style.transform = this.consoleOpen ? 'translateX(0)' : 'translateX(100%)';
+    if (this.logBtn) this.logBtn.style.filter = this.consoleOpen ? 'brightness(1.5)' : '';
+    if (this.consoleOpen) this.renderConsole();
+  }
+
+  // Turn an engine event into a console line {hash,t,name,msg,color}; null = skip.
+  pushEvent(e) {
+    const line = this.formatEvent(e);
+    if (!line) return;
+    this.txCount++;
+    line.hash = '0x' + ((0x9e3779b1 * this.txCount) >>> 0).toString(16).padStart(8, '0').slice(0, 6);
+    this.eventLog.push(line);
+    if (this.eventLog.length > 220) this.eventLog.splice(0, this.eventLog.length - 220);
+  }
+
+  formatEvent(e) {
+    const miner = e.id != null ? this.rt.s.miners[e.id] : null;
+    const name = (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
+    const t = (this.rt.timeMs / 1000).toFixed(1);
+    const depth = e.y != null ? Math.max(0, e.y - (SURFACE_Y - 1)) : null;
+    let msg, color;
+    switch (e.type) {
+      case 'moved': msg = `move → ${e.x},${e.y}`; color = '#5f7a66'; break;
+      case 'dug':
+        if ((BLOCK_DATA[e.block]?.price || 0) > 0) return null; // crystal → resource_extracted
+        msg = `drill ${e.x},${e.y}`; color = '#7a8c80'; break;
+      case 'resource_extracted': {
+        const nm = (BLOCK_DATA[e.block]?.name || '?').toUpperCase();
+        const v = BLOCK_DATA[e.block]?.price || 0;
+        color = e.block === BLOCK.HCRST ? '#ff8fdc' : e.block === BLOCK.BCRST ? '#9bffbf' : '#8fe9ff';
+        msg = `⛏ EXTRACT ${nm} −${depth}m +${v}`; break;
+      }
+      case 'ladder_placed': msg = `place_ladder −${depth}m`; color = '#b9823c'; break;
+      case 'sold': msg = `◆ BANK +${e.amount} VARA`; color = '#ffec6e'; break;
+      case 'death': msg = `✝ DIED ${e.reason || ''} −${depth}m`; color = '#ff6a6a'; break;
+      case 'respawned': msg = 'respawn'; color = '#6a8aff'; break;
+      case 'detonation': msg = `dynamite r${e.radius}`; color = '#ffae42'; break;
+      default: return null;
+    }
+    return { t, name, msg, color };
+  }
+
+  renderConsole() {
+    const body = document.getElementById('spec-console-body');
+    if (!body) return;
+    // Newest at top; older scroll off the bottom (no scrollbar needed).
+    const rows = this.eventLog.slice(-90).reverse();
+    body.innerHTML = rows.map((l) =>
+      `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">` +
+      `<span style="color:#3a6a4a">${l.hash}</span> ` +
+      `<span style="color:#566">${l.t}s</span> ` +
+      `<span style="color:#9bb0a4">${l.name}</span> ` +
+      `<span style="color:${l.color}">${l.msg}</span></div>`,
+    ).join('');
+    const cnt = document.getElementById('spec-tx-count');
+    if (cnt) cnt.textContent = `${this.txCount} tx`;
   }
 
   updateHUD() {
@@ -253,9 +355,12 @@ export default class SpectatorScene extends GameScene {
     const ms = this.rt.s.miners;
     const alive = ms.filter((m) => m.alive).length;
     const dug = ms.reduce((a, m) => a + m.stats.tilesDug, 0);
+    const fps = Math.round(this.game.loop.actualFps);
+    const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     this.statsEl.innerHTML =
+      `<span style="color:${fc}">${fps} fps</span>　` +
       `${(this.rt.timeMs / 1000).toFixed(0)}s　agents <b>${alive}/${ms.length}</b>　` +
-      `dug <b>${dug}</b>　team <b style="color:#ffec6e">$${this.rt.teamScore}</b>` +
+      `dug <b>${dug}</b>　team <b style="color:#ffec6e">${this.rt.teamScore} VARA</b>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
 
@@ -286,5 +391,6 @@ export default class SpectatorScene extends GameScene {
   teardown() {
     document.getElementById('spec-hud')?.remove();
     document.getElementById('spec-finish')?.remove();
+    document.getElementById('spec-console')?.remove();
   }
 }

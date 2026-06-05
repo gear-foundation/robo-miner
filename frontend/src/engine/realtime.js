@@ -121,6 +121,7 @@ export class RealtimeWorld {
     if (a.kind === 'move' || a.kind === 'climb') {
       m.tx = a.tx; m.ty = a.ty; m.drawX = a.tx; m.drawY = a.ty;
       this._onArrive(m);
+      this.events.push({ type: 'moved', id: m.id, x: m.tx, y: m.ty });
     } else if (a.kind === 'fall') {
       m.tx = a.tx; m.ty = a.ty; m.drawX = a.tx; m.drawY = a.ty;
       return; // physics: gravity re-checked next frame; no think pause
@@ -177,6 +178,7 @@ export class RealtimeWorld {
       if (needsLadder) {
         if (m.items.ladder <= 0) return this._cooldown(m);
         setBlock(this.world, m.tx, m.ty, BLOCK.LADDER); m.items.ladder--; this.worldDirty = true;
+        this.events.push({ type: 'ladder_placed', id: m.id, x: m.tx, y: m.ty });
       }
       if (this._occupied(m, tx, ty)) return this._cooldown(m);
       return this._startMove(m, tx, ty, 'climb');
@@ -229,7 +231,8 @@ export class RealtimeWorld {
 
     const fromY = m.ty;
     setBlock(this.world, tx, ty, BLOCK.SKY); this.worldDirty = true;
-    this.events.push({ type: 'dug', x: tx, y: ty, block: type });
+    this.events.push({ type: 'dug', id: m.id, x: tx, y: ty, block: type });
+    if ((data.price || 0) > 0) this.events.push({ type: 'resource_extracted', id: m.id, x: tx, y: ty, block: type });
     m.stats.tilesDug++;
     this._scanStone(tx, ty - 1); this._awakenLava(tx, ty);
     if (m.alive && m.fuel <= 0) { this._kill(m, 'out of fuel'); return; }
@@ -286,6 +289,7 @@ export class RealtimeWorld {
     if (m.items.ladder <= 0) return;
     if (getBlock(this.world, m.tx, m.ty) === BLOCK.LADDER) return;
     setBlock(this.world, m.tx, m.ty, BLOCK.LADDER); m.items.ladder--; this.worldDirty = true;
+    this.events.push({ type: 'ladder_placed', id: m.id, x: m.tx, y: m.ty });
   }
 
   _placePillar(m) {
@@ -382,7 +386,7 @@ export class RealtimeWorld {
       m.hasDiamond = false;
       this.events.push({ type: 'diamond_dropped', x: m.tx, y: m.ty });
     }
-    this.events.push({ type: 'death', id: m.id, reason });
+    this.events.push({ type: 'death', id: m.id, reason, x: m.tx, y: m.ty });
   }
   _respawn(m) {
     if (m.respawnAtMs == null || this.timeMs < m.respawnAtMs) return;
@@ -391,6 +395,7 @@ export class RealtimeWorld {
     m.hp = m.maxHp; m.fuel = Math.max(m.fuel, Math.round(m.maxFuel * RESPAWN_FUEL_FRACTION));
     m.items.ladder = m.maxLadders; m.items.pillar = m.maxPillars; m.fallStartY = null;
     m.nextDecisionAt = this.timeMs;
+    this.events.push({ type: 'respawned', id: m.id });
   }
 
   // ---- dynamite ------------------------------------------------------------

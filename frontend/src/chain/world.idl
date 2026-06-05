@@ -1,0 +1,63 @@
+!@sails: 1.0.0-beta.5
+
+service World@0xfaaaecdffddb0061 {
+    events {
+        AgentDied(u64, [u8; 32], u32, u32, u32),
+        AgentExited(u64, [u8; 32]),
+        AgentMoved(u64, [u8; 32], u32, u32, u32, u32),
+        AgentRegistered(u64, [u8; 32]),
+        AgentSpawned(u64, [u8; 32], u32, u32),
+        AgentSurfaced(u64, [u8; 32], u32, u32, u32),
+        LadderPlaced(u64, [u8; 32], u32, u32, u32),
+        ResourceExtracted(u64, [u8; 32], u32, u32, u32, u32),
+        TileDrilled(u64, [u8; 32], u32, u32, u32, u32),
+    }
+    functions {
+        @query
+        AgentOf(owner: ActorId) -> [u128] throws String;
+        @query
+        Agents() -> [ActorId] throws String;
+        @query
+        Config() -> [u32] throws String;
+        Drill(direction: u32) -> [u128] throws String;
+        Exit() -> [u128] throws String;
+        @query
+        InventoryOf(owner: ActorId) -> [u32] throws String;
+        @query
+        MapSnapshot() -> [u32] throws String;
+        MoveAgent(direction: u32) -> [u128] throws String;
+        PlaceLadder(direction: u32) -> [u128] throws String;
+        Register() -> [u128] throws String;
+        @query
+        Session() -> [u128] throws String;
+        Surface() -> [u128] throws String;
+        @query
+        TileAt(x: u32, y: u32) -> u32 throws String;
+    }
+}
+
+service Admin@0xf0292894fb819cec {
+    events {
+        MapGenerated(u64, u64),
+        SessionFinished(u64),
+        SessionStarted(u64),
+    }
+    functions {
+        @query
+        Admin() -> ActorId throws String;
+        FinishSession() -> [u128] throws String;
+        ResetMap(seed: u64) -> [u128] throws String;
+        StartSession() -> [u128] throws String;
+        UploadMap(seed: u64, map: [u32]) -> [u128] throws String;
+    }
+}
+
+program DiggerWorld {
+    constructors {
+        Create(seed: u64);
+    }
+    services {
+        World@0xfaaaecdffddb0061,
+        Admin@0xf0292894fb819cec,
+    }
+}

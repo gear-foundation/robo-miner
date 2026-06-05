@@ -331,6 +331,10 @@ export default class SpectatorScene extends GameScene {
       case 'bought': msg = `+ BUY ${e.item} −${e.cost}`; color = '#ffc14a'; break;
       case 'death': msg = `✝ DIED ${e.reason || ''} −${depth}m`; color = '#ff6a6a'; break;
       case 'respawned': msg = 'respawn'; color = '#6a8aff'; break;
+      case 'registered': msg = 'REGISTER'; color = '#7CFFB0'; break;
+      case 'spawned': msg = `spawn ${e.x},${e.y}`; color = '#9bb0a4'; break;
+      case 'surfaced': msg = `▲ SURFACE${e.amount ? ` +${e.amount}` : ''}`; color = '#ffec6e'; break;
+      case 'exited': msg = 'EXIT'; color = '#9bb0a4'; break;
       case 'detonation': msg = `dynamite r${e.radius}`; color = '#ffae42'; break;
       default: return null;
     }

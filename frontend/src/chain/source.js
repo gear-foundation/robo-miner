@@ -28,6 +28,7 @@
 
 import { RealtimeWorld } from '../engine/realtime.js';
 import { CHAIN, chainReady } from './config.js';
+import { worldQueries, worldActions, decodeWorldEvent } from './world.js';
 
 // Pick the data source. Local engine today; the chain source once a World
 // contract is deployed and .env is filled (CHAIN.enabled + ids).
@@ -70,31 +71,41 @@ export class ChainSource {
   async connect() {
     // const { WsVaraEthProvider, createVaraEthApi } = await import('@vara-eth/api');
     // const { createPublicClient, http } = await import('viem');
+    // const { SailsProgram } = await import('sails-js');
+    // const { SailsIdlParser } = await import('sails-js/parser');
     // const publicClient = createPublicClient({ transport: http(CHAIN.ethRpc) });
     // this._api = await createVaraEthApi(new WsVaraEthProvider(CHAIN.varaEthWs), publicClient, CHAIN.routerAddress /* , read-only signer */);
-    // this._program = parseWorldIdl();              // SailsProgram from the World IDL
+    // const parser = new SailsIdlParser(); await parser.init();
+    // const idl = await (await fetch(new URL('../chain/world.idl', import.meta.url))).text();
+    // this._program = new SailsProgram(parser.parse(idl)); // DiggerWorld (services World + Admin)
     // this._program.setProgramId(CHAIN.worldProgramId);
+    // this._q = worldQueries(this._program); this._act = worldActions(this._program); // typed calls
     throw new Error('[ChainSource] connect: wire @vara-eth/api once the World contract is deployed (chain/source.js)');
   }
 
-  // 2) Load the world grid. Two valid shapes (decide with the contract team):
-  //    A. seed:  read the per-map seed via a query → generateWorld(seed,'agents')
-  //              locally, then apply cell-delta events. (light bandwidth)
-  //    B. raw:   read the full grid bytes via api.query.program.readState(...).
-  //    See WORLDGEN_PORTING.md (frontend regenerates from the same seed).
+  // 2) Load the world grid + agents from the World queries (world.idl).
+  //    MapSnapshot() -> [u32] grid bytes; Config() -> dims; Agents()/AgentOf() ->
+  //    miners. (Alternatively read just the seed and generateWorld() locally —
+  //    see WORLDGEN_PORTING.md — then apply deltas.)
   async load() {
-    // const q = this._program.services.World.queries.Snapshot.encodePayload();
-    // const reply = await this._api.call.program.calculateReplyForHandle(SOURCE, CHAIN.worldProgramId, q);
-    // const snap = this._program.services.World.queries.Snapshot.decodeResult(reply.payload);
-    // this.world = buildWorldFromSnapshot(snap);  // { grid, W, H, surface, model:'digger' }
-    // this.s.miners = snap.miners.map(toMiner);
-    throw new Error('[ChainSource] load: read World snapshot via calculateReplyForHandle / readState (ts-api playbook §9)');
+    // const SRC = await this._signer.getAddress(); // or any read source
+    // const snapReply = await this._api.call.program.calculateReplyForHandle(SRC, CHAIN.worldProgramId, this._q.mapSnapshot());
+    // const grid = this._program.services.World.queries.MapSnapshot.decodeResult(snapReply.payload); // [u32]
+    // const cfgReply = await this._api.call.program.calculateReplyForHandle(SRC, CHAIN.worldProgramId, this._q.config());
+    // const cfg = this._program.services.World.queries.Config.decodeResult(cfgReply.payload);        // {W,H,surface,…}
+    // this.world = { grid: Uint8Array.from(grid), W: cfg[0], H: cfg[1], surface: cfg[2], model: 'digger' };
+    // this.s.miners = (await this._loadAgents());  // Agents() + AgentOf()/InventoryOf()
+    throw new Error('[ChainSource] load: read World MapSnapshot/Config/Agents via calculateReplyForHandle (ts-api playbook §9)');
   }
 
-  // 3) Subscribe to the World program events (§8) → buffer them for update().
+  // 3) Subscribe to the World program events (world.idl) → buffer for update().
+  //    AgentMoved/TileDrilled/ResourceExtracted/LadderPlaced/AgentSurfaced/… are
+  //    mapped to our internal {type,id,x,y,block,…} by decodeWorldEvent().
   subscribe() {
     // this._unsub = this._api.subscribeToProgramEvents(CHAIN.worldProgramId, (raw) => {
-    //   this._pending.push(decodeWorldEvent(this._program, raw)); // {type,id,x,y,block,...}
+    //   const { service, name, args } = this._program.decodeEvent(raw); // sails-js
+    //   const ev = decodeWorldEvent(name, args);
+    //   if (ev) this._pending.push(ev);
     // });
     throw new Error('[ChainSource] subscribe: confirm the @vara-eth/api event-subscription call against the SDK + app-builder skill');
   }

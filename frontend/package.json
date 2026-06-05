@@ -1,0 +1,23 @@
+{
+  "name": "web3-miner-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@gear-js/api": "^0.45.0",
+    "@polkadot/api": "^16.5.6",
+    "@polkadot/extension-dapp": "^0.63.1",
+    "@polkadot/util": "^14.0.3",
+    "phaser": "^3.80.1",
+    "sails-js": "^0.5.1"
+  },
+  "devDependencies": {
+    "sails-js-cli": "^0.5.1",
+    "vite": "^5.2.0"
+  }
+}

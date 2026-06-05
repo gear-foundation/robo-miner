@@ -1,0 +1,25 @@
+# dependencies & build output
+node_modules/
+dist/
+build/
+
+# rust / sails contract build
+**/target/
+**/.binpath
+
+# env & local secrets (keep .env.example)
+.env
+.env.*.local
+*.local
+
+# os / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# logs
+*.log
+npm-debug.log*
+yarn-error.log*

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Lock the viewport scale: pinch-zoom (trackpad two-finger / mobile)
+       breaks UI alignment, so the game owns the entire surface and
+       doesn't allow user-driven zoom. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no" />
+  <title>Robo Miner</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      color: #eee;
+      /* Block native pinch-to-zoom on touch + most trackpad gestures. */
+      touch-action: pan-x pan-y;
+      -ms-content-zooming: none;
+      overscroll-behavior: none;
+    }
+    #game {
+      width: 100vw;
+      height: 100vh;
+    }
+    canvas {
+      image-rendering: pixelated;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+  <script>
+    // Block macOS trackpad "pinch zoom" (delivered as ctrl+wheel) and
+    // the standard ctrl/cmd +/-/0 zoom hotkeys. Without this, two-finger
+    // pinch on the trackpad scales the whole page and the HUD/canvas
+    // misalign mid-game.
+    window.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && ['+','-','=','0'].includes(e.key)) {
+        e.preventDefault();
+      }
+    });
+    // Block multi-touch gestures on mobile Safari that bypass the meta tag.
+    document.addEventListener('gesturestart',  (e) => e.preventDefault());
+    document.addEventListener('gesturechange', (e) => e.preventDefault());
+    document.addEventListener('gestureend',    (e) => e.preventDefault());
+  </script>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

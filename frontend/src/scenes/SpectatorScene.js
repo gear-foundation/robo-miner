@@ -326,6 +326,9 @@ export default class SpectatorScene extends GameScene {
       }
       case 'ladder_placed': msg = `place_ladder −${depth}m`; color = '#b9823c'; break;
       case 'sold': msg = `◆ BANK +${e.amount} VARA`; color = '#ffec6e'; break;
+      case 'refueled': msg = `⛽ REFUEL −${e.cost}`; color = '#9bd0ff'; break;
+      case 'upgraded': msg = `▲ UPGRADE ${(e.stat || '').toUpperCase()} L${e.level} −${e.cost}`; color = '#ffd14a'; break;
+      case 'bought': msg = `+ BUY ${e.item} −${e.cost}`; color = '#ffc14a'; break;
       case 'death': msg = `✝ DIED ${e.reason || ''} −${depth}m`; color = '#ff6a6a'; break;
       case 'respawned': msg = 'respawn'; color = '#6a8aff'; break;
       case 'detonation': msg = `dynamite r${e.radius}`; color = '#ffae42'; break;

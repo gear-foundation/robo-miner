@@ -311,16 +311,18 @@ export class RealtimeWorld {
   _refuel(m) {
     if (!this._atShop(m) || m.fuel >= m.maxFuel || m.money < FUEL_PRICE) return;
     m.money -= FUEL_PRICE; m.stats.spent += FUEL_PRICE; m.fuel = m.maxFuel;
+    this.events.push({ type: 'refueled', id: m.id, cost: FUEL_PRICE });
   }
   _shopUpgrade(m, stat) {
     if (!this._atShop(m)) return;
     const before = m.money; const res = applyUpgrade(m, stat);
-    if (res.ok) m.stats.spent += before - m.money;
+    if (res.ok) { m.stats.spent += before - m.money; this.events.push({ type: 'upgraded', id: m.id, stat, level: m.upgrades[stat], cost: before - m.money }); }
   }
   _shopBuy(m, item) {
     if (!this._atShop(m)) return;
     const def = ITEMS[item]; if (!def || m.money < def.price) return;
     m.money -= def.price; m.stats.spent += def.price; m.items[item] = (m.items[item] || 0) + 1;
+    this.events.push({ type: 'bought', id: m.id, item, cost: def.price });
   }
   _turnIn(m) {
     if (!this._atShop(m) || !m.hasDiamond) return;

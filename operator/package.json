@@ -6,7 +6,8 @@
   "description": "Off-chain operator for the DiggerWorld Vara.eth contract: generates maps, uploads them, and drives the session lifecycle as the admin account.",
   "scripts": {
     "gen": "node src/operator.js",
-    "start": "node src/operator.js"
+    "start": "node src/operator.js",
+    "query": "node src/query.js"
   },
   "dependencies": {
     "@gear-js/api": "^0.45.0",

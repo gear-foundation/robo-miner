@@ -13,8 +13,12 @@
     "@polkadot/api": "^16.5.6",
     "@polkadot/extension-dapp": "^0.63.1",
     "@polkadot/util": "^14.0.3",
+    "@vara-eth/api": "^0.4.0",
+    "buffer": "^6.0.3",
+    "kzg-wasm": "^1.0.0",
     "phaser": "^3.80.1",
-    "sails-js": "^0.5.1"
+    "sails-js": "https://github.com/gear-tech/sails/releases/download/js/v1.0.0-beta.1/sails-js.tgz",
+    "viem": "^2.52.2"
   },
   "devDependencies": {
     "sails-js-cli": "^0.5.1",

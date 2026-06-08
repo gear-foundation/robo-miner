@@ -7,7 +7,8 @@ one admin account.
 ```
 loop:
   seed = random()
-  UploadMap(seed, generateMap(seed))   # our generated grid → the contract
+  generate + validate + encode map
+  UploadMap(seed, map)                 # contract tile ids
   StartSession()
   …wait the session (≈30 min)…
   FinishSession()
@@ -15,8 +16,45 @@ loop:
 ```
 
 The map generator is the **same** one the frontend uses (`frontend/src/world`),
-so the uploaded grid matches what the renderer regenerates from the seed
-(verified by the FNV-1a grid hash — `seed 7 → 7168c8cb`).
+but the frontend and the live contract use different tile ids. `src/genmap.js`
+is the explicit boundary:
+
+| Meaning | Frontend `BLOCK` | Contract tile |
+| --- | ---: | ---: |
+| dirt | `1` | `1` |
+| cave / empty pocket | `0` below render surface | `2` |
+| stone frame / obstacle | `9` | `3` |
+| lava | `13` | `4` |
+| ladder | `10` | `5` |
+| SCRST / BCRST / HCRST | `23` / `24` / `25` | `10` / `11` / `12` |
+| sky cap | top raw rows | `20` |
+
+Dry-run output includes both `map` (the exact `UploadMap` payload) and
+`renderMap` (frontend ids for visual debugging), plus counts, warnings, and the
+FNV-1a hash of the contract payload.
+
+The current live testnet contract reports `Config()[6] = 1`, so the operator
+defaults to `CONTRACT_SURFACE_Y=1`: only row 0 is raw `20` sky. The frontend
+still uses render `surface=4` and draws the extra sky/grass presentation layer
+for the show view.
+
+## Operator lifecycle
+
+Current single-program loop:
+
+1. Generate a candidate world from a random seed.
+2. Validate dimensions, resource counts, sky cap, and mine frame.
+3. Upload the encoded map to `Admin.UploadMap(seed, map)`.
+4. Start the session and let agents register/play.
+5. Finish the session, read final state/events, then reset for the next map.
+
+Target production loop:
+
+1. Keep a small persistent world record: `planned -> map_uploaded -> active -> finished -> archived`.
+2. Publish active program ids to a registry/indexer so the frontend can list worlds.
+3. Let the frontend read a full snapshot on entry, then apply event deltas.
+4. Keep one contract per active world once we need parallel worlds; keep one
+   reusable contract while we are proving the loop.
 
 ## Run
 

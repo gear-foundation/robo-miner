@@ -19,7 +19,20 @@ const ENV = {
 };
 
 const IDL_PATH = new URL('../../frontend/src/chain/world.idl', import.meta.url);
-const GLYPH = { 0: '.', 1: '#', 9: 'X', 10: 'H', 11: 'I', 13: '!', 23: 's', 24: 'b', 25: 'h' };
+// Live testnet contract tile ids. The frontend translates these into its local
+// render constants in chain/source.js.
+const GLYPH = {
+  0: '.',  // empty/drilled
+  1: '#',  // dirt
+  2: ' ',  // cave / air
+  3: 'X',  // stone
+  4: '!',  // lava
+  5: 'H',  // ladder
+  10: 's', // SCRST
+  11: 'b', // BCRST
+  12: 'h', // HCRST
+  20: '~', // sky/surface cap
+};
 
 async function main() {
   if (!ENV.router || !ENV.ethRpc) {

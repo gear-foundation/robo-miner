@@ -5,7 +5,8 @@
 // account. The contract never generates a map — it stores what we upload.
 //
 //   loop:  seed = random()
-//          UploadMap(seed, generateMap(seed))   // our grid → contract
+//          generate + validate + encode map
+//          UploadMap(seed, map)                 // contract tile ids
 //          StartSession()
 //          …wait the session…
 //          FinishSession()
@@ -32,6 +33,7 @@ const ENV = {
   router: process.env.ROUTER_ADDRESS || '',
   programId: process.env.WORLD_PROGRAM_ID || '',
   sessionMs: Number(process.env.SESSION_MS || 30 * 60 * 1000),
+  contractSurface: Number(process.env.CONTRACT_SURFACE_Y || 1),
 };
 const LIVE = Boolean(ENV.adminKey && ENV.varaEthWs && ENV.router && ENV.programId);
 
@@ -68,8 +70,14 @@ async function sendAdmin(ctx, payload, label) {
 }
 
 async function uploadNewMap(ctx, seed) {
-  const m = generateMap(seed);
-  console.log(`map seed=${m.seed} ${m.width}x${m.height} hash=${gridHash(m.map)} (${m.map.length} cells)`);
+  const m = generateMap(seed, { contractSurface: ENV.contractSurface });
+  if (!m.valid) {
+    throw new Error(`generated invalid map seed=${m.seed}: ${m.warnings.join('; ')}`);
+  }
+  console.log(
+    `map seed=${m.seed} ${m.width}x${m.height} surface=${m.contractSurface}/${m.surface} hash=${gridHash(m.map)} ` +
+    `(${m.map.length} cells) tiles=${JSON.stringify(m.counts)}`,
+  );
   await sendAdmin(ctx, ctx.admin.uploadMap(m.seed, m.map), 'UploadMap');
   return m;
 }
@@ -89,10 +97,27 @@ async function dryRun(n) {
   const dir = new URL('../out/', import.meta.url);
   await mkdir(dir, { recursive: true });
   for (let i = 0; i < n; i++) {
-    const m = generateMap(randomSeed());
+    const m = generateMap(randomSeed(), { contractSurface: ENV.contractSurface });
     const file = new URL(`map-${m.seed}.json`, dir);
-    await writeFile(file, JSON.stringify({ seed: m.seed, width: m.width, height: m.height, surface: m.surface, hash: gridHash(m.map), map: m.map }));
-    console.log(`generated ${m.width}x${m.height} seed=${m.seed} hash=${gridHash(m.map)} → operator/out/map-${m.seed}.json  (UploadMap payload)`);
+    const payload = {
+      seed: m.seed,
+      width: m.width,
+      height: m.height,
+      surface: m.surface,
+      contractSurface: m.contractSurface,
+      valid: m.valid,
+      warnings: m.warnings,
+      hash: gridHash(m.map),
+      counts: m.counts,
+      map: m.map,
+      renderMap: m.renderMap,
+    };
+    await writeFile(file, JSON.stringify(payload));
+    const status = m.valid ? 'valid' : `INVALID ${m.warnings.join('; ')}`;
+    console.log(
+      `generated ${m.width}x${m.height} surface=${m.contractSurface}/${m.surface} seed=${m.seed} hash=${gridHash(m.map)} ` +
+      `${status} → operator/out/map-${m.seed}.json  (UploadMap payload)`,
+    );
   }
 }
 
@@ -103,7 +128,7 @@ async function main() {
   }
   const ctx = await connect();
   console.log(`operator live · admin ${ENV.adminKey.slice(0, 6)}… · program ${ENV.programId}`);
-  for (;;) await runSession(ctx); // daily loop
+  for (;;) await runSession(ctx); // configured session loop
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

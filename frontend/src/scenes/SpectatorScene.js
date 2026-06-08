@@ -27,17 +27,28 @@ export default class SpectatorScene extends GameScene {
   init(data) {
     this.specMode = data?.mode || 'coop-gem';
     this.specSeed = data?.seed ?? 1234;
+    this.specProgramId = data?.programId || '';
   }
 
   create() {
     this.cleanupSceneDOM();
     this.spectator = true;
-    this.mode = GAME_MODES[this.specMode] || GAME_MODES['coop-gem'];
+    this.mode = GAME_MODES[this.specMode] || {
+      name: 'chain-live',
+      label: 'Live World',
+      spec: 'agents',
+      spawn: 'wide',
+      victory: {},
+      maxTicks: 0,
+      miners: 10,
+      description: 'Live Vara.eth world.',
+    };
     this.bots = createSquad(squadCounts(this.mode.miners));
     // Data source: local engine today, Vara.eth ChainSource once the World
     // contract is live (chain/source.js decides from env). Same surface either way.
     this.rt = createWorldSource({
       seed: this.specSeed,
+      programId: this.specProgramId,
       spec: this.mode.spec,
       spawn: this.mode.spawn,
       victory: this.mode.victory,
@@ -45,6 +56,30 @@ export default class SpectatorScene extends GameScene {
       miners: this.bots.map((b) => ({ name: b.name, hat: b.hat, color: b.color, items: b.items || undefined, radar: b.radar, maxLadders: b.maxLadders })),
     });
     this.rt.setAgents(this.bots.map((b) => b.decide));
+    this._tornDown = false;
+    this.sourceReady = false;
+    this.sourceError = null;
+
+    if (this.rt.ready) {
+      this.showLoading();
+      this.rt.ready
+        .then(() => this.setupLoadedWorld())
+        .catch((error) => this.showSourceError(error));
+      this.events.once('shutdown', () => this.teardown());
+      this.events.once('destroy', () => this.teardown());
+      return;
+    }
+
+    this.setupLoadedWorld();
+    this.events.once('shutdown', () => this.teardown());
+    this.events.once('destroy', () => this.teardown());
+  }
+
+  setupLoadedWorld() {
+    if (this._tornDown || !this.rt?.world) return;
+    this.sourceReady = true;
+    this.loadingText?.destroy();
+    this.loadingText = null;
     this.world = this.rt.world;
     // Each agent's home column → a surface totem (its personal base/sell spot).
     this.totemSpots = this.rt.s.miners.map((m) => m.spawnX);
@@ -66,18 +101,46 @@ export default class SpectatorScene extends GameScene {
     cam.setRoundPixels(true);
     cam.setZoom(1);
     cam.centerOn(this.rt.match.shopX * TILE, (this.world.surface + 7) * TILE);
+    this.fullWorldRender = true;
 
     this.setupCameraControls();
     this.statsTimer = 0;
     this.worldDirty = true;
     this.buildHUD();
-
     this.scale.on('resize', this.onSpecResize, this);
-    this.events.once('shutdown', () => this.teardown());
-    this.events.once('destroy', () => this.teardown());
   }
 
-  onSpecResize() { this.scene.restart({ mode: this.specMode, seed: this.specSeed }); }
+  showLoading() {
+    this.cameras.main.setBackgroundColor('#101820');
+    this.loadingText = this.add.text(this.scale.width / 2, this.scale.height / 2, 'CONNECTING TO VARA.ETH...', {
+      fontFamily: 'Courier New, monospace',
+      fontSize: '18px',
+      color: '#7CFFB0',
+      backgroundColor: '#000000aa',
+      padding: { x: 16, y: 10 },
+    }).setOrigin(0.5);
+  }
+
+  showSourceError(error) {
+    this.sourceError = error;
+    const msg = error?.message || String(error);
+    if (this.loadingText) {
+      this.loadingText.setText(`CHAIN SOURCE ERROR\n${msg}`);
+      this.loadingText.setColor('#ff6a6a');
+      return;
+    }
+    this.add.text(this.scale.width / 2, this.scale.height / 2, `CHAIN SOURCE ERROR\n${msg}`, {
+      fontFamily: 'Courier New, monospace',
+      fontSize: '16px',
+      color: '#ff6a6a',
+      backgroundColor: '#000000cc',
+      padding: { x: 16, y: 10 },
+      align: 'center',
+      wordWrap: { width: Math.min(720, this.scale.width - 40) },
+    }).setOrigin(0.5);
+  }
+
+  onSpecResize() { this.scene.restart({ mode: this.specMode, seed: this.specSeed, programId: this.specProgramId }); }
 
   setupCameraControls() {
     // Fixed 1:1 zoom. Drag or mouse-wheel to scroll (pan). No zoom.
@@ -87,10 +150,15 @@ export default class SpectatorScene extends GameScene {
       cam.scrollX -= p.x - p.prevPosition.x;
       cam.scrollY -= p.y - p.prevPosition.y;
     });
-    this.input.on('wheel', (_p, _o, dx, dy) => { cam.scrollX += dx; cam.scrollY += dy; });
+    this.input.on('wheel', (_p, _o, dx, dy) => {
+      cam.scrollX += dx;
+      cam.scrollY += dy;
+    });
   }
 
   update(time, dt) {
+    if (!this.sourceReady || !this.rt?.world) return;
+    if (this.cameraViewportChanged()) this.worldDirty = true;
     if (!this.rt.finished) {
       // Advance real time (cap dt so a tab-stall doesn't teleport everyone).
       this.rt.update(Math.min(50, dt));
@@ -158,6 +226,25 @@ export default class SpectatorScene extends GameScene {
         }
       }
     }
+  }
+
+  cameraViewportChanged() {
+    if (this.fullWorldRender) return false;
+    const cam = this.cameras.main;
+    const coverage = this._worldDrawCoverage;
+    if (!coverage) return true;
+
+    const zoom = cam.zoom || 1;
+    const guard = TILE * 4;
+    const left = cam.scrollX;
+    const top = cam.scrollY;
+    const right = cam.scrollX + cam.width / zoom;
+    const bottom = cam.scrollY + cam.height / zoom;
+
+    return left < coverage.left + guard ||
+      top < coverage.top + guard ||
+      right > coverage.right - guard ||
+      bottom > coverage.bottom - guard;
   }
 
   // Mirror the realtime bombs into GameScene's bomb format so the inherited
@@ -311,7 +398,8 @@ export default class SpectatorScene extends GameScene {
     const miner = e.id != null ? this.rt.s.miners[e.id] : null;
     const name = (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
     const t = (this.rt.timeMs / 1000).toFixed(1);
-    const depth = e.y != null ? Math.max(0, e.y - (SURFACE_Y - 1)) : null;
+    const surface = this.world?.surface ?? SURFACE_Y;
+    const depth = e.y != null ? Math.max(0, e.y - (surface - 1)) : null;
     let msg, color;
     switch (e.type) {
       case 'moved': msg = `move → ${e.x},${e.y}`; color = '#5f7a66'; break;
@@ -396,6 +484,9 @@ export default class SpectatorScene extends GameScene {
   }
 
   teardown() {
+    this._tornDown = true;
+    this.rt?.dispose?.();
+    this.loadingText?.destroy();
     document.getElementById('spec-hud')?.remove();
     document.getElementById('spec-finish')?.remove();
     document.getElementById('spec-console')?.remove();

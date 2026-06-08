@@ -2159,18 +2159,28 @@ export default class GameScene extends Phaser.Scene {
     // Floor scroll to integer pixels: worldGfx is in world space and fillRect
     // on fractional coords leaves 1px gaps on the canvas edges when the camera
     // smoothly tweens. Pad each fill by a few px past the viewport to hide it.
-    const camX = Math.floor(cam.scrollX) - 2;
-    const camY = Math.floor(cam.scrollY) - 2;
-    const camW = Math.ceil(cam.width) + 4;
-    const camH = Math.ceil(cam.height) + 4;
+    const renderFullWorld = !!this.fullWorldRender;
+    const padPx = renderFullWorld ? 0 : Math.max(0, this.worldRenderPadPx || 0);
+    const camX = renderFullWorld ? 0 : Math.floor(cam.scrollX) - 2 - padPx;
+    const camY = renderFullWorld ? 0 : Math.floor(cam.scrollY) - 2 - padPx;
+    const camW = renderFullWorld ? this.world.W * TILE : Math.ceil(cam.width) + 4 + padPx * 2;
+    const camH = renderFullWorld ? this.world.H * TILE : Math.ceil(cam.height) + 4 + padPx * 2;
 
-    const left = Math.max(0, Math.floor(cam.scrollX / TILE) - 1);
-    const right = Math.min(this.world.W, Math.ceil((cam.scrollX + cam.width) / TILE) + 1);
-    const top = Math.max(0, Math.floor(cam.scrollY / TILE) - 1);
-    const bot = Math.min(this.world.H, Math.ceil((cam.scrollY + cam.height) / TILE) + 1);
+    this._worldDrawCoverage = {
+      left: camX,
+      top: camY,
+      right: camX + camW,
+      bottom: camY + camH,
+    };
+
+    const left = renderFullWorld ? 0 : Math.max(0, Math.floor(camX / TILE) - 1);
+    const right = renderFullWorld ? this.world.W : Math.min(this.world.W, Math.ceil((camX + camW) / TILE) + 1);
+    const top = renderFullWorld ? 0 : Math.max(0, Math.floor(camY / TILE) - 1);
+    const bot = renderFullWorld ? this.world.H : Math.min(this.world.H, Math.ceil((camY + camH) / TILE) + 1);
 
     // Sky background (above surface) — painted everywhere above first dirt row.
-    const skyBottom = SURFACE_Y * TILE;
+    const surfaceY = this.world?.surface ?? SURFACE_Y;
+    const skyBottom = surfaceY * TILE;
     const skyFillBottom = Math.min(camY + camH, skyBottom);
     if (skyFillBottom > camY) {
       g.fillStyle(0x4a7bbf, 1);
@@ -2180,7 +2190,7 @@ export default class GameScene extends Phaser.Scene {
     // Dug-out backdrop: visible through any empty tile below the surface.
     // A dark brown base with subtle darker speckles — reads as "excavated
     // tunnel wall" instead of the void-black default.
-    const ugTop = Math.max(camY, SURFACE_Y * TILE);
+    const ugTop = Math.max(camY, surfaceY * TILE);
     const ugBottom = Math.min(camY + camH, this.world.H * TILE);
     if (ugBottom > ugTop) {
       g.fillStyle(0x3a2412, 1);
@@ -2228,7 +2238,7 @@ export default class GameScene extends Phaser.Scene {
   drawTotems(g) {
     const spots = this.totemSpots;
     if (!spots || !spots.length) return;
-    const groundY = SURFACE_Y * TILE;
+    const groundY = (this.world?.surface ?? SURFACE_Y) * TILE;
     for (const sx of spots) {
       const cx = sx * TILE + TILE / 2;
       const top = groundY - TILE + 2;
@@ -2306,6 +2316,7 @@ export default class GameScene extends Phaser.Scene {
       }
     }
     const px = x * TILE + jitterX, py = y * TILE + jitterY;
+    const surfaceY = this.world?.surface ?? SURFACE_Y;
 
     // Chests get a bespoke procedural draw based on their tier metadata.
     if (type === BLOCK.CHEST) {
@@ -2326,7 +2337,7 @@ export default class GameScene extends Phaser.Scene {
     // If a texture exists for this tile, use the sprite pool and skip procedural drawing.
     let texKey = TILE_TEXTURE[type];
     // Dirt on the surface row gets a grass-capped sprite if available.
-    if (type === BLOCK.DIRT && y === SURFACE_Y && this.textures.exists('grass')) {
+    if (type === BLOCK.DIRT && y === surfaceY && this.textures.exists('grass')) {
       texKey = 'grass';
     }
     if (texKey && this.textures.exists(texKey)) {
@@ -2337,7 +2348,7 @@ export default class GameScene extends Phaser.Scene {
       s.setVisible(true);
       // Biome tint: dirt darkens / cools with depth so each ~20m band reads
       // visually different without adding new assets. Multiplier via setTint.
-      if (type === BLOCK.DIRT) s.setTint(dirtTintForDepth(y - SURFACE_Y));
+      if (type === BLOCK.DIRT) s.setTint(dirtTintForDepth(y - surfaceY));
       else s.clearTint();
       return;
     }
@@ -2376,7 +2387,7 @@ export default class GameScene extends Phaser.Scene {
     let palette = TILE_PALETTE[type] || { base: data.color, light: 0xffffff, dark: 0x000000 };
     if (type === BLOCK.DIRT || EMBEDDED_ORES) {
       const dirtPal = TILE_PALETTE[BLOCK.DIRT];
-      const tint = dirtTintForDepth(y - SURFACE_Y);
+      const tint = dirtTintForDepth(y - surfaceY);
       palette = {
         base:  multiplyHex(dirtPal.base,  tint),
         light: multiplyHex(dirtPal.light, tint),
@@ -2418,7 +2429,7 @@ export default class GameScene extends Phaser.Scene {
     // bevel + outline so blades and the green band read as one continuous
     // strip across adjacent tiles. Blades extend up into the sky row,
     // which is fine because tiles draw after the sky fill.
-    if (y === SURFACE_Y && (type === BLOCK.DIRT || type === BLOCK.COAL)) {
+    if (y === surfaceY && (type === BLOCK.DIRT || type === BLOCK.COAL)) {
       this.drawGrassCap(g, x, px, py, seed);
     }
 

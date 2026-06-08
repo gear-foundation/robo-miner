@@ -3,6 +3,7 @@ import { GAME_MODES } from '../engine/index.js';
 import { generateWorld } from '../world.js';
 import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
+import { CHAIN, chainReady } from '../chain/config.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
 // preview of that mode's generated map and a WATCH button that drops into the
@@ -33,7 +34,7 @@ export default class LobbyScene extends Phaser.Scene {
       font-family:'Courier New',monospace; color:#fff; padding:30px 20px 60px;`;
     root.innerHTML = `<div style="text-align:center">
       <div style="font-size:40px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">🤖 AGENT ARENA</div>
-      <div style="opacity:.8;margin-top:6px">pick a mode — watch the bots dig, search and race on a shared map</div>
+      <div style="opacity:.8;margin-top:6px">${CHAIN.enabled ? 'live worlds on Vara.eth Hoodi' : 'pick a mode — watch the bots dig, search and race on a shared map'}</div>
     </div>`;
 
     const back = wireBtn(document.createElement('button'));
@@ -44,7 +45,12 @@ export default class LobbyScene extends Phaser.Scene {
 
     const grid = document.createElement('div');
     grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:22px;justify-content:center;max-width:1120px;margin:26px auto 0';
-    for (const key of ARENA_MODES) grid.appendChild(this.makeCard(key));
+    const liveWorlds = CHAIN.worldProgramIds.filter((id) => chainReady(id));
+    if (liveWorlds.length) {
+      liveWorlds.forEach((programId, i) => grid.appendChild(this.makeChainCard(programId, i)));
+    } else {
+      for (const key of ARENA_MODES) grid.appendChild(this.makeCard(key));
+    }
     root.appendChild(grid);
 
     document.body.appendChild(root);
@@ -84,9 +90,43 @@ export default class LobbyScene extends Phaser.Scene {
     return card;
   }
 
+  makeChainCard(programId, index) {
+    const card = document.createElement('div');
+    card.style.cssText = `width:300px;background:#16283a;border:3px solid #000;border-radius:14px;
+      box-shadow:5px 5px 0 rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column`;
+
+    const head = document.createElement('div');
+    head.style.cssText = `height:190px;background:linear-gradient(#11233a,#071019);
+      border-bottom:3px solid #000;display:flex;align-items:center;justify-content:center;
+      color:#7CFFB0;font-size:13px;text-align:center;line-height:1.45;padding:18px;box-sizing:border-box`;
+    head.innerHTML = `<div><div style="font-size:22px;color:#ffdd55;font-weight:bold;margin-bottom:10px">LIVE WORLD ${index + 1}</div>
+      <div>${programId.slice(0, 10)}...${programId.slice(-8)}</div></div>`;
+    card.appendChild(head);
+
+    const body = document.createElement('div');
+    body.style.cssText = 'padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:6px';
+    body.innerHTML = `<div style="font-size:18px;font-weight:bold;color:#ffdd55">Hoodi Testnet</div>
+      <div style="font-size:12px;opacity:.85;flex:1;line-height:1.35">DiggerWorld snapshot and live deltas from the deployed Vara.eth program.</div>
+      <div style="font-size:11px;opacity:.65">program ${programId.slice(0, 8)}...${programId.slice(-6)}</div>`;
+
+    const watch = wireBtn(document.createElement('button'));
+    watch.textContent = '▶  WATCH';
+    watch.style.cssText = btnCss('#7CFFB0') + 'margin-top:8px;width:100%;font-size:16px;padding:10px';
+    watch.onclick = () => this.watchChain(programId);
+    body.appendChild(watch);
+
+    card.appendChild(body);
+    return card;
+  }
+
   watch(mode, seed) {
     this.scale.off('resize', this.onResize, this);
     this.scene.start('Spectator', { mode, seed });
+  }
+
+  watchChain(programId) {
+    this.scale.off('resize', this.onResize, this);
+    this.scene.start('Spectator', { mode: 'chain-live', seed: 0, programId });
   }
 
   goMenu() {

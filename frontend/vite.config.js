@@ -1,6 +1,11 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      buffer: 'buffer/',
+    },
+  },
   server: {
     port: 5173,
     open: true,

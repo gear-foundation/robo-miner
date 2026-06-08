@@ -19,22 +19,26 @@ export const CHAIN = {
   network: env.VITE_CHAIN_NETWORK || 'testnet',
 
   // @vara-eth/api connection inputs.
-  ethRpc: env.VITE_ETH_RPC || '',          // https — Ethereum RPC (publicClient)
-  varaEthWs: env.VITE_VARA_ETH_WS || '',   // wss  — Vara.eth RPC (WsVaraEthProvider)
-  routerAddress: env.VITE_ROUTER_ADDRESS || '',
+  ethRpc: env.VITE_ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
+  varaEthWs: env.VITE_VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
+  routerAddress: env.VITE_ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
 
   // The World program (one per active map). For a multi-map lobby this is the
   // currently-watched map's program id; the lobby switcher swaps it.
   worldProgramId: env.VITE_WORLD_PROGRAM_ID || '',
+  worldProgramIds: (env.VITE_WORLD_PROGRAM_IDS || env.VITE_WORLD_PROGRAM_ID || '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean),
   // Optional thin registry / leaderboard program (aggregate across maps).
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
 
   // Fallback poll interval (ms) if push event subscription isn't used.
-  pollMs: Number(env.VITE_CHAIN_POLL_MS || 200),
+  pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
 };
 
 // True only when chain mode is on AND the minimum endpoints/ids are present, so
 // a half-filled .env never half-connects.
-export function chainReady() {
-  return Boolean(CHAIN.enabled && CHAIN.varaEthWs && CHAIN.routerAddress && CHAIN.worldProgramId);
+export function chainReady(programId = CHAIN.worldProgramId) {
+  return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && programId);
 }

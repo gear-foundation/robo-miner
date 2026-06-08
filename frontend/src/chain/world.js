@@ -20,8 +20,10 @@ export const DIR = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3 };
 export const DIR_FROM_NAME = { up: DIR.UP, right: DIR.RIGHT, down: DIR.DOWN, left: DIR.LEFT };
 export const DIR_TO_NAME = ['up', 'right', 'down', 'left'];
 
-// ── Tile bytes (must match WORLDGEN_PORTING.md / TileAt + MapSnapshot) ────────
-// 0 empty · 1 dirt · 9 stone · 10 ladder · 11 pillar · 13 lava · 23/24/25 crystals
+// ── Render tile bytes ────────────────────────────────────────────────────────
+// The live DiggerWorld testnet contract currently returns its own compact tile
+// ids (see chain/source.js CONTRACT_TO_RENDER_TILE). The renderer consumes the
+// frontend BLOCK ids below, so every chain snapshot is translated at the edge.
 export { BLOCK as TILE } from '../config.js';
 
 // ── WRITE actions (World service) ────────────────────────────────────────────

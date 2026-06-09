@@ -35,6 +35,9 @@ export const CHAIN = {
 
   // Fallback poll interval (ms) if push event subscription isn't used.
   pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
+
+  // Logical contract surface. The new Config()[6] is starting_hp, not surface.
+  contractSurfaceY: Number(env.VITE_CONTRACT_SURFACE_Y || 1),
 };
 
 // True only when chain mode is on AND the minimum endpoints/ids are present, so

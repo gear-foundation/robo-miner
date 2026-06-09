@@ -7,7 +7,11 @@
   "scripts": {
     "gen": "node src/operator.js",
     "start": "node src/operator.js",
-    "query": "node src/query.js"
+    "query": "node src/query.js",
+    "gamemaster": "node src/gamemaster.js",
+    "gamemaster:create": "node src/gamemaster.js create",
+    "gamemaster:list": "node src/gamemaster.js list",
+    "gamemaster:manifest": "node src/gamemaster.js manifest"
   },
   "dependencies": {
     "@gear-js/api": "^0.45.0",

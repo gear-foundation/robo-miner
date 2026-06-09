@@ -1,0 +1,27 @@
+[package]
+name = "digger-redeem"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Package allowing to build WASM binary for the program and IDL file for it"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+digger-redeem-app.workspace = true
+
+[dev-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "gtest", "gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+digger-redeem-app.workspace = true
+digger-redeem-client.workspace = true
+digger-res-vmt = { path = "../digger-res-vmt" }
+digger-res-vmt-client = { path = "../digger-res-vmt/client" }
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "build"] }
+digger-redeem-app.workspace = true

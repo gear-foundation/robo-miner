@@ -5,6 +5,12 @@ members = [
     "digger-world/app",
     "digger-proxy",
     "digger-proxy/app",
+    "digger-res-vmt",
+    "digger-res-vmt/app",
+    "digger-res-vmt/client",
+    "digger-redeem",
+    "digger-redeem/app",
+    "digger-redeem/client",
 ]
 
 [workspace.package]
@@ -19,5 +25,10 @@ categories = ["cryptography::cryptocurrencies", "no-std", "wasm"]
 
 [workspace.dependencies]
 sails-rs = "1.0.0-beta.2"
+tokio = "1.48.0"
 digger-world-app = { version = "0.1.0", path = "digger-world/app" }
 digger-proxy-app = { version = "0.1.0", path = "digger-proxy/app" }
+digger-res-vmt-app = { version = "0.1.0", path = "digger-res-vmt/app" }
+digger-res-vmt-client = { version = "0.1.0", path = "digger-res-vmt/client" }
+digger-redeem-app = { version = "0.1.0", path = "digger-redeem/app" }
+digger-redeem-client = { version = "0.1.0", path = "digger-redeem/client" }

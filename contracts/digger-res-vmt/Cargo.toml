@@ -1,0 +1,27 @@
+[package]
+name = "digger-res-vmt"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Package allowing to build WASM binary for the Digger RES VMT program and IDL file for it"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+digger-res-vmt-app.workspace = true
+
+[dev-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "gtest", "gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+digger-res-vmt-app.workspace = true
+digger-res-vmt-client.workspace = true
+digger-redeem = { path = "../digger-redeem" }
+digger-redeem-client = { path = "../digger-redeem/client" }
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "build"] }
+digger-res-vmt-app.workspace = true

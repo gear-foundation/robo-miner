@@ -8,6 +8,15 @@ importers:
 
   .:
     dependencies:
+      '@gear-js/api':
+        specifier: ^0.45.0
+        version: 0.45.0(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2)
+      '@polkadot/api':
+        specifier: ^16.5.1
+        version: 16.5.6
+      '@polkadot/util':
+        specifier: ^14.0.1
+        version: 14.0.3
       '@vara-eth/api':
         specifier: 0.4.0
         version: 0.4.0(@vara-eth/viem@2.47.7-1(typescript@5.9.3))(kzg-wasm@1.0.0)
@@ -19,7 +28,7 @@ importers:
         version: 1.0.0
       sails-js:
         specifier: 1.0.0
-        version: 1.0.0(@gear-js/api@0.44.2(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2))(@polkadot/api@16.5.6)(@polkadot/util@14.0.3)
+        version: 1.0.0(@gear-js/api@0.45.0(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2))(@polkadot/api@16.5.6)(@polkadot/util@14.0.3)
       viem:
         specifier: npm:@vara-eth/viem@2.47.7-1
         version: '@vara-eth/viem@2.47.7-1(typescript@5.9.3)'
@@ -195,10 +204,10 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@gear-js/api@0.44.2':
-    resolution: {integrity: sha512-367E+S5pfgxrTj+QY21qLGu+4CocKAUdbqXyYUVIPBJhkBXLBvcM9iGh6T0jXI2HC7hWncRFtne3DWvd6V6Rng==}
+  '@gear-js/api@0.45.0':
+    resolution: {integrity: sha512-imJnKGSI119REQUvbm4e9i0KDQEeGNPHZzzQz87i0DLDF03Msxl0/KkrrQGciKWIXJjXcqEXL8m3+4LOkwR9MA==}
     peerDependencies:
-      '@polkadot/api': ^16.4.1
+      '@polkadot/api': ^16.5.1
       '@polkadot/wasm-crypto': ^7.5.1
       rxjs: ^7.8.2
 
@@ -676,7 +685,7 @@ snapshots:
   '@esbuild/win32-x64@0.28.0':
     optional: true
 
-  '@gear-js/api@0.44.2(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2)':
+  '@gear-js/api@0.45.0(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2)':
     dependencies:
       '@polkadot/api': 16.5.6
       '@polkadot/wasm-crypto': 7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3)))
@@ -1198,9 +1207,9 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  sails-js@1.0.0(@gear-js/api@0.44.2(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2))(@polkadot/api@16.5.6)(@polkadot/util@14.0.3):
+  sails-js@1.0.0(@gear-js/api@0.45.0(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2))(@polkadot/api@16.5.6)(@polkadot/util@14.0.3):
     dependencies:
-      '@gear-js/api': 0.44.2(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2)
+      '@gear-js/api': 0.45.0(@polkadot/api@16.5.6)(@polkadot/wasm-crypto@7.5.4(@polkadot/util@14.0.3)(@polkadot/x-randomvalues@14.0.3(@polkadot/util@14.0.3)(@polkadot/wasm-util@7.5.4(@polkadot/util@14.0.3))))(rxjs@7.8.2)
       '@polkadot/api': 16.5.6
       '@polkadot/util': 14.0.3
 

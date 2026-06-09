@@ -1,0 +1,19 @@
+[package]
+name = "digger-world"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Vara.eth Digger world program Wasm and IDL package"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+digger-world-app.workspace = true
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "build"] }
+digger-world-app.workspace = true

@@ -1,0 +1,23 @@
+[workspace]
+resolver = "3"
+members = [
+    "digger-world",
+    "digger-world/app",
+    "digger-proxy",
+    "digger-proxy/app",
+]
+
+[workspace.package]
+version = "0.1.0"
+authors = ["Digger Contributors"]
+edition = "2024"
+rust-version = "1.91"
+repository = "https://github.com/gear-foundation/vara-eth-skills"
+license = "MIT"
+keywords = ["gear", "sails", "vara-eth", "game", "wasm"]
+categories = ["cryptography::cryptocurrencies", "no-std", "wasm"]
+
+[workspace.dependencies]
+sails-rs = "1.0.0-beta.2"
+digger-world-app = { version = "0.1.0", path = "digger-world/app" }
+digger-proxy-app = { version = "0.1.0", path = "digger-proxy/app" }

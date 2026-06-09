@@ -14,6 +14,24 @@ import { btnCss, wireBtn } from './arenaUI.js';
 // character goes idle. Free-scroll camera; a speed control scales real time.
 const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse animation)
 
+function shortAddress(address) {
+  const addr = displayAddress(address);
+  if (!addr || addr.length <= 16) return addr || '0x...';
+  return `${addr.slice(0, 6)}...${addr.slice(-5)}`;
+}
+
+function displayAddress(address) {
+  if (!address) return '';
+  return /^0x0{24}[0-9a-fA-F]{40}$/.test(address)
+    ? `0x${address.slice(-40)}`
+    : address;
+}
+
+function addressScanUrl(address) {
+  const addr = displayAddress(address);
+  return addr ? `https://hoodi.etherscan.io/address/${addr}` : '#';
+}
+
 function squadCounts(n) {
   const kinds = ['shuttle', 'prospector', 'deepdiver', 'shuttle', 'prospector'];
   const c = {};
@@ -107,6 +125,9 @@ export default class SpectatorScene extends GameScene {
     this.statsTimer = 0;
     this.worldDirty = true;
     this.buildHUD();
+    this.robotChirpSound = this.sound.add('robot-chirp', { volume: 0.42 });
+    this.robotQuestionSound = this.sound.add('robot-question', { volume: 0.42 });
+    this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound];
     this.scale.on('resize', this.onSpecResize, this);
   }
 
@@ -145,12 +166,30 @@ export default class SpectatorScene extends GameScene {
   setupCameraControls() {
     // Fixed 1:1 zoom. Drag or mouse-wheel to scroll (pan). No zoom.
     const cam = this.cameras.main;
+    const dragThreshold = 6;
+    this._pointerDrag = null;
+    this.input.on('pointerdown', (p) => {
+      this._pointerDrag = { x: p.x, y: p.y, dragging: false };
+    });
     this.input.on('pointermove', (p) => {
-      if (!p.isDown) return;
+      if (!p.isDown || !this._pointerDrag) return;
+      const dist = Math.hypot(p.x - this._pointerDrag.x, p.y - this._pointerDrag.y);
+      if (!this._pointerDrag.dragging && dist >= dragThreshold) {
+        this._pointerDrag.dragging = true;
+        this.hideAgentBubble();
+      }
+      if (!this._pointerDrag.dragging) return;
       cam.scrollX -= p.x - p.prevPosition.x;
       cam.scrollY -= p.y - p.prevPosition.y;
     });
+    this.input.on('pointerup', (p) => {
+      const drag = this._pointerDrag;
+      this._pointerDrag = null;
+      if (drag?.dragging) return;
+      this.handleAgentPointerClick(p);
+    });
     this.input.on('wheel', (_p, _o, dx, dy) => {
+      this.hideAgentBubble();
       cam.scrollX += dx;
       cam.scrollY += dy;
     });
@@ -190,6 +229,7 @@ export default class SpectatorScene extends GameScene {
     this._syncBombs();
     this.drawBombs();                                // inherited — real dynamite sticks + fuses
     this.drawSpecRobots(time);
+    this.positionAgentBubble();
     this.drawFx(time);
     this.updateBankPops(dt);
     if (this.consoleOpen) {
@@ -226,6 +266,70 @@ export default class SpectatorScene extends GameScene {
         }
       }
     }
+  }
+
+  handleAgentPointerClick(pointer) {
+    const agent = this.findAgentAtPointer(pointer);
+    if (!agent) {
+      this.hideAgentBubble();
+      return;
+    }
+    this.playAgentChirp();
+    this.sayAgentBubble(agent, 2600);
+  }
+
+  findAgentAtPointer(pointer) {
+    if (!this.rt?.s?.miners?.length) return null;
+    const cam = this.cameras.main;
+    const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
+    return this.rt.s.miners.find((m) => {
+      if (!m.alive || !m.owner) return false;
+      const cx = m.drawX * TILE + TILE / 2;
+      const cy = m.drawY * TILE + TILE / 2;
+      return Math.abs(worldPoint.x - cx) <= TILE * 0.62 &&
+        Math.abs(worldPoint.y - cy) <= TILE * 0.74;
+    });
+  }
+
+  playAgentChirp() {
+    const sounds = this.robotTouchSounds?.filter(Boolean) || [];
+    if (!sounds.length) return;
+    for (const sound of sounds) sound.stop();
+    sounds[Math.floor(Math.random() * sounds.length)].play();
+  }
+
+  sayAgentBubble(agent, ms = 2200) {
+    if (!this.agentBubbleEl || !agent) return;
+    const address = displayAddress(agent.owner);
+    this.agentBubblePrefixEl.textContent = 'I am ';
+    this.agentBubbleLinkEl.textContent = shortAddress(agent.owner);
+    this.agentBubbleLinkEl.href = addressScanUrl(agent.owner);
+    this.agentBubbleLinkEl.title = address;
+    this.agentBubbleEl.title = address;
+    this.agentBubbleEl.style.display = 'block';
+    this.agentBubbleMiner = agent;
+    this.positionAgentBubble();
+    clearTimeout(this._agentBubbleTimer);
+    this._agentBubbleTimer = setTimeout(() => this.hideAgentBubble(), ms);
+  }
+
+  hideAgentBubble() {
+    if (this.agentBubbleEl) this.agentBubbleEl.style.display = 'none';
+    this.agentBubbleMiner = null;
+    clearTimeout(this._agentBubbleTimer);
+  }
+
+  positionAgentBubble() {
+    if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleMiner) return;
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    const m = this.agentBubbleMiner;
+    const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
+    const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
+    const side = m.facing === 'left' ? -1 : 1;
+    this.agentBubbleEl.style.left = `${sx + side * 36}px`;
+    this.agentBubbleEl.style.top = `${sy}px`;
+    this.agentBubbleEl.style.setProperty('--tail-x', side > 0 ? '38%' : '62%');
   }
 
   cameraViewportChanged() {
@@ -351,7 +455,34 @@ export default class SpectatorScene extends GameScene {
     document.body.appendChild(bar);
     this.statsEl = stats;
     this.buildConsole();
+    this.buildAgentBubble();
     this.updateHUD();
+  }
+
+  buildAgentBubble() {
+    const bubble = document.createElement('div');
+    bubble.id = 'spec-agent-bubble';
+    bubble.style.cssText = `
+      position: fixed; transform: translate(-50%, -100%);
+      background: #fff; color: #222; font-family: 'Courier New', monospace;
+      font-size: 14px; padding: 6px 10px; border-radius: 10px;
+      border: 2px solid #222; box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+      white-space: nowrap; pointer-events: auto; z-index: 18;
+      display: none; max-width: 260px;
+    `;
+    bubble.innerHTML = `<span id="spec-agent-bubble-prefix"></span><a id="spec-agent-bubble-link"
+        target="_blank" rel="noreferrer"
+        style="color:#0b57d0;text-decoration:none;font-weight:bold"></a>
+      <div style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
+        width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
+        border-top:8px solid #222;pointer-events:none"></div>
+      <div style="position:absolute;bottom:-5px;left:var(--tail-x, 42%);transform:translateX(-50%);
+        width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
+        border-top:6px solid #fff;pointer-events:none"></div>`;
+    document.body.appendChild(bubble);
+    this.agentBubbleEl = bubble;
+    this.agentBubblePrefixEl = bubble.querySelector('#spec-agent-bubble-prefix');
+    this.agentBubbleLinkEl = bubble.querySelector('#spec-agent-bubble-link');
   }
 
   // Slide-out terminal that streams agent actions as if they were on-chain txs.
@@ -487,8 +618,10 @@ export default class SpectatorScene extends GameScene {
     this._tornDown = true;
     this.rt?.dispose?.();
     this.loadingText?.destroy();
+    clearTimeout(this._agentBubbleTimer);
     document.getElementById('spec-hud')?.remove();
     document.getElementById('spec-finish')?.remove();
     document.getElementById('spec-console')?.remove();
+    document.getElementById('spec-agent-bubble')?.remove();
   }
 }

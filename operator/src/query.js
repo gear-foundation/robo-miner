@@ -15,7 +15,7 @@ const ENV = {
   ethRpc: process.env.ETH_RPC || '',
   varaEthWs: process.env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
   router: process.env.ROUTER_ADDRESS || '',
-  programId: process.argv[2] || process.env.WORLD_PROGRAM_ID || '0xaa8bfb78cc1e5d1bc1458f47126f45e6b17917ac',
+  programId: process.argv[2] || process.env.WORLD_PROGRAM_ID || '0x936b5395876648772d37e22da57ba37c4e586df2',
 };
 
 const IDL_PATH = new URL('../../frontend/src/chain/world.idl', import.meta.url);

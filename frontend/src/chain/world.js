@@ -4,8 +4,8 @@
 // renders. Payloads are encoded/decoded through a sails-js SailsProgram parsed
 // from world.idl — NEVER hand-encoded (per vara-eth-skills ts-api playbook).
 //
-// Program: DiggerWorld   ctor Create(seed: u64)
-//   service World@0xfaaaecdffddb0061  — the spatial game
+// Program: DiggerWorld   ctor Create()
+//   service World@0x44d3a89e1760075a  — the spatial game
 //   service Admin@0xf0292894fb819cec  — session/map lifecycle
 //
 // NOTE — this World program is LEAN: the only agent actions are register / move /
@@ -50,6 +50,7 @@ export function worldQueries(program) {
     agentOf:     (owner) => q.AgentOf.encodePayload(owner),  // -> [u128] one agent's packed state
     agents:      () => q.Agents.encodePayload(),             // -> [ActorId] all agent ids
     inventoryOf: (owner) => q.InventoryOf.encodePayload(owner), // -> [u32] inventory counts
+    isDug:       (x, y) => q.IsDug.encodePayload(x, y),       // -> bool
     config:      () => q.Config.encodePayload(),             // -> [u32] {width,height,surface,…}
     session:     () => q.Session.encodePayload(),            // -> [u128] session timing/status
   };
@@ -59,7 +60,7 @@ export function worldQueries(program) {
 export function adminActions(program) {
   const f = program.services.Admin.functions;
   return {
-    create:        (seed) => program.ctors.Create.encodePayload(seed), // ctor: new map from seed
+    create:        () => program.ctors.Create.encodePayload(),
     uploadMap:     (seed, map) => f.UploadMap.encodePayload(seed, map),
     startSession:  () => f.StartSession.encodePayload(),
     finishSession: () => f.FinishSession.encodePayload(),

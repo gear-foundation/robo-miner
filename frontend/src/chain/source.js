@@ -59,12 +59,24 @@ function renderTile(contractTile) {
   return CONTRACT_TO_RENDER_TILE[Number(contractTile)] ?? BLOCK.DIRT;
 }
 
-function decorateDiggerGrid(rawGrid, W, H, surface) {
-  const grid = Uint8Array.from(rawGrid.map(renderTile));
+function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
+  const yOffset = Math.max(0, surface - rawSurface);
+  const H = rawH + yOffset;
+  const grid = new Uint8Array(W * H);
+  grid.fill(BLOCK.SKY);
+
+  for (let y = rawSurface; y < rawH; y++) {
+    const visualY = y + yOffset;
+    for (let x = 0; x < W; x++) {
+      grid[visualY * W + x] = renderTile(rawGrid[y * W + x]);
+    }
+  }
 
   // The contract snapshot is logical game state. The spectator adds the same
   // visual shell the local worlds have: sky above the playable surface and an
-  // unbreakable-looking stone frame around the mine.
+  // unbreakable-looking stone frame around the mine. The current contract has
+  // rawSurface=1, while the show view uses surface=4, so raw underground rows
+  // are shifted down instead of overwritten by the decorative sky band.
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const i = y * W + x;
@@ -76,13 +88,10 @@ function decorateDiggerGrid(rawGrid, W, H, surface) {
         grid[i] = BLOCK.STONE;
         continue;
       }
-      if (y === surface && grid[i] === BLOCK.SKY) {
-        grid[i] = BLOCK.DIRT;
-      }
     }
   }
 
-  return grid;
+  return { grid, H, yOffset };
 }
 
 function shortId(id) {
@@ -238,10 +247,10 @@ export class ChainSource {
 
   _applySnapshot(snap, opts = {}) {
     const emitEvents = opts.emitEvents !== false;
-    const [W = 40, H = 64] = snap.config;
+    const [W = 40, rawH = 64] = snap.config;
     const rawSurface = Number.isFinite(snap.config[6]) ? snap.config[6] : 1;
     const surface = 4;
-    const grid = decorateDiggerGrid(snap.rawGrid, W, H, surface);
+    const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid, W, rawH, rawSurface, surface);
 
     if (!this.world) {
       this.world = {
@@ -249,8 +258,10 @@ export class ChainSource {
         rawGrid: Uint32Array.from(snap.rawGrid),
         W,
         H,
+        rawH,
         surface,
         rawSurface,
+        yOffset,
         model: 'digger',
         seed: Number(snap.session?.[1] || 0),
         crystals: [],
@@ -268,14 +279,16 @@ export class ChainSource {
       this.world.rawGrid = Uint32Array.from(snap.rawGrid);
       this.world.W = W;
       this.world.H = H;
+      this.world.rawH = rawH;
       this.world.surface = surface;
       this.world.rawSurface = rawSurface;
+      this.world.yOffset = yOffset;
       this.world.seed = Number(snap.session?.[1] || this.world.seed || 0);
     }
 
     this.session = snap.session;
     this.config = snap.config;
-    const miners = snap.agents.map((row) => this._toMiner(row, surface));
+    const miners = snap.agents.map((row) => this._toMiner(row, surface, rawSurface, yOffset));
     this._emitAgentDiffs(miners, emitEvents);
     this.s.miners = miners;
     this.match = {
@@ -328,11 +341,19 @@ export class ChainSource {
     }
   }
 
-  _toMiner(row, surface) {
-    const [x = 0, rawY = surface - 1, facing = 0, aliveRaw = 1] = row.state;
-    const y = rawY < surface ? surface - 1 : rawY;
+  _toMiner(row, surface, rawSurface, yOffset) {
+    // Current AgentOf layout observed on DiggerWorld:
+    //   [status/alive, x, y, facing, ladders, ..., spawnX, ...]
+    // The previous integration read [0],[1] as x/y, which mirrored agents into
+    // the left wall and made them appear inside solid cells.
+    const aliveRaw = Number(row.state[0] ?? 1);
+    const x = Number(row.state[1] ?? 0);
+    const rawY = Number(row.state[2] ?? rawSurface);
+    const facing = Number(row.state[3] ?? 0);
+    const y = rawY < rawSurface ? surface - 1 : rawY + yOffset;
     const cargo = row.inventory.reduce((sum, v) => sum + Number(v || 0), 0);
     const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][row.index % 5];
+    const spawnX = Number(row.state[11] ?? x);
     return {
       id: row.index,
       owner: row.owner,
@@ -350,8 +371,8 @@ export class ChainSource {
       items: {},
       stats: makeEmptyStats(),
       respawnAtMs: null,
-      spawnX: Number(row.state[11] || x),
-      spawnY: Number(row.state[12] || surface),
+      spawnX: Number.isFinite(spawnX) ? spawnX : x,
+      spawnY: surface,
       hat: row.index % 3 === 0 ? 'cap' : row.index % 3 === 1 ? 'visor' : 'antenna',
       color,
       radar: 2,

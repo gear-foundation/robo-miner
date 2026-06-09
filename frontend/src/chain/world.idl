@@ -1,6 +1,6 @@
 !@sails: 1.0.0-beta.5
 
-service World@0xfaaaecdffddb0061 {
+service World@0x44d3a89e1760075a {
     events {
         AgentDied(u64, [u8; 32], u32, u32, u32),
         AgentExited(u64, [u8; 32]),
@@ -23,6 +23,8 @@ service World@0xfaaaecdffddb0061 {
         Exit() -> [u128] throws String;
         @query
         InventoryOf(owner: ActorId) -> [u32] throws String;
+        @query
+        IsDug(x: u32, y: u32) -> bool throws String;
         @query
         MapSnapshot() -> [u32] throws String;
         MoveAgent(direction: u32) -> [u128] throws String;
@@ -54,10 +56,10 @@ service Admin@0xf0292894fb819cec {
 
 program DiggerWorld {
     constructors {
-        Create(seed: u64);
+        Create();
     }
     services {
-        World@0xfaaaecdffddb0061,
+        World@0x44d3a89e1760075a,
         Admin@0xf0292894fb819cec,
     }
 }

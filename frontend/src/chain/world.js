@@ -74,24 +74,24 @@ export function adminActions(program) {
 // team — annotated below as best-read; the renderer/TX-console already consume
 // {type,id,x,y,block,...}.
 //
-//   AgentDied(u64,[u8;32],u32,u32,u32)            → id,owner, x,y, cause?
+//   AgentDied(u64,[u8;32],u32,u32,u32)            → id,owner, x,y, cause
 //   AgentExited(u64,[u8;32])                      → id,owner
 //   AgentMoved(u64,[u8;32],u32,u32,u32,u32)       → id,owner, fromX,fromY, x,y
 //   AgentRegistered(u64,[u8;32])                  → id,owner
 //   AgentSpawned(u64,[u8;32],u32,u32)             → id,owner, x,y
 //   AgentSurfaced(u64,[u8;32],u32,u32,u32)        → id,owner, x,y, banked?
-//   LadderPlaced(u64,[u8;32],u32,u32,u32)         → id,owner, x,y, dir?
+//   LadderPlaced(u64,[u8;32],u32,u32,u32)         → id,owner, x,y, laddersRemaining
 //   ResourceExtracted(u64,[u8;32],u32,u32,u32,u32)→ id,owner, x,y, kind, amount
-//   TileDrilled(u64,[u8;32],u32,u32,u32,u32)      → id,owner, x,y, tile, ?
+//   TileDrilled(u64,[u8;32],u32,u32,u32,u32)      → id,owner, x,y, oldTile, newTile
 export const WORLD_EVENTS = {
   AgentRegistered:   (a) => ({ type: 'registered', id: Number(a[0]), owner: a[1] }),
   AgentSpawned:      (a) => ({ type: 'spawned',     id: Number(a[0]), owner: a[1], x: a[2], y: a[3] }),
   AgentMoved:        (a) => ({ type: 'moved',       id: Number(a[0]), owner: a[1], fromX: a[2], fromY: a[3], x: a[4], y: a[5] }),
-  TileDrilled:       (a) => ({ type: 'dug',         id: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4] }),
+  TileDrilled:       (a) => ({ type: 'dug',         id: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], newBlock: a[5] }),
   ResourceExtracted: (a) => ({ type: 'resource_extracted', id: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], amount: a[5] }),
-  LadderPlaced:      (a) => ({ type: 'ladder_placed', id: Number(a[0]), owner: a[1], x: a[2], y: a[3] }),
+  LadderPlaced:      (a) => ({ type: 'ladder_placed', id: Number(a[0]), owner: a[1], x: a[2], y: a[3], laddersRemaining: a[4] }),
   AgentSurfaced:     (a) => ({ type: 'surfaced',    id: Number(a[0]), owner: a[1], x: a[2], y: a[3], amount: a[4] }),
-  AgentDied:         (a) => ({ type: 'death',       id: Number(a[0]), owner: a[1], x: a[2], y: a[3] }),
+  AgentDied:         (a) => ({ type: 'death',       id: Number(a[0]), owner: a[1], x: a[2], y: a[3], cause: a[4] }),
   AgentExited:       (a) => ({ type: 'exited',      id: Number(a[0]), owner: a[1] }),
 };
 

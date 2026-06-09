@@ -2753,41 +2753,37 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Digger crystals: small (cyan) + big (green) read as a cluster of shards;
-    // huge (magenta) is a single treasure gem like the diamond.
-    if (type === BLOCK.SCRST || type === BLOCK.BCRST) {
-      const C = type === BLOCK.SCRST
-        ? { out: 0x0d3a4a, body: 0x2fb6df, hi: 0x8fe9ff, h: 13, w: 4 }
-        : { out: 0x0d3a22, body: 0x35c46a, hi: 0x9bffbf, h: 17, w: 5 };
-      const drawShard = (cx, cy, h, w, tilt) => {
-        const tx = cx + tilt;
-        g.fillStyle(C.out, 1);
-        g.fillTriangle(cx - w, cy, cx, cy - h, cx + w, cy);
-        g.fillTriangle(cx - w, cy, cx, cy + 4, cx, cy - h);
-        g.fillStyle(C.body, 1);
-        g.fillTriangle(cx - w + 1, cy, tx, cy - h + 2, cx + w - 1, cy);
-        g.fillStyle(C.hi, 0.95);
-        g.fillRect(tx - 1, cy - h + 4, 1, Math.max(2, h - 6));
-      };
-      const ox = (seed & 3) - 1;
-      drawShard(px + 14, py + 38 + ox, C.h + 3, C.w, -1);
-      drawShard(px + 26, py + 40, C.h, C.w - 1, 1);
-      drawShard(px + 36, py + 36 - ox, C.h + 1, C.w - 1, 0);
-      return;
-    }
-
-    if (type === BLOCK.HCRST) {
-      g.fillStyle(0x4a0d35, 1);
-      g.fillTriangle(px+10, py+30, px+22, py+8,  px+34, py+30);
-      g.fillTriangle(px+10, py+30, px+22, py+44, px+34, py+30);
-      g.fillStyle(0xe85cc0, 1);
-      g.fillTriangle(px+14, py+30, px+22, py+12, px+30, py+30);
-      g.fillTriangle(px+14, py+30, px+22, py+40, px+30, py+30);
-      g.fillStyle(0xffc6ef, 1);
-      g.fillTriangle(px+18, py+30, px+22, py+16, px+26, py+30);
+    // Digger crystals share one faceted gem silhouette. Only color changes,
+    // so SCRST/BCRST/HCRST read as the same collectible family on the map.
+    if (type === BLOCK.SCRST || type === BLOCK.BCRST || type === BLOCK.HCRST) {
+      const C = {
+        [BLOCK.SCRST]: { out: 0x123a52, body: 0x36bde6, mid: 0x66dfff, hi: 0xcff8ff },
+        [BLOCK.BCRST]: { out: 0x103a25, body: 0x39c96f, mid: 0x6effa0, hi: 0xd2ffe2 },
+        [BLOCK.HCRST]: { out: 0x4a0d35, body: 0xe85cc0, mid: 0xff8fdc, hi: 0xffc6ef },
+      }[type];
+      const cx = px + 22;
+      const yTop = py + 8;
+      const yMid = py + 30;
+      const yBot = py + 44;
+      const half = 12;
+      g.fillStyle(C.out, 1);
+      g.fillTriangle(cx - half, yMid, cx, yTop, cx + half, yMid);
+      g.fillTriangle(cx - half, yMid, cx, yBot, cx + half, yMid);
+      g.fillStyle(C.body, 1);
+      g.fillTriangle(cx - half + 3, yMid, cx, yTop + 4, cx, yMid);
+      g.fillTriangle(cx, yMid, cx, yBot - 4, cx + half - 3, yMid);
+      g.fillStyle(C.mid, 1);
+      g.fillTriangle(cx, yMid, cx, yTop + 4, cx + half - 3, yMid);
+      g.fillTriangle(cx - half + 3, yMid, cx, yBot - 4, cx, yMid);
+      g.fillStyle(C.hi, 0.96);
+      g.fillTriangle(cx - 4, yMid - 1, cx, yTop + 8, cx + 4, yMid - 1);
+      g.fillRect(cx - 1, yTop + 9, 2, Math.max(5, yMid - yTop - 9));
+      g.fillStyle(C.out, 0.55);
+      g.fillRect(cx - half + 2, yMid, 3, 2);
+      g.fillRect(cx + half - 5, yMid, 3, 2);
       g.fillStyle(0xffffff, 1);
-      g.fillRect(px + 21, py + 14, 2, 10);
-      g.fillRect(px + 16, py + 21, 12, 2);
+      g.fillRect(cx - 1, yTop + 6, 2, 10);
+      g.fillRect(cx - 6, yTop + 11, 12, 2);
       return;
     }
 

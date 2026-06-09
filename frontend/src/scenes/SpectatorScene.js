@@ -208,7 +208,7 @@ export default class SpectatorScene extends GameScene {
           this.spawnDebris(e.x, e.y, BLOCK.STONE, 16);
           this.cameras.main.shake(160, 0.004 * (e.radius + 1));
         }
-        else if (e.type === 'sold') this.spawnBankPop(e.id, e.amount);
+        else if (e.type === 'sold' || e.type === 'surfaced') this.spawnBankPop(e.id, e.amount || 0);
         this.pushEvent(e);
       }
       if (this.rt.worldDirty) { this.worldDirty = true; this.rt.worldDirty = false; }
@@ -526,7 +526,9 @@ export default class SpectatorScene extends GameScene {
   }
 
   formatEvent(e) {
-    const miner = e.id != null ? this.rt.s.miners[e.id] : null;
+    const miner = e.owner
+      ? this.rt.s.miners.find((m) => m.owner && m.owner.toLowerCase() === e.owner.toLowerCase())
+      : e.id != null ? this.rt.s.miners.find((m) => m.id === e.id) : null;
     const name = (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
     const t = (this.rt.timeMs / 1000).toFixed(1);
     const surface = this.world?.surface ?? SURFACE_Y;
@@ -555,6 +557,8 @@ export default class SpectatorScene extends GameScene {
       case 'surfaced': msg = `▲ SURFACE${e.amount ? ` +${e.amount}` : ''}`; color = '#ffec6e'; break;
       case 'exited': msg = 'EXIT'; color = '#9bb0a4'; break;
       case 'detonation': msg = `dynamite r${e.radius}`; color = '#ffae42'; break;
+      case 'chain_gap': msg = 'SYNC GAP · SNAPSHOT'; color = '#ffae42'; break;
+      case 'chain_error': msg = `CHAIN ${e.message || 'ERROR'}`; color = '#ff6a6a'; break;
       default: return null;
     }
     return { t, name, msg, color };

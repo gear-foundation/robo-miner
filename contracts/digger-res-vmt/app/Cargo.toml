@@ -1,0 +1,15 @@
+[package]
+name = "digger-res-vmt-app"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Package containing Digger RES VMT business logic"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+digger-redeem-client.workspace = true

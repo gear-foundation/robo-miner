@@ -1,0 +1,81 @@
+
+!@sails: 1.0.0-beta.5
+
+service Redeem@0x9077a36884dff78d {
+    events {
+        RedeemCanceled(u128, [u8; 32], u128, u128, u128, u128),
+        Redeemed([u8; 32], u128, u128, u128, u128),
+        RedeemRequested(u128, [u8; 32], u128, u128, u128, u128),
+        ReserveDeposited([u8; 32], u128, u128),
+        ReserveSynced(u128, u128),
+    }
+    functions {
+        @query
+        AvailableReserve() -> u128 throws String;
+        @query
+        BcrstRate() -> u128 throws String;
+        CancelRedeem(redeem_id: u128) throws String;
+        ConfirmRedeem(redeem_id: u128) -> u128 throws String;
+        @payable
+        DepositReserve() -> u128 throws String;
+        @query
+        HcrstRate() -> u128 throws String;
+        @query
+        LockedBalance() -> u128 throws String;
+        @query
+        PendingRedeemCount() -> u128 throws String;
+        Redeem(scrst: u128, bcrst: u128, hcrst: u128) -> u128 throws String;
+        @query
+        ReserveBalance() -> u128 throws String;
+        @query
+        ScrstRate() -> u128 throws String;
+        @query
+        TotalPaid() -> u128 throws String;
+        @query
+        TotalRedeemedBcrst() -> u128 throws String;
+        @query
+        TotalRedeemedHcrst() -> u128 throws String;
+        @query
+        TotalRedeemedScrst() -> u128 throws String;
+    }
+}
+
+service Admin@0x55e01d646e511900 {
+    events {
+        AdminAdded([u8; 32]),
+        AdminRemoved([u8; 32]),
+        FundsWithdrawn([u8; 32], u128, u128),
+        Paused([u8; 32]),
+        RatesUpdated(u128, u128, u128),
+        ResContractUpdated([u8; 32], [u8; 32]),
+        Unpaused([u8; 32]),
+    }
+    functions {
+        AddAdmin(admin: ActorId) -> bool throws String;
+        @query
+        Admins() -> [ActorId] throws String;
+        @query
+        IsAdmin(account: ActorId) -> bool throws String;
+        @query
+        IsPaused() -> bool throws String;
+        Pause() throws String;
+        RemoveAdmin(admin: ActorId) -> bool throws String;
+        @query
+        ResContract() -> ActorId throws String;
+        SetRates(scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
+        SetResContract(res_contract: ActorId) throws String;
+        Unpause() throws String;
+        @returns_value
+        WithdrawFunds(amount: u128) throws String;
+    }
+}
+
+program DiggerRedeemClient {
+    constructors {
+        Create(res_contract: ActorId, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
+    }
+    services {
+        Redeem@0x9077a36884dff78d,
+        Admin@0x55e01d646e511900,
+    }
+}

@@ -1,0 +1,18 @@
+[package]
+name = "digger-res-vmt-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Package containing the generated client for the Digger RES VMT program"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["ethexe"] }
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "build"] }
+digger-res-vmt-app.workspace = true

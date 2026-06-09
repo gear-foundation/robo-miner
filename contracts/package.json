@@ -10,6 +10,8 @@
     "upload-map:verify": "tsx scripts/upload-map.ts --verify-only",
     "reload-program": "tsx scripts/reload-program.ts",
     "reload-program:dry-run": "tsx scripts/reload-program.ts --dry-run",
+    "deploy-economy": "tsx scripts/deploy-economy.ts",
+    "deploy-economy:dry-run": "tsx scripts/deploy-economy.ts --dry-run",
     "deploy-proxy": "tsx scripts/deploy-proxy.ts",
     "deploy-proxy:dry-run": "tsx scripts/deploy-proxy.ts --dry-run",
     "proxy-fleet": "tsx scripts/proxy-fleet.ts",
@@ -20,6 +22,9 @@
     "world-events": "tsx scripts/read-events.ts --watch --service World --no-requests --latest-computed-outcome --events-only"
   },
   "dependencies": {
+    "@gear-js/api": "^0.45.0",
+    "@polkadot/api": "^16.5.1",
+    "@polkadot/util": "^14.0.1",
     "@vara-eth/api": "0.4.0",
     "dotenv": "^17.2.3",
     "kzg-wasm": "1.0.0",

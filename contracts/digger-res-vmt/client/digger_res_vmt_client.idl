@@ -1,0 +1,81 @@
+
+!@sails: 1.0.0-beta.5
+
+service Vmt@0x4e01e4dd806d52bb {
+    events {
+        Approval([u8; 32], [u8; 32]),
+        BatchTransfer([u8; 32], [u8; 32]),
+        Burned([u8; 32], u128, u128, u128),
+        Minted([u8; 32], u128, u128, u128),
+        RedeemBurnRejected(u128, [u8; 32], u128, u128, u128),
+        Transfer([u8; 32], [u8; 32], u128, u128),
+    }
+    functions {
+        Approve(operator: ActorId) -> bool throws String;
+        @query
+        BalanceOf(account: ActorId, id: u128) -> u128 throws String;
+        BatchTransferFrom(from: ActorId, to: ActorId, ids: [u128], amounts: [u128]) throws String;
+        @query
+        BcrstTokenId() -> u128 throws String;
+        BurnForRedeem(redeem_id: u128, owner: ActorId, scrst: u128, bcrst: u128, hcrst: u128) throws String;
+        @query
+        Decimals() -> u128 throws String;
+        @query
+        HcrstTokenId() -> u128 throws String;
+        @query
+        IsApproved(account: ActorId, operator: ActorId) -> bool throws String;
+        MintResources(to: ActorId, scrst: u128, bcrst: u128, hcrst: u128) throws String;
+        @query
+        Name() -> String throws String;
+        @query
+        ScrstTokenId() -> u128 throws String;
+        @query
+        Symbol() -> String throws String;
+        @query
+        TotalSupplyOf(id: u128) -> u128 throws String;
+        TransferFrom(from: ActorId, to: ActorId, id: u128, amount: u128) throws String;
+    }
+}
+
+service Admin@0x01d79581eb6b9405 {
+    events {
+        AdminAdded([u8; 32]),
+        AdminRemoved([u8; 32]),
+        MinterAdded([u8; 32]),
+        MinterRemoved([u8; 32]),
+        Paused([u8; 32]),
+        RedeemContractUpdated([u8; 32], [u8; 32]),
+        Unpaused([u8; 32]),
+    }
+    functions {
+        AddAdmin(admin: ActorId) -> bool throws String;
+        AddMinter(minter: ActorId) -> bool throws String;
+        @query
+        Admins() -> [ActorId] throws String;
+        @query
+        IsAdmin(account: ActorId) -> bool throws String;
+        @query
+        IsMinter(account: ActorId) -> bool throws String;
+        @query
+        IsPaused() -> bool throws String;
+        @query
+        Minters() -> [ActorId] throws String;
+        Pause() throws String;
+        @query
+        RedeemContract() -> ActorId throws String;
+        RemoveAdmin(admin: ActorId) -> bool throws String;
+        RemoveMinter(minter: ActorId) -> bool throws String;
+        SetRedeemContract(redeem_contract: ActorId) throws String;
+        Unpause() throws String;
+    }
+}
+
+program DiggerResVmtClient {
+    constructors {
+        Create(redeem_contract: ActorId, minter: ActorId);
+    }
+    services {
+        Vmt@0x4e01e4dd806d52bb,
+        Admin@0x01d79581eb6b9405,
+    }
+}

@@ -29,6 +29,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { unwrapInjectedPromise } from "./injected-reply.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -497,11 +499,12 @@ async function sendInjected<T>(
     previousStateHash,
   });
 
-  const reply = await withTimeout(
+  const rawReply = await withTimeout(
     injected.sendAndWaitForPromise(),
     promiseTimeoutMs,
     `${label} injected promise`,
   );
+  const reply = unwrapInjectedPromise(rawReply, label);
   if (!reply?.payload) throw new Error(`${label} did not return an injected promise payload`);
   assertSuccessReply(reply.code, sails, reply.payload);
   const decoded = decode(reply.payload);
@@ -744,7 +747,7 @@ async function main() {
         sails,
         programId,
         "World.Register",
-        sails.services.World.functions.Register.encodePayload() as Hex,
+        sails.services.World.functions.Register.encodePayload(ownerActor) as Hex,
         (payload) => decodeAgentResult(sails, "Register", payload),
         transport,
         validatorMode,

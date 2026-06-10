@@ -31,6 +31,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { unwrapInjectedPromise } from "./injected-reply.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -70,6 +72,8 @@ type CliArgs = {
   promiseTimeoutMs?: string;
   queryTimeoutMs?: string;
   validatorMode?: ValidatorMode;
+  forceNew?: boolean;
+  codeIdFromWasm?: boolean;
   noRegister?: boolean;
   noWriteEnv?: boolean;
   dryRun?: boolean;
@@ -112,6 +116,9 @@ Inputs:
   --wasm             Proxy wasm artifact. Defaults to target release digger_proxy.opt.wasm.
   --top-up           Initial executable balance. Defaults to DIGGER_PROXY_TOP_UP.
   --validator        "default" or "slot". Defaults to DIGGER_VALIDATOR_MODE/default.
+  --new, --force-new Ignore DIGGER_PROXY_PROGRAM_ID and create a new proxy mirror.
+  --code-id-from-wasm
+                     Ignore DIGGER_PROXY_CODE_ID and derive code id from proxy wasm.
   --no-register      Deploy/init only; skip Digger.Register().
   --no-write-env     Do not write DIGGER_PROXY_PROGRAM_ID/CODE_ID.
   --dry-run          Resolve local inputs and print payload sizes without sending txs.
@@ -191,6 +198,13 @@ function parseArgs(argv: string[]): CliArgs {
         args.validatorMode = value;
         break;
       }
+      case "--new":
+      case "--force-new":
+        args.forceNew = true;
+        break;
+      case "--code-id-from-wasm":
+        args.codeIdFromWasm = true;
+        break;
       case "--no-register":
         args.noRegister = true;
         break;
@@ -449,8 +463,10 @@ async function waitForCodeState(
 }
 
 async function resolveProxyCodeId(args: CliArgs): Promise<Hex> {
-  const explicit = args.codeId || envValue("DIGGER_PROXY_CODE_ID");
-  if (explicit) return normalizeHex32(explicit, "DIGGER_PROXY_CODE_ID");
+  if (!args.codeIdFromWasm) {
+    const explicit = args.codeId || envValue("DIGGER_PROXY_CODE_ID");
+    if (explicit) return normalizeHex32(explicit, "DIGGER_PROXY_CODE_ID");
+  }
 
   const wasmPath = resolveFromRoot(args.wasm || PROXY_WASM_PATH);
   if (!existsSync(wasmPath)) throw new Error(`Wasm artifact does not exist: ${wasmPath}`);
@@ -678,11 +694,12 @@ async function sendInjectedMessage(
     validatorMode,
   });
 
-  const reply = await withTimeout(
+  const rawReply = await withTimeout(
     injected.sendAndWaitForPromise(),
     promiseTimeoutMs,
     `${label} injected promise`,
   );
+  const reply = unwrapInjectedPromise(rawReply, label);
 
   if (!reply) {
     console.warn(`[${label}] continuing with stateHash polling without injected promise`);
@@ -979,7 +996,10 @@ async function main() {
     ),
     "world program id",
   );
-  const resumeProgram = args.program || envValue("DIGGER_PROXY_PROGRAM_ID");
+  if (args.forceNew && args.program) {
+    throw new Error("--new/--force-new cannot be combined with --program");
+  }
+  const resumeProgram = args.forceNew ? undefined : args.program || envValue("DIGGER_PROXY_PROGRAM_ID");
   const proxySails = await loadSails(PROXY_IDL_PATH);
   const worldSails = await loadSails(WORLD_IDL_PATH);
   const worldActorId = actorIdFromAddress(worldProgramId);
@@ -999,6 +1019,8 @@ async function main() {
     topUp: topUp.toString(),
     validatorMode,
     resumeProgram: resumeProgram || null,
+    forceNew: Boolean(args.forceNew),
+    codeIdFromWasm: Boolean(args.codeIdFromWasm),
     writeEnv: !args.noWriteEnv,
     register: !args.noRegister,
     dryRun: Boolean(args.dryRun),

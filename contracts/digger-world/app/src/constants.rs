@@ -20,6 +20,9 @@ pub const SESSION_CREATED: u32 = 0;
 pub const SESSION_ACTIVE: u32 = 1;
 pub const SESSION_FINISHED: u32 = 2;
 
+pub const MIN_SESSION_PARTICIPANTS: usize = 8;
+pub const AUTO_START_SESSION_PARTICIPANTS: usize = 10;
+
 pub const AGENT_ACTIVE: u32 = 1;
 pub const AGENT_SURFACED: u32 = 2;
 pub const AGENT_DEAD: u32 = 3;

@@ -29,6 +29,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { unwrapInjectedPromise } from "./injected-reply.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -822,11 +824,12 @@ async function main() {
       validatorMode,
     });
 
-    const reply = await withTimeout(
+    const rawReply = await withTimeout(
       injected.sendAndWaitForPromise(),
       promiseTimeoutMs,
       "injected promise",
     );
+    const reply = unwrapInjectedPromise(rawReply, "upload-map");
 
     if (reply) {
       const code = normalizeReplyCode(reply.code);

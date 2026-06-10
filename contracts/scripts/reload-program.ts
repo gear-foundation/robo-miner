@@ -31,6 +31,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { unwrapInjectedPromise } from "./injected-reply.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -1009,11 +1011,12 @@ async function sendInjectedMessage(
     validatorMode,
   });
 
-  const reply = await withTimeout(
+  const rawReply = await withTimeout(
     injected.sendAndWaitForPromise(),
     promiseTimeoutMs,
     `${label} injected promise`,
   );
+  const reply = unwrapInjectedPromise(rawReply, label);
 
   if (reply) {
     console.log(`[${label}] promise`, {

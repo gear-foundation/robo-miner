@@ -22,6 +22,7 @@ import {
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
 import { ingestFreshOutcomeMessages } from "./leaderboard-ingest.js";
+import { unwrapInjectedPromise } from "./injected-reply.js";
 
 loadEnv({ quiet: true });
 
@@ -60,8 +61,8 @@ type ActionFunctionName =
   | "worldMintResources";
 type ResourceTile = typeof TILE_RESOURCE_SCRST | typeof TILE_RESOURCE_BCRST | typeof TILE_RESOURCE_HCRST;
 
-const WORLD_HEADER_PREFIX = "0x474d0110364cf104b8fd622b";
-const ADMIN_HEADER_PREFIX = "0x474d011053f54356c82702e5";
+const WORLD_HEADER_PREFIX = "0x474d01103126e7ea14da7d8f";
+const ADMIN_HEADER_PREFIX = "0x474d01105acb75662050b164";
 const sailsHeader = (prefix: string, route: number, entry = 1): Hex =>
   `${prefix}${route.toString(16).padStart(2, "0")}${entry.toString(16).padStart(4, "0")}` as Hex;
 
@@ -69,7 +70,7 @@ const SAILS_WORLD = {
   AgentOf: sailsHeader(WORLD_HEADER_PREFIX, 0),
   IsDug: sailsHeader(WORLD_HEADER_PREFIX, 6),
   MapSnapshot: sailsHeader(WORLD_HEADER_PREFIX, 7),
-  Session: sailsHeader(WORLD_HEADER_PREFIX, 12),
+  Session: sailsHeader(WORLD_HEADER_PREFIX, 13),
 } as const;
 
 const SAILS_WORLD_EVENTS = {
@@ -82,14 +83,16 @@ const SAILS_WORLD_EVENTS = {
   LadderPlaced: sailsHeader(WORLD_HEADER_PREFIX, 6),
   ResourceExtracted: sailsHeader(WORLD_HEADER_PREFIX, 7),
   ResourcesMinted: sailsHeader(WORLD_HEADER_PREFIX, 8),
-  TileDrilled: sailsHeader(WORLD_HEADER_PREFIX, 9),
+  SessionStarted: sailsHeader(WORLD_HEADER_PREFIX, 9),
+  TileDrilled: sailsHeader(WORLD_HEADER_PREFIX, 10),
 } as const;
 
 const SAILS_ADMIN_EVENTS = {
-  MapGenerated: sailsHeader(ADMIN_HEADER_PREFIX, 0, 2),
-  ResourceVmtUpdated: sailsHeader(ADMIN_HEADER_PREFIX, 1, 2),
-  SessionFinished: sailsHeader(ADMIN_HEADER_PREFIX, 2, 2),
-  SessionStarted: sailsHeader(ADMIN_HEADER_PREFIX, 3, 2),
+  Killed: sailsHeader(ADMIN_HEADER_PREFIX, 0, 2),
+  MapGenerated: sailsHeader(ADMIN_HEADER_PREFIX, 1, 2),
+  ResourceVmtUpdated: sailsHeader(ADMIN_HEADER_PREFIX, 2, 2),
+  SessionFinished: sailsHeader(ADMIN_HEADER_PREFIX, 3, 2),
+  SessionStarted: sailsHeader(ADMIN_HEADER_PREFIX, 4, 2),
 } as const;
 
 const AGENT_FIELD_ORDER = [
@@ -163,9 +166,11 @@ type WorldEvent =
   | { name: "LadderPlaced"; sessionId: string; owner: Hex; x: number; y: number; laddersRemaining: number }
   | { name: "ResourceExtracted"; sessionId: string; owner: Hex; x: number; y: number; resource: number; carriedTotal: number }
   | { name: "ResourcesMinted"; sessionId: string; owner: Hex; scrst: number; bcrst: number; hcrst: number }
+  | { name: "SessionStarted"; sessionId: string }
   | { name: "TileDrilled"; sessionId: string; owner: Hex; x: number; y: number; oldTile: number; newTile: number };
 
 type AdminEvent =
+  | { name: "Killed"; inheritor: Hex }
   | { name: "MapGenerated"; sessionId: string; seed: string }
   | { name: "ResourceVmtUpdated"; previous: Hex; next: Hex }
   | { name: "SessionFinished"; sessionId: string }
@@ -950,6 +955,15 @@ function decodeWorldEvent(payload: Hex) {
 
     const label = `World.${name}`;
     const sessionId = readU64String(bytes, 0, label);
+    if (name === "SessionStarted") {
+      return {
+        source: "block_outcome zero-destination message",
+        header,
+        decodeRule: "Sails World event payload = header + u64 sessionId",
+        fields: { name, sessionId } satisfies WorldEvent,
+      };
+    }
+
     const owner = readActorId(bytes, 8, label);
     let offset = 40;
     const nextU32 = () => {
@@ -1013,6 +1027,9 @@ function decodeAdminEvent(payload: Hex) {
     const label = `Admin.${name}`;
     let fields: AdminEvent | null = null;
     switch (name) {
+      case "Killed":
+        fields = { name, inheritor: readActorId(bytes, 0, label) };
+        break;
       case "MapGenerated":
         fields = { name, sessionId: readU64String(bytes, 0, label), seed: readU64String(bytes, 8, label) };
         break;
@@ -1315,7 +1332,9 @@ async function sendInjectedAction(
   const recipient = tx.setDefaultValidator();
   console.log(JSON.stringify({ prepared: { recipient, messageId: tx.messageId, txHash: tx.txHash } }));
 
-  const reply = await tx.sendAndWaitForPromise();
+  const rawReply = await tx.sendAndWaitForPromise();
+  const reply = unwrapInjectedPromise(rawReply, "agent-step");
+  if (!reply) throw new Error("agent-step did not return an injected promise");
   const decodedPayload = decodePromisePayload(reply.payload);
   console.log(JSON.stringify({
     promise: {

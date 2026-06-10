@@ -13,10 +13,7 @@ import {
   type IVaraEthProvider,
   type StateTransition,
 } from "@vara-eth/api";
-import {
-  normalizeBlockEvent,
-  normalizeStateTransition,
-} from "@vara-eth/api/util";
+import { normalizeBlockEvent } from "@vara-eth/api/util";
 import { config as loadEnv } from "dotenv";
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
@@ -90,6 +87,49 @@ type BlockResult = {
   outcomeSource?: string;
   outcomeError?: string;
 };
+
+function moveField(record: Record<string, unknown>, from: string, to: string): void {
+  if (!(to in record) && from in record) {
+    record[to] = record[from];
+  }
+}
+
+function normalizeStateTransition(transition: unknown): void {
+  if (!transition || typeof transition !== "object") return;
+  const record = transition as Record<string, unknown>;
+
+  moveField(record, "actor_id", "actorId");
+  moveField(record, "new_state_hash", "newStateHash");
+  moveField(record, "value_to_receive", "valueToReceive");
+  moveField(record, "value_to_receive_negative_sign", "valueToReceiveNegativeSign");
+  moveField(record, "value_claims", "valueClaims");
+
+  if (typeof record.valueToReceive === "string" || typeof record.valueToReceive === "number") {
+    record.valueToReceive = BigInt(record.valueToReceive);
+  }
+
+  if (Array.isArray(record.valueClaims)) {
+    for (const claim of record.valueClaims) {
+      if (!claim || typeof claim !== "object") continue;
+      const claimRecord = claim as Record<string, unknown>;
+      moveField(claimRecord, "message_id", "messageId");
+      if (typeof claimRecord.value === "string" || typeof claimRecord.value === "number") {
+        claimRecord.value = BigInt(claimRecord.value);
+      }
+    }
+  }
+
+  if (Array.isArray(record.messages)) {
+    for (const message of record.messages) {
+      if (!message || typeof message !== "object") continue;
+      const messageRecord = message as Record<string, unknown>;
+      moveField(messageRecord, "reply_details", "replyDetails");
+      if (typeof messageRecord.value === "string" || typeof messageRecord.value === "number") {
+        messageRecord.value = BigInt(messageRecord.value);
+      }
+    }
+  }
+}
 
 function printUsage() {
   console.log(`Usage:

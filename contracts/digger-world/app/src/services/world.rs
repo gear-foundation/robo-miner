@@ -1,14 +1,17 @@
 use sails_rs::{cell::RefCell, gstd::msg, prelude::*};
 
 use crate::{
-    agent::{Agent, agent_view, inventory_view},
+    agent::{Agent, agent_view, inventory_view, owner_view},
     constants::*,
     events::WorldEvents,
     map::{
         ensure_map_loaded, ensure_move_allowed, gravity_target, index_of, is_dug_tile,
         next_spawn_x, target_position, tile_at,
     },
-    state::{WorldState, active_agent, ensure_session_active, next_action_seq},
+    state::{
+        WorldState, active_agent, ensure_registration_open, ensure_session_active, next_action_seq,
+        should_auto_start_session,
+    },
 };
 
 const VMT_MINT_RESOURCES: [u8; 16] = [
@@ -28,21 +31,32 @@ impl<'a> WorldService<'a> {
 #[service(events = WorldEvents)]
 impl WorldService<'_> {
     #[export(unwrap_result)]
-    pub fn register(&mut self) -> Result<Vec<u128>, String> {
+    pub fn register(&mut self, owner: ActorId) -> Result<Vec<u128>, String> {
         let caller = Syscall::message_source();
         let mut state = self.state.borrow_mut();
 
-        ensure_session_active(&state)?;
+        ensure_map_loaded(&state.map)?;
+        ensure_registration_open(&state)?;
+        if owner == ActorId::zero() {
+            return Err("owner cannot be zero".into());
+        }
         if state.agents.contains_key(&caller) {
             return Err("agent is already registered".into());
+        }
+        if state.agents.len() >= AUTO_START_SESSION_PARTICIPANTS {
+            return Err("registration is full".into());
         }
 
         let x = next_spawn_x(state.spawn_cursor);
         state.spawn_cursor = state.spawn_cursor.saturating_add(1);
-        let agent = Agent::new(caller, x, &state.config);
+        let agent = Agent::new(owner, x, &state.config);
         let view = agent_view(&agent);
 
         state.agents.insert(caller, agent);
+        let auto_started = should_auto_start_session(&state);
+        if auto_started {
+            state.session.status = SESSION_ACTIVE;
+        }
 
         self.emit_event(WorldEvents::AgentRegistered(
             state.session.session_id,
@@ -56,6 +70,10 @@ impl WorldService<'_> {
             0,
         ))
         .expect("failed to emit agent spawned event");
+        if auto_started {
+            self.emit_event(WorldEvents::SessionStarted(state.session.session_id))
+                .expect("failed to emit world session started event");
+        }
 
         Ok(view)
     }
@@ -338,7 +356,7 @@ impl WorldService<'_> {
     #[export(unwrap_result)]
     pub async fn mint_resources(&mut self) -> Result<Vec<u128>, String> {
         let caller = Syscall::message_source();
-        let (resource_vmt, scrst, bcrst, hcrst) = {
+        let (resource_vmt, recipient, scrst, bcrst, hcrst) = {
             let state = self.state.borrow();
 
             ensure_session_active(&state)?;
@@ -353,13 +371,14 @@ impl WorldService<'_> {
 
             (
                 state.resource_vmt,
+                agent.owner,
                 agent.banked_scrst,
                 agent.banked_bcrst,
                 agent.banked_hcrst,
             )
         };
 
-        let payload = encode_vmt_mint_resources(caller, scrst, bcrst, hcrst);
+        let payload = encode_vmt_mint_resources(recipient, scrst, bcrst, hcrst);
         let reply = msg::send_bytes_for_reply(resource_vmt, payload, 0)
             .map_err(|_| "failed to send MintResources to VMT".to_string())?;
 
@@ -439,6 +458,17 @@ impl WorldService<'_> {
                 .borrow()
                 .agents
                 .get(&owner)
+                .ok_or_else(|| "agent is not registered".to_string())?,
+        ))
+    }
+
+    #[export(unwrap_result)]
+    pub fn owner_of(&self, proxy: ActorId) -> Result<ActorId, String> {
+        Ok(owner_view(
+            self.state
+                .borrow()
+                .agents
+                .get(&proxy)
                 .ok_or_else(|| "agent is not registered".to_string())?,
         ))
     }

@@ -32,6 +32,7 @@ pub trait DiggerRedeemClientCtors {
     fn create(
         self,
         res_contract: ActorId,
+        vara_unit: u128,
         scrst_rate: u128,
         bcrst_rate: u128,
         hcrst_rate: u128,
@@ -45,17 +46,18 @@ impl<E: sails_rs::client::GearEnv> DiggerRedeemClientCtors
     fn create(
         self,
         res_contract: ActorId,
+        vara_unit: u128,
         scrst_rate: u128,
         bcrst_rate: u128,
         hcrst_rate: u128,
     ) -> sails_rs::client::PendingCtor<DiggerRedeemClientProgram, io::Create, Self::Env> {
-        self.pending_ctor((res_contract, scrst_rate, bcrst_rate, hcrst_rate))
+        self.pending_ctor((res_contract, vara_unit, scrst_rate, bcrst_rate, hcrst_rate))
     }
 }
 
 pub mod io {
     use super::*;
-    sails_rs::io_struct_impl!(Create (res_contract: ActorId, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> (), 0);
+    sails_rs::io_struct_impl!(Create (res_contract: ActorId, vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> (), 0);
 }
 
 pub mod redeem {
@@ -101,13 +103,14 @@ pub mod redeem {
         fn total_redeemed_scrst(
             &self,
         ) -> sails_rs::client::PendingCall<io::TotalRedeemedScrst, Self::Env>;
+        fn vara_unit(&self) -> sails_rs::client::PendingCall<io::VaraUnit, Self::Env>;
     }
 
     pub struct RedeemImpl;
 
     impl sails_rs::client::Identifiable for RedeemImpl {
         const INTERFACE_ID: sails_rs::InterfaceId =
-            sails_rs::InterfaceId::from_bytes_8([144, 119, 163, 104, 132, 223, 247, 141]);
+            sails_rs::InterfaceId::from_bytes_8([116, 192, 67, 47, 159, 23, 46, 21]);
     }
 
     impl<E: sails_rs::client::GearEnv> Redeem for sails_rs::client::Service<RedeemImpl, E> {
@@ -180,6 +183,9 @@ pub mod redeem {
         ) -> sails_rs::client::PendingCall<io::TotalRedeemedScrst, Self::Env> {
             self.pending_call(())
         }
+        fn vara_unit(&self) -> sails_rs::client::PendingCall<io::VaraUnit, Self::Env> {
+            self.pending_call(())
+        }
     }
 
     pub mod io {
@@ -199,6 +205,7 @@ pub mod redeem {
         sails_rs::io_struct_impl!(TotalRedeemedBcrst () -> u128 | String, 12, <super::RedeemImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
         sails_rs::io_struct_impl!(TotalRedeemedHcrst () -> u128 | String, 13, <super::RedeemImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
         sails_rs::io_struct_impl!(TotalRedeemedScrst () -> u128 | String, 14, <super::RedeemImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(VaraUnit () -> u128 | String, 15, <super::RedeemImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -272,6 +279,13 @@ pub mod admin {
             admin: ActorId,
         ) -> sails_rs::client::PendingCall<io::RemoveAdmin, Self::Env>;
         fn res_contract(&self) -> sails_rs::client::PendingCall<io::ResContract, Self::Env>;
+        fn set_rate_config(
+            &mut self,
+            vara_unit: u128,
+            scrst_rate: u128,
+            bcrst_rate: u128,
+            hcrst_rate: u128,
+        ) -> sails_rs::client::PendingCall<io::SetRateConfig, Self::Env>;
         fn set_rates(
             &mut self,
             scrst_rate: u128,
@@ -293,7 +307,7 @@ pub mod admin {
 
     impl sails_rs::client::Identifiable for AdminImpl {
         const INTERFACE_ID: sails_rs::InterfaceId =
-            sails_rs::InterfaceId::from_bytes_8([85, 224, 29, 100, 110, 81, 25, 0]);
+            sails_rs::InterfaceId::from_bytes_8([48, 166, 228, 163, 224, 67, 46, 69]);
     }
 
     impl<E: sails_rs::client::GearEnv> Admin for sails_rs::client::Service<AdminImpl, E> {
@@ -327,6 +341,15 @@ pub mod admin {
         }
         fn res_contract(&self) -> sails_rs::client::PendingCall<io::ResContract, Self::Env> {
             self.pending_call(())
+        }
+        fn set_rate_config(
+            &mut self,
+            vara_unit: u128,
+            scrst_rate: u128,
+            bcrst_rate: u128,
+            hcrst_rate: u128,
+        ) -> sails_rs::client::PendingCall<io::SetRateConfig, Self::Env> {
+            self.pending_call((vara_unit, scrst_rate, bcrst_rate, hcrst_rate))
         }
         fn set_rates(
             &mut self,
@@ -362,10 +385,11 @@ pub mod admin {
         sails_rs::io_struct_impl!(Pause () -> () | String, 4, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
         sails_rs::io_struct_impl!(RemoveAdmin (admin: ActorId) -> bool | String, 5, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
         sails_rs::io_struct_impl!(ResContract () -> ActorId | String, 6, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetRates (scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetResContract (res_contract: ActorId) -> () | String, 8, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(Unpause () -> () | String, 9, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(WithdrawFunds (amount: u128) -> () | String, 10, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetRateConfig (vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetRates (scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 8, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetResContract (res_contract: ActorId) -> () | String, 9, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(Unpause () -> () | String, 10, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(WithdrawFunds (amount: u128) -> () | String, 11, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -383,10 +407,12 @@ pub mod admin {
             #[codec(index = 3)]
             Paused([u8; 32]),
             #[codec(index = 4)]
-            RatesUpdated(u128, u128, u128),
+            RateConfigUpdated(u128, u128, u128, u128),
             #[codec(index = 5)]
-            ResContractUpdated([u8; 32], [u8; 32]),
+            RatesUpdated(u128, u128, u128),
             #[codec(index = 6)]
+            ResContractUpdated([u8; 32], [u8; 32]),
+            #[codec(index = 7)]
             Unpaused([u8; 32]),
         }
 
@@ -397,9 +423,10 @@ pub mod admin {
                     Self::AdminRemoved { .. } => 1,
                     Self::FundsWithdrawn { .. } => 2,
                     Self::Paused { .. } => 3,
-                    Self::RatesUpdated { .. } => 4,
-                    Self::ResContractUpdated { .. } => 5,
-                    Self::Unpaused { .. } => 6,
+                    Self::RateConfigUpdated { .. } => 4,
+                    Self::RatesUpdated { .. } => 5,
+                    Self::ResContractUpdated { .. } => 6,
+                    Self::Unpaused { .. } => 7,
                 }
             }
         }

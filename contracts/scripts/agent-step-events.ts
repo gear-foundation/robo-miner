@@ -21,6 +21,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { ingestFreshOutcomeMessages } from "./leaderboard-ingest.js";
+
 loadEnv({ quiet: true });
 
 const OWNER = "0xee98b6381b0a6a18a4a4e6d74355b015319a6809" as Hex;
@@ -1326,10 +1328,22 @@ async function sendInjectedAction(
     },
   }));
 
+  const freshMessages = await watcher;
+  const ingest = await ingestFreshOutcomeMessages(freshMessages, {
+    programId,
+    txHash: reply.txHash,
+    messageId: tx.messageId,
+  }).catch((error) => ({
+    skipped: true as const,
+    reason: error instanceof Error ? error.message : String(error),
+  }));
+  console.log(JSON.stringify({ leaderboardIngest: ingest }));
+
   return {
     reply,
     decodedPayload,
-    freshMessages: await watcher,
+    freshMessages,
+    leaderboardIngest: ingest,
   };
 }
 

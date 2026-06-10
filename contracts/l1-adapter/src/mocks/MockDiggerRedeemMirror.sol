@@ -31,7 +31,7 @@ contract MockDiggerRedeemMirror is IDiggerRedeemMirror {
         IDiggerRedeemMirrorCallbacks(adapter).onErrorReply(messageId, reason, bytes4(0));
     }
 
-    function create(bool, address, uint128, uint128, uint128) external returns (bytes32 messageId) {}
+    function create(bool, address, uint128, uint128, uint128, uint128) external returns (bytes32 messageId) {}
     function redeemAvailableReserve(bool) external returns (bytes32 messageId) {}
     function redeemBcrstRate(bool) external returns (bytes32 messageId) {}
     function redeemCancelRedeem(bool, uint128) external returns (bytes32 messageId) {}
@@ -46,6 +46,7 @@ contract MockDiggerRedeemMirror is IDiggerRedeemMirror {
     function redeemTotalRedeemedBcrst(bool) external returns (bytes32 messageId) {}
     function redeemTotalRedeemedHcrst(bool) external returns (bytes32 messageId) {}
     function redeemTotalRedeemedScrst(bool) external returns (bytes32 messageId) {}
+    function redeemVaraUnit(bool) external returns (bytes32 messageId) {}
     function adminAddAdmin(bool, address) external returns (bytes32 messageId) {}
     function adminAdmins(bool) external returns (bytes32 messageId) {}
     function adminIsAdmin(bool, address) external returns (bytes32 messageId) {}
@@ -53,6 +54,7 @@ contract MockDiggerRedeemMirror is IDiggerRedeemMirror {
     function adminPause(bool) external returns (bytes32 messageId) {}
     function adminRemoveAdmin(bool, address) external returns (bytes32 messageId) {}
     function adminResContract(bool) external returns (bytes32 messageId) {}
+    function adminSetRateConfig(bool, uint128, uint128, uint128, uint128) external returns (bytes32 messageId) {}
     function adminSetRates(bool, uint128, uint128, uint128) external returns (bytes32 messageId) {}
     function adminSetResContract(bool, address) external returns (bytes32 messageId) {}
     function adminUnpause(bool) external returns (bytes32 messageId) {}

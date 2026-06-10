@@ -22,6 +22,7 @@ impl Rates {
 pub struct RedeemState {
     admins: BTreeMap<ActorId, bool>,
     res_contract: ActorId,
+    vara_unit: u128,
     rates: Rates,
     reserve_balance: u128,
     locked_balance: u128,
@@ -44,13 +45,14 @@ struct PendingRedeem {
 }
 
 impl RedeemState {
-    fn new_with_rates(admin: ActorId, res_contract: ActorId, rates: Rates) -> Self {
+    fn new_with_rates(admin: ActorId, res_contract: ActorId, vara_unit: u128, rates: Rates) -> Self {
         let mut admins = BTreeMap::new();
         admins.insert(admin, true);
 
         Self {
             admins,
             res_contract,
+            vara_unit,
             rates,
             reserve_balance: 0,
             locked_balance: 0,
@@ -109,10 +111,14 @@ fn ensure_not_paused(state: &RedeemState) -> Result<(), String> {
 }
 
 fn ensure_nonzero_rates(
+    vara_unit: u128,
     scrst_rate: u128,
     bcrst_rate: u128,
     hcrst_rate: u128,
 ) -> Result<(), String> {
+    if vara_unit == 0 {
+        return Err("VARA unit must be greater than zero".into());
+    }
     if scrst_rate == 0 || bcrst_rate == 0 || hcrst_rate == 0 {
         return Err("redeem rates must be greater than zero".into());
     }
@@ -120,19 +126,28 @@ fn ensure_nonzero_rates(
     Ok(())
 }
 
-fn calculate_payout(rates: &Rates, scrst: u128, bcrst: u128, hcrst: u128) -> Result<u128, String> {
+fn calculate_payout(
+    vara_unit: u128,
+    rates: &Rates,
+    scrst: u128,
+    bcrst: u128,
+    hcrst: u128,
+) -> Result<u128, String> {
     if scrst == 0 && bcrst == 0 && hcrst == 0 {
         return Err("at least one RES amount must be greater than zero".into());
     }
 
     let scrst_value = scrst
         .checked_mul(rates.scrst)
+        .and_then(|value| value.checked_mul(vara_unit))
         .ok_or_else(|| "SCRST payout overflow".to_string())?;
     let bcrst_value = bcrst
         .checked_mul(rates.bcrst)
+        .and_then(|value| value.checked_mul(vara_unit))
         .ok_or_else(|| "BCRST payout overflow".to_string())?;
     let hcrst_value = hcrst
         .checked_mul(rates.hcrst)
+        .and_then(|value| value.checked_mul(vara_unit))
         .ok_or_else(|| "HCRST payout overflow".to_string())?;
 
     scrst_value
@@ -208,6 +223,7 @@ pub enum AdminEvents {
     AdminRemoved([u8; 32]),
     ResContractUpdated([u8; 32], [u8; 32]),
     RatesUpdated(u128, u128, u128),
+    RateConfigUpdated(u128, u128, u128, u128),
     Paused([u8; 32]),
     Unpaused([u8; 32]),
     FundsWithdrawn([u8; 32], u128, u128),
@@ -252,7 +268,7 @@ impl RedeemService<'_> {
             ensure_not_paused(&state)?;
             state.sync_reserve_balance();
 
-            let payout = calculate_payout(&state.rates, scrst, bcrst, hcrst)?;
+            let payout = calculate_payout(state.vara_unit, &state.rates, scrst, bcrst, hcrst)?;
             if payout > state.reserve_balance {
                 return Err("insufficient reserve".into());
             }
@@ -452,6 +468,12 @@ impl RedeemService<'_> {
     pub fn hcrst_rate(&self) -> Result<u128, String> {
         Ok(self.state.borrow().rates.hcrst)
     }
+
+    #[export(unwrap_result)]
+    pub fn vara_unit(&self) -> Result<u128, String> {
+        Ok(self.state.borrow().vara_unit)
+    }
+
 }
 
 impl RedeemService<'_> {
@@ -578,18 +600,42 @@ impl AdminService<'_> {
         bcrst_rate: u128,
         hcrst_rate: u128,
     ) -> Result<(), String> {
-        ensure_nonzero_rates(scrst_rate, bcrst_rate, hcrst_rate)?;
-
         let caller = Syscall::message_source();
         let mut state = self.state.borrow_mut();
 
         ensure_admin(&state, caller)?;
+        ensure_nonzero_rates(state.vara_unit, scrst_rate, bcrst_rate, hcrst_rate)?;
         state.rates = Rates::new(scrst_rate, bcrst_rate, hcrst_rate);
 
         self.emit_event(AdminEvents::RatesUpdated(
             scrst_rate, bcrst_rate, hcrst_rate,
         ))
         .expect("failed to emit rates update event");
+
+        Ok(())
+    }
+
+    #[export(unwrap_result)]
+    pub fn set_rate_config(
+        &mut self,
+        vara_unit: u128,
+        scrst_rate: u128,
+        bcrst_rate: u128,
+        hcrst_rate: u128,
+    ) -> Result<(), String> {
+        ensure_nonzero_rates(vara_unit, scrst_rate, bcrst_rate, hcrst_rate)?;
+
+        let caller = Syscall::message_source();
+        let mut state = self.state.borrow_mut();
+
+        ensure_admin(&state, caller)?;
+        state.vara_unit = vara_unit;
+        state.rates = Rates::new(scrst_rate, bcrst_rate, hcrst_rate);
+
+        self.emit_event(AdminEvents::RateConfigUpdated(
+            vara_unit, scrst_rate, bcrst_rate, hcrst_rate,
+        ))
+        .expect("failed to emit rate config update event");
 
         Ok(())
     }
@@ -667,17 +713,20 @@ pub struct Program {
 impl Program {
     pub fn create(
         res_contract: ActorId,
+        vara_unit: u128,
         scrst_rate: u128,
         bcrst_rate: u128,
         hcrst_rate: u128,
     ) -> Self {
-        ensure_nonzero_rates(scrst_rate, bcrst_rate, hcrst_rate).expect("invalid redeem rates");
+        ensure_nonzero_rates(vara_unit, scrst_rate, bcrst_rate, hcrst_rate)
+            .expect("invalid redeem rate config");
 
         let admin = Syscall::message_source();
         Self {
             state: RefCell::new(RedeemState::new_with_rates(
                 admin,
                 res_contract,
+                vara_unit,
                 Rates::new(scrst_rate, bcrst_rate, hcrst_rate),
             )),
         }
@@ -696,16 +745,35 @@ impl Program {
 mod tests {
     use super::*;
 
+    const VARA_UNIT: u128 = 1_000_000_000_000;
+    const SCRST_RATE: u128 = 66;
+    const BCRST_RATE: u128 = 330;
+    const HCRST_RATE: u128 = 1650;
+
     #[test]
     fn calculates_configured_resource_payout() {
-        let payout = calculate_payout(&Rates::new(66, 330, 1650), 2, 3, 1).expect("payout");
+        let payout = calculate_payout(
+            VARA_UNIT,
+            &Rates::new(SCRST_RATE, BCRST_RATE, HCRST_RATE),
+            2,
+            3,
+            1,
+        )
+        .expect("payout");
 
-        assert_eq!(payout, 2 * 66 + 3 * 330 + 1650);
+        assert_eq!(payout, (2 * 66 + 3 * 330 + 1650) * VARA_UNIT);
     }
 
     #[test]
     fn rejects_empty_redeem() {
-        let error = calculate_payout(&Rates::new(66, 330, 1650), 0, 0, 0).expect_err("must fail");
+        let error = calculate_payout(
+            VARA_UNIT,
+            &Rates::new(SCRST_RATE, BCRST_RATE, HCRST_RATE),
+            0,
+            0,
+            0,
+        )
+        .expect_err("must fail");
 
         assert_eq!(error, "at least one RES amount must be greater than zero");
     }
@@ -713,7 +781,8 @@ mod tests {
     #[test]
     fn detects_payout_overflow() {
         let error =
-            calculate_payout(&Rates::new(66, 330, 1650), u128::MAX, 0, 0).expect_err("must fail");
+            calculate_payout(VARA_UNIT, &Rates::new(66, 330, 1650), u128::MAX, 0, 0)
+                .expect_err("must fail");
 
         assert_eq!(error, "SCRST payout overflow");
     }

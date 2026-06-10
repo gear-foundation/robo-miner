@@ -16,6 +16,7 @@ contract DiggerL1AdapterTest {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
 
     address private constant USER = address(0xA11CE);
+    uint256 private constant VARA_UNIT = 1_000_000_000_000;
     MockDiggerResVmtMirror private resMirror;
     MockDiggerRedeemMirror private redeemMirror;
     DiggerL1Adapter private adapter;
@@ -221,7 +222,7 @@ contract DiggerL1AdapterTest {
         DiggerL1Adapter thinAdapter = new DiggerL1Adapter(address(resMirror), address(redeemMirror));
         resMirror.setAdapter(address(thinAdapter));
         redeemMirror.setAdapter(address(thinAdapter));
-        vm.deal(address(thinAdapter), 65 ether);
+        vm.deal(address(thinAdapter), 65 * VARA_UNIT);
 
         bytes32 messageId = thinAdapter.requestMint(USER, 1, 0, 0);
         resMirror.succeed(messageId);

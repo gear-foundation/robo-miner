@@ -57,6 +57,10 @@ user
 
 On Mirror error, the adapter re-mints the burned wrapper tokens to the user and unreserves the payout.
 
+Payouts use the same unit scale as `digger-redeem`: `VARA_UNIT = 1_000_000_000_000`.
+The adapter quote for `1 SCRST` is `66 * VARA_UNIT`, so `replyOn_redeemRedeem`
+matches the Vara.eth redeem callback.
+
 ### Current Spike Boundary
 
 The adapter imports the generated Sails Solidity ABI wrappers from `src/generated` and uses these methods:

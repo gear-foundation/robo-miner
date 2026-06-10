@@ -12,17 +12,19 @@ const MINTER_ID: u64 = 77;
 const PLAYER_ID: u64 = 99;
 const OTHER_ID: u64 = 123;
 
-const RESERVE_VALUE: u128 = 10_000;
+const VARA_UNIT: u128 = 1_000_000_000_000;
+const RESERVE_VALUE: u128 = 10_000 * VARA_UNIT;
 const SCRST_RATE: u128 = 66;
 const BCRST_RATE: u128 = 330;
 const HCRST_RATE: u128 = 1650;
 const SCRST: u128 = 2;
 const BCRST: u128 = 3;
 const HCRST: u128 = 1;
-const EXPECTED_PAYOUT: u128 = 2 * SCRST_RATE + 3 * BCRST_RATE + HCRST_RATE;
+const EXPECTED_PAYOUT: u128 = (2 * 66 + 3 * 330 + 1650) * VARA_UNIT;
 const SCRST_ID: u128 = 0;
 const BCRST_ID: u128 = 1;
 const HCRST_ID: u128 = 2;
+const TEST_ACCOUNT_BALANCE: u128 = 100_000 * VARA_UNIT;
 
 #[tokio::test]
 async fn redeem_burns_res_in_vmt_before_paying_vara() {
@@ -126,6 +128,8 @@ async fn standalone_redeem_initializes_reserve_config_and_rates() {
         redeem_service.bcrst_rate().await.unwrap();
     let hcrst_rate: sails_rs::Result<u128, sails_rs::String> =
         redeem_service.hcrst_rate().await.unwrap();
+    let vara_unit: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.vara_unit().await.unwrap();
     let reserve_balance: sails_rs::Result<u128, sails_rs::String> =
         redeem_service.reserve_balance().await.unwrap();
 
@@ -135,6 +139,7 @@ async fn standalone_redeem_initializes_reserve_config_and_rates() {
     assert_eq!(scrst_rate, Ok(SCRST_RATE));
     assert_eq!(bcrst_rate, Ok(BCRST_RATE));
     assert_eq!(hcrst_rate, Ok(HCRST_RATE));
+    assert_eq!(vara_unit, Ok(VARA_UNIT));
     assert_eq!(reserve_balance, Ok(0));
 }
 
@@ -309,7 +314,7 @@ async fn redeem_rejects_when_vmt_burn_fails_and_restores_reserve() {
         .with_actor_id(PLAYER_ID.into())
         .await
         .unwrap();
-    assert_eq!(requested_payout, Ok(2 * SCRST_RATE));
+    assert_eq!(requested_payout, Ok(2 * SCRST_RATE * VARA_UNIT));
     assert_eq!(
         redeem_events.next().await.unwrap(),
         (
@@ -320,7 +325,7 @@ async fn redeem_rejects_when_vmt_burn_fails_and_restores_reserve() {
                 2,
                 0,
                 0,
-                2 * SCRST_RATE
+                2 * SCRST_RATE * VARA_UNIT
             )
         )
     );
@@ -334,7 +339,7 @@ async fn redeem_rejects_when_vmt_burn_fails_and_restores_reserve() {
                 2,
                 0,
                 0,
-                2 * SCRST_RATE
+                2 * SCRST_RATE * VARA_UNIT
             )
         )
     );
@@ -419,7 +424,7 @@ async fn direct_balance_top_up_counts_as_reserve_for_redeem() {
         .with_actor_id(PLAYER_ID.into())
         .await
         .unwrap();
-    assert_eq!(payout, Ok(SCRST * SCRST_RATE));
+    assert_eq!(payout, Ok(SCRST * SCRST_RATE * VARA_UNIT));
 }
 
 #[tokio::test]
@@ -465,7 +470,7 @@ async fn configured_constructor_and_admin_rate_update_control_payout() {
         .with_actor_id(PLAYER_ID.into())
         .await
         .unwrap();
-    assert_eq!(payout, Ok(2 * 1 + 3 * 2 + 3));
+    assert_eq!(payout, Ok((2 * 1 + 3 * 2 + 3) * VARA_UNIT));
 }
 
 #[tokio::test]
@@ -544,7 +549,7 @@ async fn pause_blocks_redeem_until_unpaused() {
         .with_actor_id(PLAYER_ID.into())
         .await
         .unwrap();
-    assert_eq!(payout, Ok(SCRST * SCRST_RATE));
+    assert_eq!(payout, Ok(SCRST * SCRST_RATE * VARA_UNIT));
 }
 
 async fn fund_reserve_and_mint_player_res(
@@ -585,7 +590,7 @@ async fn deploy_pair(
             redeem_code_id,
             format!("{salt_prefix}-redeem").into_bytes(),
         )
-        .create(ActorId::zero(), SCRST_RATE, BCRST_RATE, HCRST_RATE)
+        .create(ActorId::zero(), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE)
         .await
         .unwrap();
 
@@ -616,7 +621,7 @@ async fn deploy_redeem_program(
         code_id,
         salt.as_bytes().to_vec(),
     )
-    .create(res_contract, SCRST_RATE, BCRST_RATE, HCRST_RATE)
+    .create(res_contract, VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE)
     .await
     .unwrap()
 }
@@ -624,10 +629,10 @@ async fn deploy_redeem_program(
 fn create_env() -> (GtestEnv, CodeId, CodeId) {
     let system = System::new();
     system.init_logger_with_default_filter("gwasm=debug,gtest=info,sails_rs=debug");
-    system.mint_to(ADMIN_ID, 1_000_000_000_000_000);
-    system.mint_to(MINTER_ID, 1_000_000_000_000_000);
-    system.mint_to(PLAYER_ID, 1_000_000_000_000_000);
-    system.mint_to(OTHER_ID, 1_000_000_000_000_000);
+    system.mint_to(ADMIN_ID, TEST_ACCOUNT_BALANCE);
+    system.mint_to(MINTER_ID, TEST_ACCOUNT_BALANCE);
+    system.mint_to(PLAYER_ID, TEST_ACCOUNT_BALANCE);
+    system.mint_to(OTHER_ID, TEST_ACCOUNT_BALANCE);
 
     let redeem_code_id = system.submit_code(::digger_redeem::WASM_BINARY);
     let res_code_id = system.submit_code(::digger_res_vmt::WASM_BINARY);

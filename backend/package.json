@@ -3,21 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Modular monolith backend for Web3 Miner: game master, world registry, indexer, rental, LP bonus, and jobs.",
+  "description": "Modular monolith backend for Web3 Miner: game master, world registry, indexer, rental, leaderboard, and jobs.",
   "scripts": {
     "gen": "node src/modules/gameMaster/operator.js",
     "start": "node src/modules/gameMaster/operator.js",
+    "api": "node src/api/server.js",
     "query": "node src/modules/gameMaster/query.js",
     "gamemaster": "node src/modules/gameMaster/gamemaster.js",
     "gamemaster:create": "node src/modules/gameMaster/gamemaster.js create",
     "gamemaster:list": "node src/modules/gameMaster/gamemaster.js list",
-    "gamemaster:manifest": "node src/modules/gameMaster/gamemaster.js manifest"
+    "gamemaster:manifest": "node src/modules/gameMaster/gamemaster.js manifest",
+    "registry:sync": "node src/jobs/registrySync.js",
+    "digger:registry": "node src/jobs/diggerRegistry.js",
+    "indexer": "node src/jobs/indexer.js",
+    "rental:top-up": "node src/jobs/diggerRentalTopUp.js",
+    "scheduler": "node src/jobs/scheduler.js"
   },
   "dependencies": {
     "@gear-js/api": "^0.45.0",
     "@polkadot/api": "^16.5.6",
     "@polkadot/util": "^14.0.3",
-    "@vara-eth/api": "latest",
+    "@vara-eth/api": "0.5.0",
     "kzg-wasm": "1.0.0",
     "sails-js": "https://github.com/gear-tech/sails/releases/download/js/v1.0.0-beta.1/sails-js.tgz",
     "viem": "^2.39.0"

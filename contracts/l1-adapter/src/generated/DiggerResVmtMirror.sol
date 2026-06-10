@@ -34,24 +34,11 @@ interface IDiggerResVmtMirror {
 
     function vmtBalanceOf(bool _callReply, address account, uint128 id) external returns (bytes32 messageId);
 
-    function vmtBatchTransferFrom(
-        bool _callReply,
-        address from,
-        address to,
-        uint128[] calldata ids,
-        uint128[] calldata amounts
-    ) external returns (bytes32 messageId);
+    function vmtBatchTransferFrom(bool _callReply, address from, address to, uint128[] calldata ids, uint128[] calldata amounts) external returns (bytes32 messageId);
 
     function vmtBcrstTokenId(bool _callReply) external returns (bytes32 messageId);
 
-    function vmtBurnForRedeem(
-        bool _callReply,
-        uint128 redeemId,
-        address owner,
-        uint128 scrst,
-        uint128 bcrst,
-        uint128 hcrst
-    ) external returns (bytes32 messageId);
+    function vmtBurnForRedeem(bool _callReply, uint128 redeemId, address owner, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId);
 
     function vmtDecimals(bool _callReply) external returns (bytes32 messageId);
 
@@ -59,9 +46,7 @@ interface IDiggerResVmtMirror {
 
     function vmtIsApproved(bool _callReply, address account, address operator) external returns (bytes32 messageId);
 
-    function vmtMintResources(bool _callReply, address to, uint128 scrst, uint128 bcrst, uint128 hcrst)
-        external
-        returns (bytes32 messageId);
+    function vmtMintResources(bool _callReply, address to, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId);
 
     function vmtName(bool _callReply) external returns (bytes32 messageId);
 
@@ -71,9 +56,7 @@ interface IDiggerResVmtMirror {
 
     function vmtTotalSupplyOf(bool _callReply, uint128 id) external returns (bytes32 messageId);
 
-    function vmtTransferFrom(bool _callReply, address from, address to, uint128 id, uint128 amount)
-        external
-        returns (bytes32 messageId);
+    function vmtTransferFrom(bool _callReply, address from, address to, uint128 id, uint128 amount) external returns (bytes32 messageId);
 
     function adminAddAdmin(bool _callReply, address admin) external returns (bytes32 messageId);
 
@@ -109,24 +92,11 @@ contract DiggerResVmtMirrorAbi is IDiggerResVmtMirror {
 
     function vmtBalanceOf(bool _callReply, address account, uint128 id) external returns (bytes32 messageId) {}
 
-    function vmtBatchTransferFrom(
-        bool _callReply,
-        address from,
-        address to,
-        uint128[] calldata ids,
-        uint128[] calldata amounts
-    ) external returns (bytes32 messageId) {}
+    function vmtBatchTransferFrom(bool _callReply, address from, address to, uint128[] calldata ids, uint128[] calldata amounts) external returns (bytes32 messageId) {}
 
     function vmtBcrstTokenId(bool _callReply) external returns (bytes32 messageId) {}
 
-    function vmtBurnForRedeem(
-        bool _callReply,
-        uint128 redeemId,
-        address owner,
-        uint128 scrst,
-        uint128 bcrst,
-        uint128 hcrst
-    ) external returns (bytes32 messageId) {}
+    function vmtBurnForRedeem(bool _callReply, uint128 redeemId, address owner, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId) {}
 
     function vmtDecimals(bool _callReply) external returns (bytes32 messageId) {}
 
@@ -134,10 +104,7 @@ contract DiggerResVmtMirrorAbi is IDiggerResVmtMirror {
 
     function vmtIsApproved(bool _callReply, address account, address operator) external returns (bytes32 messageId) {}
 
-    function vmtMintResources(bool _callReply, address to, uint128 scrst, uint128 bcrst, uint128 hcrst)
-        external
-        returns (bytes32 messageId)
-    {}
+    function vmtMintResources(bool _callReply, address to, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId) {}
 
     function vmtName(bool _callReply) external returns (bytes32 messageId) {}
 
@@ -147,10 +114,7 @@ contract DiggerResVmtMirrorAbi is IDiggerResVmtMirror {
 
     function vmtTotalSupplyOf(bool _callReply, uint128 id) external returns (bytes32 messageId) {}
 
-    function vmtTransferFrom(bool _callReply, address from, address to, uint128 id, uint128 amount)
-        external
-        returns (bytes32 messageId)
-    {}
+    function vmtTransferFrom(bool _callReply, address from, address to, uint128 id, uint128 amount) external returns (bytes32 messageId) {}
 
     function adminAddAdmin(bool _callReply, address admin) external returns (bytes32 messageId) {}
 
@@ -371,11 +335,7 @@ contract DiggerResVmtMirrorCaller is IDiggerResVmtMirrorCallbacks {
         // TODO: implement this
     }
 
-    function onErrorReply(bytes32 messageId, bytes calldata payload, bytes4 replyCode)
-        external
-        payable
-        onlyVaraEthProgram
-    {
+    function onErrorReply(bytes32 messageId, bytes calldata payload, bytes4 replyCode) external payable onlyVaraEthProgram {
         // TODO: implement this
     }
 }

@@ -32,6 +32,7 @@ export const CHAIN = {
     .filter(Boolean),
   // Optional thin registry / leaderboard program (aggregate across maps).
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
+  backendUrl: env.VITE_BACKEND_URL || '',
 
   // Fallback poll interval (ms) if push event subscription isn't used.
   pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),

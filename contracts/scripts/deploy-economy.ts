@@ -44,6 +44,7 @@ const DEFAULTS = {
   DIGGER_EVENT_TIMEOUT_MS: "180000",
   DIGGER_PROMISE_TIMEOUT_MS: "60000",
   DIGGER_ECONOMY_TOP_UP: "100000000000000",
+  VARA_UNIT: "1000000000000",
   SCRST_RATE: "66",
   BCRST_RATE: "330",
   HCRST_RATE: "1650",
@@ -64,6 +65,7 @@ type CliArgs = {
   addMinter?: string[];
   topUp?: string;
   reserveTopUp?: string;
+  varaUnit?: string;
   scrstRate?: string;
   bcrstRate?: string;
   hcrstRate?: string;
@@ -125,9 +127,10 @@ Inputs:
   --add-minter           Extra minter to add after deploy. Can be passed multiple times.
   --top-up               Initial executable balance for each created program.
   --reserve-top-up       Native value sent to redeem.deposit_reserve.
-  --scrst-rate           Defaults to ${DEFAULTS.SCRST_RATE}.
-  --bcrst-rate           Defaults to ${DEFAULTS.BCRST_RATE}.
-  --hcrst-rate           Defaults to ${DEFAULTS.HCRST_RATE}.
+  --vara-unit            Minimal units per 1 display VARA. Defaults to ${DEFAULTS.VARA_UNIT}.
+  --scrst-rate           Display VARA per SCRST. Defaults to ${DEFAULTS.SCRST_RATE}.
+  --bcrst-rate           Display VARA per BCRST. Defaults to ${DEFAULTS.BCRST_RATE}.
+  --hcrst-rate           Display VARA per HCRST. Defaults to ${DEFAULTS.HCRST_RATE}.
   --smoke                Mint 1/1/1 RES to signer, then redeem it. Requires signer to be a minter and reserve to be funded.
   --no-smoke             Skip smoke even if --reserve-top-up is set.
   --manifest             Output manifest path. Defaults to deployments/digger-economy-<timestamp>.json.
@@ -179,6 +182,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--reserve-top-up":
         args.reserveTopUp = next();
+        break;
+      case "--vara-unit":
+        args.varaUnit = next();
         break;
       case "--scrst-rate":
         args.scrstRate = next();
@@ -535,6 +541,7 @@ async function main() {
 
   const topUp = parseAmount(args.topUp || envValue("DIGGER_ECONOMY_TOP_UP") || DEFAULTS.DIGGER_ECONOMY_TOP_UP, "DIGGER_ECONOMY_TOP_UP");
   const reserveTopUp = parseAmount(args.reserveTopUp || envValue("DIGGER_REDEEM_RESERVE_TOP_UP"), "DIGGER_REDEEM_RESERVE_TOP_UP");
+  const varaUnit = parseU128(args.varaUnit || envValue("VARA_UNIT") || DEFAULTS.VARA_UNIT, "VARA_UNIT");
   const rates = {
     scrst: parseU128(args.scrstRate || envValue("SCRST_RATE") || DEFAULTS.SCRST_RATE, "SCRST_RATE"),
     bcrst: parseU128(args.bcrstRate || envValue("BCRST_RATE") || DEFAULTS.BCRST_RATE, "BCRST_RATE"),
@@ -546,12 +553,15 @@ async function main() {
 
   const resSails = await loadSails(RES_IDL_PATH);
   const redeemSails = await loadSails(REDEEM_IDL_PATH);
+  if (!resSails.ctors?.Create) throw new Error("res-vmt IDL does not contain Create constructor");
+  if (!redeemSails.ctors?.Create) throw new Error("redeem IDL does not contain Create constructor");
   const smoke = Boolean(args.smoke && !args.noSmoke);
 
   console.log("[economy] prepared", {
     topUp: topUp.toString(),
     reserveTopUp: reserveTopUp.toString(),
     rates,
+    varaUnit: varaUnit.toString(),
     smoke,
     skipBuild: Boolean(args.skipBuild),
     dryRun: Boolean(args.dryRun),
@@ -586,7 +596,7 @@ async function main() {
     }
 
     if (!args.skipRedeemInit) {
-      const createRedeem = redeemSails.ctors.Create.encodePayload(actorIdFromAddress(resProgram), rates.scrst, rates.bcrst, rates.hcrst) as Hex;
+      const createRedeem = redeemSails.ctors.Create.encodePayload(actorIdFromAddress(resProgram), varaUnit, rates.scrst, rates.bcrst, rates.hcrst) as Hex;
       await sendMirrorMessage(connection.api, redeemProgram, "redeem.create", createRedeem, 0n, promiseTimeoutMs);
     }
 
@@ -637,6 +647,7 @@ async function main() {
         codeId: redeemCodeId,
         resContract: resProgram,
         resContractActor: actorIdFromAddress(resProgram),
+        varaUnit: varaUnit.toString(),
         rates,
         reserveTopUp: reserveTopUp.toString(),
       },

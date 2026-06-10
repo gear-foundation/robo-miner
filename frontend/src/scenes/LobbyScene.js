@@ -4,6 +4,7 @@ import { generateWorld } from '../world.js';
 import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
 import { CHAIN, chainReady } from '../chain/config.js';
+import { backendEnabled, fetchLiveWorlds } from '../backend/api.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
 // preview of that mode's generated map and a WATCH button that drops into the
@@ -16,9 +17,11 @@ export default class LobbyScene extends Phaser.Scene {
 
   create() {
     this.cleanupDOM();
+    this.backendWorlds = [];
     const W = this.scale.width, H = this.scale.height;
     this.add.graphics().fillStyle(0x20140a, 1).fillRect(0, 0, W, H);
     this.buildDOM();
+    this.refreshBackendWorlds();
     this.scale.on('resize', this.onResize, this);
     this.events.once('shutdown', () => this.destroyDOM());
     this.events.once('destroy', () => this.destroyDOM());
@@ -27,6 +30,7 @@ export default class LobbyScene extends Phaser.Scene {
   onResize() { this.scene.restart(); }
 
   buildDOM() {
+    this.cleanupDOM();
     const root = document.createElement('div');
     root.id = 'arena-lobby';
     root.style.cssText = `position:fixed; inset:0; z-index:20; overflow:auto;
@@ -45,7 +49,10 @@ export default class LobbyScene extends Phaser.Scene {
 
     const grid = document.createElement('div');
     grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:22px;justify-content:center;max-width:1120px;margin:26px auto 0';
-    const liveWorlds = CHAIN.worldProgramIds.filter((id) => chainReady(id));
+    const liveWorlds = [...new Set([
+      ...(this.backendWorlds || []),
+      ...CHAIN.worldProgramIds,
+    ])].filter((id) => chainReady(id));
     if (liveWorlds.length) {
       liveWorlds.forEach((programId, i) => grid.appendChild(this.makeChainCard(programId, i)));
     } else {
@@ -55,6 +62,19 @@ export default class LobbyScene extends Phaser.Scene {
 
     document.body.appendChild(root);
     this.lobbyEl = root;
+  }
+
+  async refreshBackendWorlds() {
+    if (!CHAIN.enabled || !backendEnabled()) return;
+    try {
+      const worlds = await fetchLiveWorlds();
+      this.backendWorlds = worlds
+        .map((world) => world.programId)
+        .filter(Boolean);
+      if (this.lobbyEl) this.buildDOM();
+    } catch (error) {
+      console.warn('[backend] failed to load live worlds', error);
+    }
   }
 
   makeCard(key) {

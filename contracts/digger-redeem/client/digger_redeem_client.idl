@@ -1,7 +1,7 @@
 
 !@sails: 1.0.0-beta.5
 
-service Redeem@0x9077a36884dff78d {
+service Redeem@0x74c0432f9f172e15 {
     events {
         RedeemCanceled(u128, [u8; 32], u128, u128, u128, u128),
         Redeemed([u8; 32], u128, u128, u128, u128),
@@ -37,15 +37,18 @@ service Redeem@0x9077a36884dff78d {
         TotalRedeemedHcrst() -> u128 throws String;
         @query
         TotalRedeemedScrst() -> u128 throws String;
+        @query
+        VaraUnit() -> u128 throws String;
     }
 }
 
-service Admin@0x55e01d646e511900 {
+service Admin@0x30a6e4a3e0432e45 {
     events {
         AdminAdded([u8; 32]),
         AdminRemoved([u8; 32]),
         FundsWithdrawn([u8; 32], u128, u128),
         Paused([u8; 32]),
+        RateConfigUpdated(u128, u128, u128, u128),
         RatesUpdated(u128, u128, u128),
         ResContractUpdated([u8; 32], [u8; 32]),
         Unpaused([u8; 32]),
@@ -62,6 +65,7 @@ service Admin@0x55e01d646e511900 {
         RemoveAdmin(admin: ActorId) -> bool throws String;
         @query
         ResContract() -> ActorId throws String;
+        SetRateConfig(vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetRates(scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetResContract(res_contract: ActorId) throws String;
         Unpause() throws String;
@@ -72,10 +76,10 @@ service Admin@0x55e01d646e511900 {
 
 program DiggerRedeemClient {
     constructors {
-        Create(res_contract: ActorId, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
+        Create(res_contract: ActorId, vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
     }
     services {
-        Redeem@0x9077a36884dff78d,
-        Admin@0x55e01d646e511900,
+        Redeem@0x74c0432f9f172e15,
+        Admin@0x30a6e4a3e0432e45,
     }
 }

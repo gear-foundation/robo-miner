@@ -20,15 +20,15 @@ interface IDiggerRedeemMirror {
 
     event Paused(uint8[32]);
 
+    event RateConfigUpdated(uint128, uint128, uint128, uint128);
+
     event RatesUpdated(uint128, uint128, uint128);
 
     event ResContractUpdated(uint8[32], uint8[32]);
 
     event Unpaused(uint8[32]);
 
-    function create(bool _callReply, address resContract, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate)
-        external
-        returns (bytes32 messageId);
+    function create(bool _callReply, address resContract, uint128 varaUnit, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId);
 
     function redeemAvailableReserve(bool _callReply) external returns (bytes32 messageId);
 
@@ -46,9 +46,7 @@ interface IDiggerRedeemMirror {
 
     function redeemPendingRedeemCount(bool _callReply) external returns (bytes32 messageId);
 
-    function redeemRedeem(bool _callReply, uint128 scrst, uint128 bcrst, uint128 hcrst)
-        external
-        returns (bytes32 messageId);
+    function redeemRedeem(bool _callReply, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId);
 
     function redeemReserveBalance(bool _callReply) external returns (bytes32 messageId);
 
@@ -61,6 +59,8 @@ interface IDiggerRedeemMirror {
     function redeemTotalRedeemedHcrst(bool _callReply) external returns (bytes32 messageId);
 
     function redeemTotalRedeemedScrst(bool _callReply) external returns (bytes32 messageId);
+
+    function redeemVaraUnit(bool _callReply) external returns (bytes32 messageId);
 
     function adminAddAdmin(bool _callReply, address admin) external returns (bytes32 messageId);
 
@@ -76,9 +76,9 @@ interface IDiggerRedeemMirror {
 
     function adminResContract(bool _callReply) external returns (bytes32 messageId);
 
-    function adminSetRates(bool _callReply, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate)
-        external
-        returns (bytes32 messageId);
+    function adminSetRateConfig(bool _callReply, uint128 varaUnit, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId);
+
+    function adminSetRates(bool _callReply, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId);
 
     function adminSetResContract(bool _callReply, address resContract) external returns (bytes32 messageId);
 
@@ -88,10 +88,7 @@ interface IDiggerRedeemMirror {
 }
 
 contract DiggerRedeemMirrorAbi is IDiggerRedeemMirror {
-    function create(bool _callReply, address resContract, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate)
-        external
-        returns (bytes32 messageId)
-    {}
+    function create(bool _callReply, address resContract, uint128 varaUnit, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId) {}
 
     function redeemAvailableReserve(bool _callReply) external returns (bytes32 messageId) {}
 
@@ -109,10 +106,7 @@ contract DiggerRedeemMirrorAbi is IDiggerRedeemMirror {
 
     function redeemPendingRedeemCount(bool _callReply) external returns (bytes32 messageId) {}
 
-    function redeemRedeem(bool _callReply, uint128 scrst, uint128 bcrst, uint128 hcrst)
-        external
-        returns (bytes32 messageId)
-    {}
+    function redeemRedeem(bool _callReply, uint128 scrst, uint128 bcrst, uint128 hcrst) external returns (bytes32 messageId) {}
 
     function redeemReserveBalance(bool _callReply) external returns (bytes32 messageId) {}
 
@@ -125,6 +119,8 @@ contract DiggerRedeemMirrorAbi is IDiggerRedeemMirror {
     function redeemTotalRedeemedHcrst(bool _callReply) external returns (bytes32 messageId) {}
 
     function redeemTotalRedeemedScrst(bool _callReply) external returns (bytes32 messageId) {}
+
+    function redeemVaraUnit(bool _callReply) external returns (bytes32 messageId) {}
 
     function adminAddAdmin(bool _callReply, address admin) external returns (bytes32 messageId) {}
 
@@ -140,10 +136,9 @@ contract DiggerRedeemMirrorAbi is IDiggerRedeemMirror {
 
     function adminResContract(bool _callReply) external returns (bytes32 messageId) {}
 
-    function adminSetRates(bool _callReply, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate)
-        external
-        returns (bytes32 messageId)
-    {}
+    function adminSetRateConfig(bool _callReply, uint128 varaUnit, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId) {}
+
+    function adminSetRates(bool _callReply, uint128 scrstRate, uint128 bcrstRate, uint128 hcrstRate) external returns (bytes32 messageId) {}
 
     function adminSetResContract(bool _callReply, address resContract) external returns (bytes32 messageId) {}
 
@@ -185,6 +180,8 @@ interface IDiggerRedeemMirrorCallbacks {
 
     function replyOn_redeemTotalRedeemedScrst(bytes32 messageId, uint128 reply) external;
 
+    function replyOn_redeemVaraUnit(bytes32 messageId, uint128 reply) external;
+
     function replyOn_adminAddAdmin(bytes32 messageId, bool reply) external;
 
     function replyOn_adminAdmins(bytes32 messageId, address[] calldata reply) external;
@@ -198,6 +195,8 @@ interface IDiggerRedeemMirrorCallbacks {
     function replyOn_adminRemoveAdmin(bytes32 messageId, bool reply) external;
 
     function replyOn_adminResContract(bytes32 messageId, address reply) external;
+
+    function replyOn_adminSetRateConfig(bytes32 messageId) external;
 
     function replyOn_adminSetRates(bytes32 messageId) external;
 
@@ -294,6 +293,10 @@ contract DiggerRedeemMirrorCaller is IDiggerRedeemMirrorCallbacks {
         // TODO: implement this
     }
 
+    function replyOn_redeemVaraUnit(bytes32 messageId, uint128 reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
     function replyOn_adminAddAdmin(bytes32 messageId, bool reply) external onlyVaraEthProgram {
         // TODO: implement this
     }
@@ -322,6 +325,10 @@ contract DiggerRedeemMirrorCaller is IDiggerRedeemMirrorCallbacks {
         // TODO: implement this
     }
 
+    function replyOn_adminSetRateConfig(bytes32 messageId) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
     function replyOn_adminSetRates(bytes32 messageId) external onlyVaraEthProgram {
         // TODO: implement this
     }
@@ -338,11 +345,7 @@ contract DiggerRedeemMirrorCaller is IDiggerRedeemMirrorCallbacks {
         // TODO: implement this
     }
 
-    function onErrorReply(bytes32 messageId, bytes calldata payload, bytes4 replyCode)
-        external
-        payable
-        onlyVaraEthProgram
-    {
+    function onErrorReply(bytes32 messageId, bytes calldata payload, bytes4 replyCode) external payable onlyVaraEthProgram {
         // TODO: implement this
     }
 }

@@ -43,16 +43,16 @@ const ZERO_ACTOR_RE = /^0x0+$/i;
 const CHAIN_MOVE_MS = 180;
 const CHAIN_DIG_PULSE_MS = 240;
 const MAX_BLOCK_BACKFILL = 24;
+const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
 
 // Current live DiggerWorld testnet tile ids differ from the older frontend
 // constants. Keep the renderer stable by translating contract cells at the edge.
 const CONTRACT_TO_RENDER_TILE = {
   0: BLOCK.SKY,   // empty/drilled
   1: BLOCK.DIRT,
-  2: BLOCK.SKY,   // caves / air pockets
-  3: BLOCK.STONE,
-  4: BLOCK.LAVA,
-  5: BLOCK.LADDER,
+  2: BLOCK.STONE,
+  3: BLOCK.LAVA,
+  4: BLOCK.LADDER,
   10: BLOCK.SCRST,
   11: BLOCK.BCRST,
   12: BLOCK.HCRST,
@@ -410,7 +410,7 @@ export class ChainSource {
         }
         break;
       case 'ladder_placed':
-        this._setRawTile(event.x, event.rawY, 5);
+        this._setRawTile(event.x, event.rawY, 4);
         if (miner && Number.isFinite(event.laddersRemaining)) {
           miner.items.ladder = event.laddersRemaining;
         }
@@ -484,7 +484,7 @@ export class ChainSource {
   }
 
   _visualY(rawY) {
-    const rawSurface = this.world?.rawSurface ?? this.config?.[6] ?? 1;
+    const rawSurface = this.world?.rawSurface ?? DEFAULT_RAW_SURFACE;
     const surface = this.world?.surface ?? 4;
     const yOffset = this.world?.yOffset ?? Math.max(0, surface - rawSurface);
     return rawToVisualY(rawY, surface, rawSurface, yOffset);
@@ -606,7 +606,7 @@ export class ChainSource {
   _applySnapshot(snap, opts = {}) {
     const emitEvents = opts.emitEvents !== false;
     const [W = 40, rawH = 64] = snap.config;
-    const rawSurface = Number.isFinite(snap.config[6]) ? snap.config[6] : 1;
+    const rawSurface = DEFAULT_RAW_SURFACE;
     const surface = 4;
     const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid, W, rawH, rawSurface, surface);
 

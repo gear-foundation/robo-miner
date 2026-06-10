@@ -10,6 +10,8 @@
     "upload-map:verify": "tsx scripts/upload-map.ts --verify-only",
     "reload-program": "tsx scripts/reload-program.ts",
     "reload-program:dry-run": "tsx scripts/reload-program.ts --dry-run",
+    "deploy-economy": "tsx scripts/deploy-economy.ts",
+    "deploy-economy:dry-run": "tsx scripts/deploy-economy.ts --dry-run",
     "deploy-proxy": "tsx scripts/deploy-proxy.ts",
     "deploy-proxy:dry-run": "tsx scripts/deploy-proxy.ts --dry-run",
     "proxy-fleet": "tsx scripts/proxy-fleet.ts",

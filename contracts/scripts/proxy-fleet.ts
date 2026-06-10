@@ -30,6 +30,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { unwrapInjectedPromise } from "./injected-reply.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -59,7 +61,13 @@ const DIR_UP = 0;
 const DIR_RIGHT = 1;
 const DIR_DOWN = 2;
 const DIR_LEFT = 3;
-const SIDE_LOOKAHEAD_DEPTH = 5;
+const DIR_CURRENT = 4;
+const SIDE_LOOKAHEAD_DEPTH = 0;
+const SIDE_LOOKAHEAD_RADIUS = 10;
+const RESOURCE_SEARCH_MAX_DISTANCE = 24;
+const RESOURCE_DISTANCE_PENALTY = 16;
+const RESOURCE_DESCENT_PENALTY = 32;
+const RESOURCE_ASCENT_PENALTY = 8;
 
 const TILE_EMPTY = 0;
 const TILE_DIRT = 1;
@@ -92,6 +100,8 @@ type CliArgs = {
   noDeploy?: boolean;
   noPlay?: boolean;
   untilGold?: boolean;
+  goldAndSurface?: boolean;
+  surfaceCarried?: boolean;
   help?: boolean;
 };
 
@@ -99,6 +109,15 @@ type Connection = {
   api: VaraEthApi;
   accountAddress: Address;
   disconnect: () => Promise<void>;
+};
+
+type InjectedReplyMetrics = {
+  programId: Address;
+  messageId: Hex;
+  txHash: Hex;
+  promiseMs: number;
+  replyCode: Hex | null;
+  payloadBytes: number;
 };
 
 type SessionView = {
@@ -125,9 +144,9 @@ type AgentView = {
 };
 
 type PlannedAction = {
-  fn: "Drill" | "MoveAgent";
-  direction: number;
-  target: { x: number; y: number };
+  fn: "Drill" | "MoveAgent" | "PlaceLadder" | "Surface";
+  direction?: number;
+  target?: { x: number; y: number };
   reason: string;
 };
 
@@ -137,12 +156,32 @@ type ResourceLookahead = {
   tile: number;
   direction: number;
   depth: number;
+  horizontalDistance: number;
   score: number;
   exitLaddersNeeded: number;
 };
 
 type ResourcePlannedAction = PlannedAction & {
   resource: ResourceLookahead;
+};
+
+type PathStep = {
+  from: string;
+  direction: number;
+  x: number;
+  y: number;
+  distance: number;
+};
+
+type ResourcePathCandidate = {
+  x: number;
+  y: number;
+  tile: number;
+  distance: number;
+  descent: number;
+  ascent: number;
+  score: number;
+  first: PathStep;
 };
 
 type GoldPlannedAction = PlannedAction & {
@@ -167,6 +206,9 @@ Options:
   --create          Number of additional proxies to create. Default 9.
   --steps           Simple gameplay steps per proxy. Default 2.
   --until-gold      Move agents toward nearest HCRST and stop at first gold.
+  --gold-and-surface
+                    Mine one HCRST and carry it back to surface via ladders.
+  --surface-carried Carry current backpack resources back to surface and bank them.
   --gold-strategy   HCRST strategy: round-robin or nearest. Default round-robin.
   --max-rounds      Safety limit for --until-gold. Rounds for round-robin, moves for nearest. Default 200.
   --proxy-indexes   One-based proxy indexes to play, comma-separated. Example: 2,5.
@@ -250,6 +292,15 @@ function parseArgs(argv: string[]): CliArgs {
       case "--until-gold":
       case "--gold":
         args.untilGold = true;
+        break;
+      case "--gold-and-surface":
+      case "--mine-gold-and-surface":
+        args.goldAndSurface = true;
+        args.untilGold = true;
+        break;
+      case "--surface-carried":
+      case "--surface":
+        args.surfaceCarried = true;
         break;
       case "--help":
       case "-h":
@@ -369,6 +420,10 @@ async function loadSails(idlPath: string): Promise<SailsProgram> {
 
 function normalizeReplyCode(code: ReplyCode | string): Hex {
   return typeof code === "string" ? (code as Hex) : bytesToHex(code.toBytes());
+}
+
+function payloadBytes(payload?: Hex): number {
+  return payload ? Math.max(0, (payload.length - 2) / 2) : 0;
 }
 
 function assertSuccessReply(code: ReplyCode | string, payload?: Hex) {
@@ -501,7 +556,18 @@ async function sendInjectedMessage(
   const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
   validatorMode === "slot" ? await injected.setSlotValidator() : injected.setDefaultValidator();
   console.log(`[${label}] injected`, { programId, messageId: injected.messageId, txHash: injected.txHash });
-  const reply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const promiseStartedAt = Date.now();
+  const rawReply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const promiseMs = Date.now() - promiseStartedAt;
+  const reply = unwrapInjectedPromise(rawReply, label);
+  console.log(`[${label}] injected:reply`, {
+    programId,
+    messageId: injected.messageId,
+    txHash: injected.txHash,
+    promiseMs,
+    replyCode: reply ? normalizeReplyCode(reply.code) : null,
+    payloadBytes: reply ? payloadBytes(reply.payload) : 0,
+  });
   if (reply) assertSuccessReply(reply.code, reply.payload);
   return waitForStateHashChange(api, programId, previous, stateTimeoutMs);
 }
@@ -517,8 +583,21 @@ async function sendInjectedMessageAndWaitForReplyOnly(
   const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
   validatorMode === "slot" ? await injected.setSlotValidator() : injected.setDefaultValidator();
   console.log(`[${label}] injected`, { programId, messageId: injected.messageId, txHash: injected.txHash });
-  const reply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const promiseStartedAt = Date.now();
+  const rawReply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const promiseMs = Date.now() - promiseStartedAt;
+  const reply = unwrapInjectedPromise(rawReply, label);
+  const metrics: InjectedReplyMetrics = {
+    programId,
+    messageId: injected.messageId as Hex,
+    txHash: injected.txHash as Hex,
+    promiseMs,
+    replyCode: reply ? normalizeReplyCode(reply.code) : null,
+    payloadBytes: reply ? payloadBytes(reply.payload) : 0,
+  };
+  console.log(`[${label}] injected:reply`, metrics);
   if (reply) assertSuccessReply(reply.code, reply.payload);
+  return metrics;
 }
 
 async function queryProgram(
@@ -728,12 +807,23 @@ function targetOf(agent: AgentView, direction: number): { x: number; y: number }
   if (direction === DIR_DOWN && agent.y + 1 < MAP_HEIGHT) return { x: agent.x, y: agent.y + 1 };
   if (direction === DIR_RIGHT && agent.x + 1 < MAP_WIDTH) return { x: agent.x + 1, y: agent.y };
   if (direction === DIR_LEFT && agent.x > 0) return { x: agent.x - 1, y: agent.y };
+  if (direction === DIR_CURRENT) return { x: agent.x, y: agent.y };
   return null;
 }
 
 function verticalPathCanBeOpened(agent: AgentView, map: number[], targetY: number): boolean {
   for (let y = agent.y + 1; y <= targetY; y += 1) {
     const tile = tileAt(map, agent.x, y);
+    if (tile === TILE_LAVA || tile < 0) return false;
+    if (!isTraversable(tile) && !isDrillable(tile)) return false;
+  }
+  return true;
+}
+
+function horizontalPathCanBeOpened(map: number[], fromX: number, toX: number, y: number): boolean {
+  const step = toX > fromX ? 1 : -1;
+  for (let x = fromX + step; step > 0 ? x <= toX : x >= toX; x += step) {
+    const tile = tileAt(map, x, y);
     if (tile === TILE_LAVA || tile < 0) return false;
     if (!isTraversable(tile) && !isDrillable(tile)) return false;
   }
@@ -749,21 +839,26 @@ function sideLookaheadResources(agent: AgentView, map: number[], allowedTiles?: 
     if (!canPlanAtDepth(agent, y)) continue;
     if (!verticalPathCanBeOpened(agent, map, y)) continue;
 
-    for (const direction of [DIR_RIGHT, DIR_LEFT]) {
-      const x = direction === DIR_RIGHT ? agent.x + 1 : agent.x - 1;
+    for (let offset = -SIDE_LOOKAHEAD_RADIUS; offset <= SIDE_LOOKAHEAD_RADIUS; offset += 1) {
+      if (offset === 0) continue;
+      const x = agent.x + offset;
       if (x < 0 || x >= MAP_WIDTH) continue;
 
       const tile = tileAt(map, x, y);
       if (!isResourceTile(tile)) continue;
       if (allowedTiles && !allowedTiles.has(tile)) continue;
+      if (!horizontalPathCanBeOpened(map, agent.x, x, y)) continue;
+
+      const horizontalDistance = Math.abs(offset);
 
       resources.push({
         x,
         y,
         tile,
-        direction,
+        direction: offset > 0 ? DIR_RIGHT : DIR_LEFT,
         depth,
-        score: resourceScore(tile) - depth * 5,
+        horizontalDistance,
+        score: resourceScore(tile) - depth * 8 - horizontalDistance * 12,
         exitLaddersNeeded: exitLaddersNeeded(y),
       });
     }
@@ -772,6 +867,7 @@ function sideLookaheadResources(agent: AgentView, map: number[], allowedTiles?: 
   return resources.sort((left, right) => {
     if (right.score !== left.score) return right.score - left.score;
     if (left.depth !== right.depth) return left.depth - right.depth;
+    if (left.horizontalDistance !== right.horizontalDistance) return left.horizontalDistance - right.horizontalDistance;
     return left.direction - right.direction;
   });
 }
@@ -785,13 +881,19 @@ function planSideLookaheadAction(
   if (!resource) return null;
 
   if (resource.depth === 0) {
-    return {
-      fn: "Drill",
-      direction: resource.direction,
-      target: { x: resource.x, y: resource.y },
-      reason: `drill side-lookahead ${tileName(resource.tile)} at ${resource.x},${resource.y}; ${ladderBudgetReason(agent, resource.y)}`,
-      resource,
-    };
+    const target = targetOf(agent, resource.direction);
+    if (!target) return null;
+
+    const tile = tileAt(map, target.x, target.y);
+    const reason =
+      resource.horizontalDistance === 1
+        ? `drill adjacent ${tileName(resource.tile)} at ${resource.x},${resource.y}; ${ladderBudgetReason(agent, resource.y)}`
+        : `open side tunnel toward ${tileName(resource.tile)} at ${resource.x},${resource.y} ` +
+          `(offset ${resource.horizontalDistance}); next tile ${tileName(tile)}; ${ladderBudgetReason(agent, resource.y)}`;
+
+    if (isTraversable(tile)) return { fn: "MoveAgent", direction: resource.direction, target, reason, resource };
+    if (isDrillable(tile)) return { fn: "Drill", direction: resource.direction, target, reason, resource };
+    return null;
   }
 
   const target = targetOf(agent, DIR_DOWN);
@@ -807,10 +909,149 @@ function planSideLookaheadAction(
   return null;
 }
 
+function directionTarget(x: number, y: number, direction: number): { x: number; y: number } | null {
+  if (direction === DIR_UP && y > 0) return { x, y: y - 1 };
+  if (direction === DIR_DOWN && y + 1 < MAP_HEIGHT) return { x, y: y + 1 };
+  if (direction === DIR_RIGHT && x + 1 < MAP_WIDTH) return { x: x + 1, y };
+  if (direction === DIR_LEFT && x > 0) return { x: x - 1, y };
+  if (direction === DIR_CURRENT) return { x, y };
+  return null;
+}
+
+function coordKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+function firstPathStep(start: string, parents: Map<string, PathStep>, targetKey: string): PathStep | null {
+  let cursor = targetKey;
+  let first = parents.get(cursor);
+  while (first && first.from !== start) {
+    cursor = first.from;
+    first = parents.get(cursor);
+  }
+  return first ?? null;
+}
+
+function canTraverseInSearch(map: number[], fromX: number, fromY: number, direction: number, toX: number, toY: number): boolean {
+  const targetTile = tileAt(map, toX, toY);
+  if (!isTraversable(targetTile)) return false;
+  if (direction !== DIR_UP) return true;
+
+  const currentTile = tileAt(map, fromX, fromY);
+  return currentTile === TILE_LADDER || targetTile === TILE_LADDER;
+}
+
+function canOpenPathInSearch(map: number[], direction: number): boolean {
+  // Opening an upward non-resource cell would still leave no legal way to move
+  // there unless a ladder is already involved. Keep upward pathing for return logic.
+  return direction !== DIR_UP;
+}
+
+function resourcePathScore(agent: AgentView, tile: number, x: number, y: number, distance: number): number {
+  const descent = Math.max(0, y - agent.y);
+  const ascent = Math.max(0, agent.y - y);
+  return resourceScore(tile)
+    - distance * RESOURCE_DISTANCE_PENALTY
+    - descent * RESOURCE_DESCENT_PENALTY
+    - ascent * RESOURCE_ASCENT_PENALTY;
+}
+
+function planNearestResourceAction(agent: AgentView, map: number[], allowedTiles?: Set<number>): PlannedAction | null {
+  const start = coordKey(agent.x, agent.y);
+  const queue: Array<{ x: number; y: number; distance: number }> = [{ x: agent.x, y: agent.y, distance: 0 }];
+  const parents = new Map<string, PathStep>();
+  const seen = new Set<string>([start]);
+  const candidates: ResourcePathCandidate[] = [];
+  const directions = [DIR_RIGHT, DIR_LEFT, DIR_DOWN, DIR_UP];
+
+  for (let index = 0; index < queue.length; index += 1) {
+    const current = queue[index];
+    if (current.distance >= RESOURCE_SEARCH_MAX_DISTANCE) continue;
+
+    for (const direction of directions) {
+      const next = directionTarget(current.x, current.y, direction);
+      if (!next) continue;
+      if (!canPlanAtDepth(agent, next.y)) continue;
+
+      const key = coordKey(next.x, next.y);
+      if (seen.has(key)) continue;
+
+      const tile = tileAt(map, next.x, next.y);
+      if (tile === TILE_LAVA || tile < 0) continue;
+
+      const distance = current.distance + 1;
+      const step: PathStep = {
+        from: coordKey(current.x, current.y),
+        direction,
+        x: next.x,
+        y: next.y,
+        distance,
+      };
+
+      seen.add(key);
+      parents.set(key, step);
+
+      if (isResourceTile(tile)) {
+        if (!allowedTiles || allowedTiles.has(tile)) {
+          const first = firstPathStep(start, parents, key);
+          if (first) {
+            candidates.push({
+              x: next.x,
+              y: next.y,
+              tile,
+              distance,
+              descent: Math.max(0, next.y - agent.y),
+              ascent: Math.max(0, agent.y - next.y),
+              score: resourcePathScore(agent, tile, next.x, next.y, distance),
+              first,
+            });
+          }
+        }
+        continue;
+      }
+
+      if (canTraverseInSearch(map, current.x, current.y, direction, next.x, next.y)) {
+        queue.push({ ...next, distance });
+        continue;
+      }
+
+      if (isDrillable(tile) && canOpenPathInSearch(map, direction)) {
+        queue.push({ ...next, distance });
+      }
+    }
+  }
+
+  candidates.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    if (left.distance !== right.distance) return left.distance - right.distance;
+    if (left.descent !== right.descent) return left.descent - right.descent;
+    if (left.ascent !== right.ascent) return left.ascent - right.ascent;
+    return resourceScore(right.tile) - resourceScore(left.tile);
+  });
+
+  const [candidate] = candidates;
+  if (!candidate) return null;
+
+  const firstTile = tileAt(map, candidate.first.x, candidate.first.y);
+  const target = { x: candidate.first.x, y: candidate.first.y };
+  const reason =
+    `seek nearest ${tileName(candidate.tile)} at ${candidate.x},${candidate.y}; ` +
+    `distance ${candidate.distance}, score ${candidate.score}; first tile ${tileName(firstTile)}; ` +
+    ladderBudgetReason(agent, candidate.y);
+
+  if (isTraversable(firstTile)) return { fn: "MoveAgent", direction: candidate.first.direction, target, reason };
+  if (isDrillable(firstTile)) return { fn: "Drill", direction: candidate.first.direction, target, reason };
+  return null;
+}
+
 function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
   if (agent.status !== AGENT_ACTIVE) return null;
 
-  for (const direction of [DIR_RIGHT, DIR_LEFT, DIR_DOWN]) {
+  if (carriedTotal(agent) >= agent.backpackCapacity) {
+    return chooseSurfaceAction(agent, map);
+  }
+
+  for (const direction of [DIR_RIGHT, DIR_LEFT, DIR_DOWN, DIR_UP]) {
     const target = targetOf(agent, direction);
     if (!target) continue;
     const tile = tileAt(map, target.x, target.y);
@@ -820,29 +1061,18 @@ function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
   const sideLookahead = planSideLookaheadAction(agent, map);
   if (sideLookahead) return sideLookahead;
 
-  for (const direction of [DIR_DOWN, DIR_RIGHT, DIR_LEFT]) {
-    const target = targetOf(agent, direction);
-    if (!target) continue;
-    if (direction === DIR_DOWN && !canPlanAtDepth(agent, target.y)) continue;
+  const nearestResource = planNearestResourceAction(agent, map);
+  if (nearestResource) return nearestResource;
+
+  const target = targetOf(agent, DIR_DOWN);
+  if (target && canPlanAtDepth(agent, target.y)) {
     const tile = tileAt(map, target.x, target.y);
-    const depthReason = direction === DIR_DOWN ? `; ${ladderBudgetReason(agent, target.y)}` : "";
-    if (isDrillable(tile)) return { fn: "Drill", direction, target, reason: `drill ${tileName(tile)}${depthReason}` };
-    if (isTraversable(tile)) return { fn: "MoveAgent", direction, target, reason: `move into ${tileName(tile)}${depthReason}` };
+    const depthReason = `; ${ladderBudgetReason(agent, target.y)}`;
+    if (isDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `drill ${tileName(tile)}${depthReason}` };
+    if (isTraversable(tile)) return { fn: "MoveAgent", direction: DIR_DOWN, target, reason: `move into ${tileName(tile)}${depthReason}` };
   }
 
   return null;
-}
-
-function directionTarget(x: number, y: number, direction: number): { x: number; y: number } | null {
-  if (direction === DIR_UP && y > 0) return { x, y: y - 1 };
-  if (direction === DIR_DOWN && y + 1 < MAP_HEIGHT) return { x, y: y + 1 };
-  if (direction === DIR_RIGHT && x + 1 < MAP_WIDTH) return { x: x + 1, y };
-  if (direction === DIR_LEFT && x > 0) return { x: x - 1, y };
-  return null;
-}
-
-function coordKey(x: number, y: number): string {
-  return `${x},${y}`;
 }
 
 function nearestHcrstTarget(agent: AgentView, map: number[]): { x: number; y: number } | null {
@@ -867,12 +1097,15 @@ function directionOrderToward(x: number, target: { x: number; y: number } | null
 function planGoldAction(agent: AgentView, map: number[]): GoldPlannedAction | null {
   if (agent.status !== AGENT_ACTIVE) return null;
 
-  const sideGold = planSideLookaheadAction(agent, map, new Set([TILE_RESOURCE_HCRST]));
-  if (sideGold) {
+  const sideResource = planSideLookaheadAction(agent, map);
+  if (sideResource) {
+    const nearestHcrst = nearestHcrstTarget(agent, map);
     return {
-      ...sideGold,
-      distance: sideGold.resource.depth + 1,
-      hcrst: { x: sideGold.resource.x, y: sideGold.resource.y },
+      ...sideResource,
+      distance: sideResource.resource.depth + sideResource.resource.horizontalDistance,
+      hcrst: sideResource.resource.tile === TILE_RESOURCE_HCRST
+        ? { x: sideResource.resource.x, y: sideResource.resource.y }
+        : nearestHcrst ?? { x: sideResource.resource.x, y: sideResource.resource.y },
     };
   }
 
@@ -945,6 +1178,127 @@ function planGoldAction(agent: AgentView, map: number[]): GoldPlannedAction | nu
 
 function chooseGoldAction(agent: AgentView, map: number[]): PlannedAction | null {
   return planGoldAction(agent, map);
+}
+
+function carriedTotal(agent: AgentView): bigint {
+  return agent.inventoryScrst + agent.inventoryBcrst + agent.inventoryHcrst;
+}
+
+function chooseSurfaceAction(agent: AgentView, map: number[]): PlannedAction | null {
+  if (agent.status !== AGENT_ACTIVE) return null;
+  if (agent.y === 0) {
+    return { fn: "Surface", reason: "bank carried resources on surface" };
+  }
+
+  const currentTile = tileAt(map, agent.x, agent.y);
+  const targetUp = targetOf(agent, DIR_UP);
+
+  if (targetUp) {
+    const targetTile = tileAt(map, targetUp.x, targetUp.y);
+    if (
+      isTraversable(targetTile) &&
+      (currentTile === TILE_LADDER || targetTile === TILE_LADDER)
+    ) {
+      return {
+        fn: "MoveAgent",
+        direction: DIR_UP,
+        target: targetUp,
+        reason: `move up toward surface through ${tileName(targetTile)}`,
+      };
+    }
+  }
+
+  if (currentTile !== TILE_LADDER) {
+    const missingLadders = verticalReturnMissingLadders(map, agent.x, agent.y);
+    if (currentTile === TILE_EMPTY && missingLadders > 0 && missingLadders <= agent.ladders) {
+      return {
+        fn: "PlaceLadder",
+        direction: DIR_CURRENT,
+        target: { x: agent.x, y: agent.y },
+        reason: `place ladder at ${agent.x},${agent.y} for direct ascent; missing ${missingLadders}/${agent.ladders}`,
+      };
+    }
+
+    const ladder = nearestReachableSameRowLadder(agent, map);
+    if (ladder) {
+      return planHorizontalActionToX(
+        agent,
+        map,
+        ladder.x,
+        `return to ladder at ${ladder.x},${agent.y} before surfacing`,
+      );
+    }
+
+    if (agent.ladders <= 0 || missingLadders > agent.ladders) return null;
+    if (currentTile !== TILE_EMPTY) return null;
+
+    return {
+      fn: "PlaceLadder",
+      direction: DIR_CURRENT,
+      target: { x: agent.x, y: agent.y },
+      reason: `place ladder at ${agent.x},${agent.y} for ascent; missing ${missingLadders}/${agent.ladders}`,
+    };
+  }
+
+  const target = targetUp;
+  if (!target) return null;
+  const targetTile = tileAt(map, target.x, target.y);
+  if (isTraversable(targetTile)) {
+    return {
+      fn: "MoveAgent",
+      direction: DIR_UP,
+      target,
+      reason: `move up toward surface through ${tileName(targetTile)}`,
+    };
+  }
+  if (isDrillable(targetTile)) {
+    return {
+      fn: "Drill",
+      direction: DIR_UP,
+      target,
+      reason: `open upward return path through ${tileName(targetTile)}`,
+    };
+  }
+
+  return null;
+}
+
+function verticalReturnMissingLadders(map: number[], x: number, y: number): number {
+  let missing = 0;
+  for (let fromY = y; fromY > 0; fromY -= 1) {
+    const currentTile = tileAt(map, x, fromY);
+    const targetTile = tileAt(map, x, fromY - 1);
+    if (currentTile !== TILE_LADDER && targetTile !== TILE_LADDER) {
+      missing += 1;
+    }
+  }
+  return missing;
+}
+
+function nearestReachableSameRowLadder(agent: AgentView, map: number[]): { x: number; distance: number } | null {
+  for (let distance = 1; distance < MAP_WIDTH; distance += 1) {
+    const candidates = [agent.x - distance, agent.x + distance];
+    for (const x of candidates) {
+      if (x < 0 || x >= MAP_WIDTH) continue;
+      if (tileAt(map, x, agent.y) !== TILE_LADDER) continue;
+      if (!horizontalPathCanBeOpened(map, agent.x, x, agent.y)) continue;
+      return { x, distance };
+    }
+  }
+  return null;
+}
+
+function planHorizontalActionToX(agent: AgentView, map: number[], targetX: number, reason: string): PlannedAction | null {
+  if (targetX === agent.x) return null;
+  const direction = targetX > agent.x ? DIR_RIGHT : DIR_LEFT;
+  const target = targetOf(agent, direction);
+  if (!target) return null;
+
+  const tile = tileAt(map, target.x, target.y);
+  const fullReason = `${reason}; next ${tileName(tile)} at ${target.x},${target.y}`;
+  if (isTraversable(tile)) return { fn: "MoveAgent", direction, target, reason: fullReason };
+  if (isDrillable(tile)) return { fn: "Drill", direction, target, reason: fullReason };
+  return null;
 }
 
 async function waitForAgentChange(
@@ -1103,8 +1457,11 @@ async function executeProxyAction(
   promiseTimeoutMs: number,
   timeoutMs: number,
 ) {
-  const payload = proxySails.services.Digger.functions[action.fn].encodePayload(action.direction) as Hex;
-  await sendInjectedMessageAndWaitForReplyOnly(
+  const fn = proxySails.services.Digger.functions[action.fn];
+  const payload = action.direction === undefined
+    ? fn.encodePayload() as Hex
+    : fn.encodePayload(action.direction) as Hex;
+  const injectedReply = await sendInjectedMessageAndWaitForReplyOnly(
     connection.api,
     proxy,
     `fleet-play-${action.fn}`,
@@ -1135,7 +1492,50 @@ async function executeProxyAction(
     },
     hcrst: { before: agent.inventoryHcrst.toString(), after: after.inventoryHcrst.toString() },
   });
-  return { before: agent, after, action };
+  console.log("[fleet:tx]", JSON.stringify({
+    proxy,
+    action: action.fn,
+    direction: action.direction ?? null,
+    target: action.target ?? null,
+    reason: action.reason,
+    txHash: injectedReply.txHash,
+    messageId: injectedReply.messageId,
+    promiseMs: injectedReply.promiseMs,
+    replyCode: injectedReply.replyCode,
+    before: {
+      x: agent.x,
+      y: agent.y,
+      seq: agent.lastActionSeq.toString(),
+      inventory: {
+        scrst: agent.inventoryScrst.toString(),
+        bcrst: agent.inventoryBcrst.toString(),
+        hcrst: agent.inventoryHcrst.toString(),
+      },
+      banked: {
+        scrst: agent.bankedScrst.toString(),
+        bcrst: agent.bankedBcrst.toString(),
+        hcrst: agent.bankedHcrst.toString(),
+      },
+      ladders: agent.ladders,
+    },
+    after: {
+      x: after.x,
+      y: after.y,
+      seq: after.lastActionSeq.toString(),
+      inventory: {
+        scrst: after.inventoryScrst.toString(),
+        bcrst: after.inventoryBcrst.toString(),
+        hcrst: after.inventoryHcrst.toString(),
+      },
+      banked: {
+        scrst: after.bankedScrst.toString(),
+        bcrst: after.bankedBcrst.toString(),
+        hcrst: after.bankedHcrst.toString(),
+      },
+      ladders: after.ladders,
+    },
+  }));
+  return { before: agent, after, action, injectedReply };
 }
 
 async function playProxyStep(
@@ -1176,6 +1576,188 @@ async function playProxyStep(
   );
 }
 
+async function mineGoldAndSurface(
+  connection: Connection,
+  proxySails: SailsProgram,
+  worldSails: SailsProgram,
+  worldProgramId: Address,
+  proxy: Address,
+  validatorMode: ValidatorMode,
+  promiseTimeoutMs: number,
+  timeoutMs: number,
+  queryTimeoutMs: number,
+  maxRounds: number,
+) {
+  let agent = await readAgent(connection, worldSails, worldProgramId, proxy, queryTimeoutMs);
+  const initialBankedHcrst = agent.bankedHcrst;
+  let phase: "mine" | "surface" = agent.inventoryHcrst > 0n ? "surface" : "mine";
+
+  for (let move = 1; move <= maxRounds; move += 1) {
+    const map = await readMap(connection, worldSails, worldProgramId, queryTimeoutMs);
+    const action = phase === "mine"
+      ? chooseGoldAction(agent, map)
+      : chooseSurfaceAction(agent, map);
+
+    if (!action) {
+      console.log("[fleet:gold-surface-stop]", {
+        proxy,
+        move,
+        phase,
+        reason: phase === "mine" ? "no reachable HCRST action" : "no surface return action",
+        agent: agentSummary(agent),
+        carried: carriedTotal(agent).toString(),
+      });
+      return { complete: false, agent, move, phase };
+    }
+
+    console.log("[fleet:gold-surface-step]", {
+      proxy,
+      move,
+      phase,
+      action: action.fn,
+      direction: action.direction,
+      target: action.target,
+      reason: action.reason,
+      before: agentSummary(agent),
+      carried: carriedTotal(agent).toString(),
+    });
+
+    const before = agent;
+    const result = await executeProxyAction(
+      connection,
+      proxySails,
+      worldSails,
+      worldProgramId,
+      proxy,
+      agent,
+      action,
+      validatorMode,
+      promiseTimeoutMs,
+      timeoutMs,
+    );
+    agent = result.after;
+
+    if (phase === "mine" && agent.inventoryHcrst > before.inventoryHcrst) {
+      console.log("[fleet:gold-extracted]", {
+        proxy,
+        move,
+        hcrst: { before: before.inventoryHcrst.toString(), after: agent.inventoryHcrst.toString() },
+        position: { x: agent.x, y: agent.y },
+        ladders: agent.ladders,
+      });
+      phase = "surface";
+      continue;
+    }
+
+    if (phase === "surface" && agent.bankedHcrst > initialBankedHcrst && agent.inventoryHcrst === 0n) {
+      console.log("[fleet:gold-surfaced]", {
+        proxy,
+        move,
+        bankedHcrst: agent.bankedHcrst.toString(),
+        final: agentSummary(agent),
+      });
+      return { complete: true, agent, move, phase };
+    }
+  }
+
+  console.log("[fleet:gold-surface-timeout]", {
+    proxy,
+    maxRounds,
+    phase,
+    agent: agentSummary(agent),
+    carried: carriedTotal(agent).toString(),
+  });
+  return { complete: false, agent, move: maxRounds, phase };
+}
+
+function bankedTotal(agent: AgentView): bigint {
+  return agent.bankedScrst + agent.bankedBcrst + agent.bankedHcrst;
+}
+
+async function returnCarriedToSurface(
+  connection: Connection,
+  proxySails: SailsProgram,
+  worldSails: SailsProgram,
+  worldProgramId: Address,
+  proxy: Address,
+  validatorMode: ValidatorMode,
+  promiseTimeoutMs: number,
+  timeoutMs: number,
+  queryTimeoutMs: number,
+  maxRounds: number,
+) {
+  let agent = await readAgent(connection, worldSails, worldProgramId, proxy, queryTimeoutMs);
+  const initialBanked = bankedTotal(agent);
+  const initialCarried = carriedTotal(agent);
+
+  if (initialCarried === 0n) {
+    console.log("[fleet:surface-carried:empty]", { proxy, agent: agentSummary(agent) });
+    return { complete: true, agent, move: 0 };
+  }
+
+  for (let move = 1; move <= maxRounds; move += 1) {
+    const map = await readMap(connection, worldSails, worldProgramId, queryTimeoutMs);
+    const action = chooseSurfaceAction(agent, map);
+
+    if (!action) {
+      console.log("[fleet:surface-carried-stop]", {
+        proxy,
+        move,
+        reason: "no surface return action",
+        agent: agentSummary(agent),
+        carried: carriedTotal(agent).toString(),
+        banked: bankedTotal(agent).toString(),
+      });
+      return { complete: false, agent, move };
+    }
+
+    console.log("[fleet:surface-carried-step]", {
+      proxy,
+      move,
+      action: action.fn,
+      direction: action.direction,
+      target: action.target,
+      reason: action.reason,
+      before: agentSummary(agent),
+      carried: carriedTotal(agent).toString(),
+      banked: bankedTotal(agent).toString(),
+    });
+
+    const result = await executeProxyAction(
+      connection,
+      proxySails,
+      worldSails,
+      worldProgramId,
+      proxy,
+      agent,
+      action,
+      validatorMode,
+      promiseTimeoutMs,
+      timeoutMs,
+    );
+    agent = result.after;
+
+    if (carriedTotal(agent) === 0n && bankedTotal(agent) > initialBanked) {
+      console.log("[fleet:surface-carried-complete]", {
+        proxy,
+        move,
+        initialCarried: initialCarried.toString(),
+        final: agentSummary(agent),
+      });
+      return { complete: true, agent, move };
+    }
+  }
+
+  console.log("[fleet:surface-carried-timeout]", {
+    proxy,
+    maxRounds,
+    agent: agentSummary(agent),
+    carried: carriedTotal(agent).toString(),
+    banked: bankedTotal(agent).toString(),
+  });
+  return { complete: false, agent, move: maxRounds };
+}
+
 async function selectNearestGoldCandidate(
   connection: Connection,
   worldSails: SailsProgram,
@@ -1207,8 +1789,10 @@ async function main() {
   }
 
   const createCount = args.noDeploy ? 0 : parseNonNegativeInt(args.create, 9, "--create");
-  const untilGold = Boolean(args.untilGold);
-  const steps = args.noPlay || untilGold ? 0 : parseNonNegativeInt(args.steps, 2, "--steps");
+  const goldAndSurface = Boolean(args.goldAndSurface);
+  const surfaceCarried = Boolean(args.surfaceCarried);
+  const untilGold = Boolean(args.untilGold || goldAndSurface);
+  const steps = args.noPlay || untilGold || surfaceCarried ? 0 : parseNonNegativeInt(args.steps, 2, "--steps");
   const maxRounds = parsePositiveInt(args.maxRounds, 200, "--max-rounds");
   const timeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_EVENT_TIMEOUT_MS"], "DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), 180_000, "--timeout-ms");
   const promiseTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_PROMISE_TIMEOUT_MS"], "DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), 60_000, "--promise-timeout-ms");
@@ -1232,6 +1816,8 @@ async function main() {
       createCount,
       steps,
       untilGold,
+      goldAndSurface,
+      surfaceCarried,
       goldStrategy,
       maxRounds,
       validatorMode,
@@ -1257,13 +1843,44 @@ async function main() {
     }
 
     const allProxies = [...new Set(proxies.map((proxy) => proxy.toLowerCase()))] as Address[];
-    for (const proxy of allProxies) {
+    const playProxies = selectProxyIndexes(allProxies, args.proxyIndexes);
+    const registerProxies = args.proxyIndexes ? playProxies : allProxies;
+    for (const proxy of registerProxies) {
       await registerProxy(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
     }
     await updateProxyList(allProxies);
-    const playProxies = selectProxyIndexes(allProxies, args.proxyIndexes);
 
-    if (untilGold && !args.noPlay && goldStrategy === "nearest") {
+    if (surfaceCarried && !args.noPlay) {
+      for (const proxy of playProxies) {
+        await returnCarriedToSurface(
+          connection,
+          proxySails,
+          worldSails,
+          worldProgramId,
+          proxy,
+          validatorMode,
+          promiseTimeoutMs,
+          timeoutMs,
+          queryTimeoutMs,
+          maxRounds,
+        );
+      }
+    } else if (goldAndSurface && !args.noPlay) {
+      for (const proxy of playProxies) {
+        await mineGoldAndSurface(
+          connection,
+          proxySails,
+          worldSails,
+          worldProgramId,
+          proxy,
+          validatorMode,
+          promiseTimeoutMs,
+          timeoutMs,
+          queryTimeoutMs,
+          maxRounds,
+        );
+      }
+    } else if (untilGold && !args.noPlay && goldStrategy === "nearest") {
       let found = false;
       for (let move = 0; move < maxRounds && !found; move += 1) {
         const candidate = await selectNearestGoldCandidate(
@@ -1365,6 +1982,8 @@ async function main() {
       playProxies,
       steps,
       untilGold,
+      goldAndSurface,
+      surfaceCarried,
       goldStrategy,
     });
   } finally {

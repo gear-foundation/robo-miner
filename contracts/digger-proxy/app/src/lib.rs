@@ -3,7 +3,11 @@
 #[cfg(test)]
 extern crate std;
 
-use sails_rs::{cell::RefCell, gstd::msg, prelude::*};
+use sails_rs::{
+    cell::RefCell,
+    gstd::{exec, msg},
+    prelude::*,
+};
 
 const ACTION_REGISTER: u32 = 1;
 const ACTION_DRILL: u32 = 2;
@@ -14,25 +18,25 @@ const ACTION_EXIT: u32 = 6;
 const ACTION_MINT_RESOURCES: u32 = 7;
 
 const WORLD_REGISTER: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x0b, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x0c, 0x00, 0x01, 0x00,
 ];
 const WORLD_DRILL: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x03, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x03, 0x00, 0x01, 0x00,
 ];
 const WORLD_MOVE_AGENT: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x09, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x09, 0x00, 0x01, 0x00,
 ];
 const WORLD_PLACE_LADDER: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x0a, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x0b, 0x00, 0x01, 0x00,
 ];
 const WORLD_SURFACE: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x0d, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x0e, 0x00, 0x01, 0x00,
 ];
 const WORLD_EXIT: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x04, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x04, 0x00, 0x01, 0x00,
 ];
 const WORLD_MINT_RESOURCES: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x08, 0x00, 0x01, 0x00,
+    0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x08, 0x00, 0x01, 0x00,
 ];
 
 #[derive(Clone, Debug)]
@@ -63,6 +67,8 @@ impl DiggerState {
 #[reflect_hash(crate = sails_rs)]
 pub enum DiggerEvents {
     Forwarded(u64, u32, [u8; 32]),
+    Killed([u8; 32]),
+    WorldUpdated([u8; 32], [u8; 32]),
 }
 
 pub struct Program {
@@ -96,7 +102,13 @@ impl<'a> DiggerService<'a> {
 impl DiggerService<'_> {
     #[export(unwrap_result)]
     pub fn register(&mut self) -> Result<[u8; 32], String> {
-        self.forward_no_args(ACTION_REGISTER, WORLD_REGISTER)
+        let owner = {
+            let state = self.state.borrow();
+            ensure_owner(&state)?;
+            state.owner
+        };
+
+        self.forward(ACTION_REGISTER, encode_world_register(owner))
     }
 
     #[export(unwrap_result)]
@@ -127,6 +139,46 @@ impl DiggerService<'_> {
     #[export(unwrap_result)]
     pub fn mint_resources(&mut self) -> Result<[u8; 32], String> {
         self.forward_no_args(ACTION_MINT_RESOURCES, WORLD_MINT_RESOURCES)
+    }
+
+    #[export(unwrap_result)]
+    pub fn kill(&mut self, inheritor: ActorId) -> Result<(), String> {
+        {
+            let state = self.state.borrow();
+            ensure_owner(&state)?;
+        }
+
+        if inheritor == ActorId::zero() {
+            return Err("inheritor cannot be zero".into());
+        }
+
+        self.emit_event(DiggerEvents::Killed(inheritor.into_bytes()))
+            .expect("failed to emit killed event");
+
+        exec::exit(inheritor);
+    }
+
+    #[export(unwrap_result)]
+    pub fn set_world(&mut self, world: ActorId) -> Result<ActorId, String> {
+        if world == ActorId::zero() {
+            return Err("world cannot be zero".into());
+        }
+
+        let previous = {
+            let mut state = self.state.borrow_mut();
+            ensure_owner(&state)?;
+            let previous = state.world;
+            state.world = world;
+            previous
+        };
+
+        self.emit_event(DiggerEvents::WorldUpdated(
+            previous.into_bytes(),
+            world.into_bytes(),
+        ))
+        .expect("failed to emit world updated event");
+
+        Ok(world)
     }
 
     #[export(unwrap_result)]
@@ -192,6 +244,12 @@ fn ensure_owner(state: &DiggerState) -> Result<(), String> {
     Ok(())
 }
 
+fn encode_world_register(owner: ActorId) -> Vec<u8> {
+    let mut payload = WORLD_REGISTER.to_vec();
+    payload.extend(owner.encode());
+    payload
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,7 +259,7 @@ mod tests {
         assert_eq!(
             WORLD_REGISTER,
             [
-                0x47, 0x4d, 0x01, 0x10, 0x36, 0x4c, 0xf1, 0x04, 0xb8, 0xfd, 0x62, 0x2b, 0x0b, 0x00,
+                0x47, 0x4d, 0x01, 0x10, 0x31, 0x26, 0xe7, 0xea, 0x14, 0xda, 0x7d, 0x8f, 0x0c, 0x00,
                 0x01, 0x00,
             ]
         );
@@ -209,8 +267,18 @@ mod tests {
         assert_eq!(WORLD_EXIT[12], 0x04);
         assert_eq!(WORLD_MINT_RESOURCES[12], 0x08);
         assert_eq!(WORLD_MOVE_AGENT[12], 0x09);
-        assert_eq!(WORLD_PLACE_LADDER[12], 0x0a);
-        assert_eq!(WORLD_REGISTER[12], 0x0b);
-        assert_eq!(WORLD_SURFACE[12], 0x0d);
+        assert_eq!(WORLD_PLACE_LADDER[12], 0x0b);
+        assert_eq!(WORLD_REGISTER[12], 0x0c);
+        assert_eq!(WORLD_SURFACE[12], 0x0e);
+    }
+
+    #[test]
+    fn register_payload_forwards_owner_to_world() {
+        let owner = ActorId::new([9; 32]);
+        let payload = encode_world_register(owner);
+
+        assert_eq!(&payload[..16], &WORLD_REGISTER);
+        assert_eq!(payload.len(), 16 + 32);
+        assert_eq!(&payload[16..48], &owner.encode());
     }
 }

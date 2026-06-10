@@ -3,7 +3,10 @@ use sails_rs::prelude::*;
 use crate::{
     agent::Agent,
     config::WorldConfig,
-    constants::{AGENT_ACTIVE, SESSION_ACTIVE, SESSION_CREATED},
+    constants::{
+        AGENT_ACTIVE, AUTO_START_SESSION_PARTICIPANTS, MIN_SESSION_PARTICIPANTS, SESSION_ACTIVE,
+        SESSION_CREATED,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -66,6 +69,27 @@ pub(crate) fn ensure_session_active(state: &WorldState) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn ensure_registration_open(state: &WorldState) -> Result<(), String> {
+    if state.session.status == SESSION_ACTIVE {
+        return Err("session is already active".into());
+    }
+    if state.session.status != SESSION_CREATED {
+        return Err("registration is closed".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_min_participants_to_start(state: &WorldState) -> Result<(), String> {
+    if state.agents.len() < MIN_SESSION_PARTICIPANTS {
+        return Err("not enough participants to start session".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn should_auto_start_session(state: &WorldState) -> bool {
+    state.session.status == SESSION_CREATED && state.agents.len() >= AUTO_START_SESSION_PARTICIPANTS
+}
+
 pub(crate) fn active_agent(state: &WorldState, owner: ActorId) -> Result<&Agent, String> {
     let agent = state
         .agents
@@ -95,5 +119,85 @@ mod tests {
         assert_eq!(state.session.status, SESSION_CREATED);
         assert_eq!(state.resource_vmt, ActorId::zero());
         assert!(state.map.is_empty());
+    }
+
+    #[test]
+    fn registration_is_open_only_before_session_starts() {
+        let mut state = WorldState::new(ActorId::zero(), WorldConfig::default_40x64());
+
+        assert_eq!(ensure_registration_open(&state), Ok(()));
+
+        state.session.status = SESSION_ACTIVE;
+        assert_eq!(
+            ensure_registration_open(&state),
+            Err("session is already active".into())
+        );
+
+        state.session.status = crate::constants::SESSION_FINISHED;
+        assert_eq!(
+            ensure_registration_open(&state),
+            Err("registration is closed".into())
+        );
+    }
+
+    #[test]
+    fn start_session_requires_minimum_participants() {
+        let mut state = WorldState::new(ActorId::zero(), WorldConfig::default_40x64());
+
+        for index in 0..(MIN_SESSION_PARTICIPANTS - 1) {
+            state.agents.insert(
+                ActorId::new([index as u8; 32]),
+                Agent::new(
+                    ActorId::new([100 + index as u8; 32]),
+                    index as u32,
+                    &state.config,
+                ),
+            );
+        }
+
+        assert_eq!(
+            ensure_min_participants_to_start(&state),
+            Err("not enough participants to start session".into())
+        );
+
+        state.agents.insert(
+            ActorId::new([MIN_SESSION_PARTICIPANTS as u8; 32]),
+            Agent::new(
+                ActorId::new([200; 32]),
+                MIN_SESSION_PARTICIPANTS as u32,
+                &state.config,
+            ),
+        );
+
+        assert_eq!(ensure_min_participants_to_start(&state), Ok(()));
+    }
+
+    #[test]
+    fn auto_start_triggers_at_ten_registered_participants() {
+        let mut state = WorldState::new(ActorId::zero(), WorldConfig::default_40x64());
+
+        for index in 0..(AUTO_START_SESSION_PARTICIPANTS - 1) {
+            state.agents.insert(
+                ActorId::new([index as u8; 32]),
+                Agent::new(
+                    ActorId::new([100 + index as u8; 32]),
+                    index as u32,
+                    &state.config,
+                ),
+            );
+        }
+
+        assert!(!should_auto_start_session(&state));
+
+        state.agents.insert(
+            ActorId::new([AUTO_START_SESSION_PARTICIPANTS as u8; 32]),
+            Agent::new(
+                ActorId::new([220; 32]),
+                AUTO_START_SESSION_PARTICIPANTS as u32,
+                &state.config,
+            ),
+        );
+
+        assert!(should_auto_start_session(&state));
     }
 }

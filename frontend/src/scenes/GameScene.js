@@ -4,6 +4,7 @@ import { generateWorld, getBlock, setBlock, isSolid, isClimbable } from '../worl
 import { createRobot, applyUpgrade, addToCargo } from '../robot.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { CHEST_TIERS, rollLoot } from '../config/chests.js';
+import { setRoute } from '../routing.js';
 
 // Mapping from block type → texture key (files live in public/assets/tiles/).
 // Missing files fall through to the procedural Graphics renderer.
@@ -207,6 +208,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
+    setRoute('Game', {}, { replace: true });
     this.cleanupSceneDOM();
     // Restore the master volume the player picked on the menu (or any
     // earlier session). Without this, reloading straight into the game
@@ -3079,27 +3081,57 @@ export default class GameScene extends Phaser.Scene {
   }
 
   drawLavaTile(g, x, y, px, py) {
-    // Dark volcanic backing so the bands pop.
-    g.fillStyle(0x2a0a00, 1);
+    const t = this.time.now;
+    const seed = (x * 73856093 ^ y * 19349663) >>> 0;
+
+    // Solid deep-ember base so the rippling bands never leave a gap.
+    g.fillStyle(0x7a1402, 1);
     g.fillRect(px, py, TILE, TILE);
 
-    // Animated wavy bands — phase uses world position so neighboring tiles
-    // read as one continuous lava surface, not per-tile loops.
-    const t = this.time.now / 280;
-    const bandH = 6;
-    for (let row = 0; row < TILE; row += bandH) {
-      const phase = t + (x * 0.9) + (y * 0.35) + row * 0.08;
-      const offset = Math.sin(phase) * 3;
-      const shade = (row / TILE) * 0.4;
-      const color = row < TILE / 2 ? 0xff8a1f : 0xff3a0a;
-      g.fillStyle(color, 1 - shade);
-      g.fillRect(px, py + row + offset, TILE, bandH + 1);
+    // Molten heat gradient (hot yellow at the surface → deep red below). Each
+    // band ripples horizontally with a phase from world position, so a pool of
+    // lava reads as one flowing surface across tiles, not per-tile loops.
+    const bands = [0xffd24a, 0xff9a24, 0xff6a16, 0xe83a0c, 0xb01e04];
+    const bh = Math.ceil(TILE / bands.length);
+    for (let i = 0; i < bands.length; i++) {
+      const wob = Math.round(Math.sin(t / 300 + x * 0.8 + y * 0.3 + i * 0.7) * 1.6);
+      g.fillStyle(bands[i], 1);
+      g.fillRect(px, py + i * bh + wob, TILE, bh + 2);
     }
-    // Highlight ripples on top.
-    g.fillStyle(0xfff0a0, 0.35);
+
+    // Glowing molten surface — only when the tile above is open (the top of a
+    // lava pool), so the surface glows white-hot and pulses while the depths
+    // stay dark-red. Reads as "this is where it'll burn you".
+    const exposed = getBlock(this.world, x, y - 1) !== BLOCK.LAVA;
+    if (exposed) {
+      const pulse = 0.55 + 0.45 * Math.sin(t / 260 + x * 0.6);
+      g.fillStyle(0xffe27a, 1);
+      g.fillRect(px, py, TILE, 2);
+      g.fillStyle(0xfff6c8, pulse);
+      g.fillRect(px, py, TILE, 1);
+    }
+
+    // Rising bubbles: 1–2 per tile, each rises bottom→top over its lifetime and
+    // shrinks as it pops at the surface — bright core with a soft glow halo.
+    const bubbles = 1 + (seed & 1);
+    for (let b = 0; b < bubbles; b++) {
+      const off = ((seed >>> (b * 6)) & 0xff) / 255;
+      const life = ((t / 1000) + off) % 1; // 0..1 lifetime
+      const bx = px + 3 + ((seed >>> (b * 5 + 3)) % Math.max(1, TILE - 8));
+      const by = py + TILE - 3 - Math.round(life * (TILE - 6));
+      const r = life < 0.82 ? 2 + (b & 1) : 1; // shrink as it pops
+      g.fillStyle(0xff9a24, 0.55);
+      g.fillRect(bx - 1, by - 1, r + 2, r + 2);
+      g.fillStyle(0xfff3b0, 0.95);
+      g.fillRect(bx, by, r, r);
+    }
+
+    // Cooled crust flecks — a few dark spots for texture.
+    g.fillStyle(0x5a1002, 0.7);
     for (let i = 0; i < 3; i++) {
-      const rx = px + ((x * 7 + i * 11 + Math.floor(t * 6)) % TILE);
-      g.fillRect(rx, py + 2 + i * 4, 4, 1);
+      const cxp = px + 2 + ((seed >>> (i * 4)) % Math.max(1, TILE - 5));
+      const cyp = py + 5 + ((seed >>> (i * 4 + 9)) % Math.max(1, TILE - 8));
+      g.fillRect(cxp, cyp, 2, 2);
     }
   }
 

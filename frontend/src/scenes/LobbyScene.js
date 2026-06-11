@@ -5,6 +5,7 @@ import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
 import { CHAIN, chainReady } from '../chain/config.js';
 import { backendEnabled, fetchLiveWorlds } from '../backend/api.js';
+import { setRoute } from '../routing.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
 // preview of that mode's generated map and a WATCH button that drops into the
@@ -16,6 +17,7 @@ export default class LobbyScene extends Phaser.Scene {
   constructor() { super('Lobby'); }
 
   create() {
+    setRoute('Lobby', {}, { replace: true });
     this.cleanupDOM();
     this.backendWorlds = [];
     const W = this.scale.width, H = this.scale.height;
@@ -141,16 +143,19 @@ export default class LobbyScene extends Phaser.Scene {
 
   watch(mode, seed) {
     this.scale.off('resize', this.onResize, this);
+    setRoute('Spectator', { mode, seed });
     this.scene.start('Spectator', { mode, seed });
   }
 
   watchChain(programId) {
     this.scale.off('resize', this.onResize, this);
+    setRoute('Spectator', { mode: 'chain-live', seed: 0, programId });
     this.scene.start('Spectator', { mode: 'chain-live', seed: 0, programId });
   }
 
   goMenu() {
     this.scale.off('resize', this.onResize, this);
+    setRoute('Menu');
     this.scene.start('Menu');
   }
 

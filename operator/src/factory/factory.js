@@ -5,7 +5,7 @@
 // (no chain) or a real @vara-eth/api chain driver. All chain side effects go
 // through `driver`; the factory only owns the lifecycle + lobby rules.
 
-import { WORLD, newWorld, decideStart, worldView } from './world.js';
+import { WORLD, newWorld, syncWorldCounter, decideStart, worldView } from './world.js';
 
 const POOL_STATUSES = [WORLD.PROVISIONING, WORLD.OPEN, WORLD.ACTIVE];
 
@@ -15,11 +15,14 @@ export function createFactory({
   clock = Date.now,
   log = console.log,
   publish = null,
+  initialLive = [], // open/active/finished worlds restored after an operator restart
   initialPast = [], // archived worlds restored from disk (survive restarts)
+  onLive = null, // persist callback whenever the live pool changes
   onPast = null, // persist callback whenever the past list changes
 }) {
   const cfg = config;
-  const worlds = new Map(); // id → world (live: provisioning/open/active/finished)
+  syncWorldCounter(initialLive);
+  const worlds = new Map(initialLive.map((world) => [world.id, world])); // id → world
   const pastStore = [...initialPast]; // retired worlds, kept for the PAST tab
   let running = false;
   let timer = null;
@@ -29,9 +32,15 @@ export function createFactory({
   const countOpen = () => active().filter((w) => w.status === WORLD.OPEN).length;
   const poolBusy = () => active().filter((w) => POOL_STATUSES.includes(w.status)).length;
 
+  async function persistLive() {
+    try { await onLive?.(active()); }
+    catch (error) { log(`[factory] live persist error: ${error?.message || error}`); }
+  }
+
   async function provisionOne() {
     const world = newWorld(clock());
     worlds.set(world.id, world);
+    await persistLive();
     log(`[factory] + provisioning ${world.id}`);
     try {
       const provisioned = await driver.provision(world); // deploy+fund+Create OR pick a free pool program
@@ -52,9 +61,11 @@ export function createFactory({
         `[factory]   ${world.id} OPEN program=${world.programId} seed=${world.seed} ` +
           `(${cfg.lobbyMode ? 'lobby' : 'instant-open'})`,
       );
+      await persistLive();
     } catch (error) {
       log(`[factory] ! ${world.id} provision failed: ${error?.message || error}`);
       worlds.delete(world.id);
+      await persistLive();
     }
   }
 
@@ -67,6 +78,7 @@ export function createFactory({
       world.agents = count;
       world.lastJoinAt = now;
       log(`[factory]   ${world.id} agents ${count}/${cfg.lobbyCap}`);
+      await persistLive();
     }
     const decision = decideStart(world, cfg, now);
     if (decision.eligibleManual && !world.eligibleManualStart) {
@@ -75,6 +87,7 @@ export function createFactory({
         `[factory]   ${world.id} READY for manual start ` +
           `(${world.agents} agents, idle ≥ ${cfg.lobbyTimeoutMs}ms)`,
       );
+      await persistLive();
     }
     if (decision.start) await startWorld(world, decision.reason);
   }
@@ -92,6 +105,7 @@ export function createFactory({
       `[factory] > ${world.id} START (${reason}) agents=${world.agents} → ` +
         `running ~${Math.round(cfg.sessionMs / 1000)}s`,
     );
+    await persistLive();
   }
 
   async function tickActive(world) {
@@ -103,6 +117,7 @@ export function createFactory({
         `[factory] = ${world.id} FINISHED ` +
           `(ran ${Math.round((world.finishedAt - world.startedAt) / 1000)}s, ${world.agents} agents)`,
       );
+      await persistLive();
     }
   }
 
@@ -122,6 +137,7 @@ export function createFactory({
       world.openedAt = clock();
       world.lastJoinAt = world.openedAt;
       log(`[factory] ↺ ${world.id} OPEN again (session ${world.sessionId}, program ${world.programId})`);
+      await persistLive();
     } else {
       await driver.retire?.(world);
       world.status = WORLD.RETIRED;
@@ -130,6 +146,7 @@ export function createFactory({
       pastStore.push(world);
       const limit = cfg.pastLimit || 50;
       while (pastStore.length > limit) pastStore.shift();
+      await persistLive();
       try { await onPast?.(pastStore); } catch (error) { log(`[factory] past persist error: ${error?.message || error}`); }
       log(`[factory] x ${world.id} retired → PAST (${pastStore.length} kept) program=${world.programId}`);
     }
@@ -168,7 +185,10 @@ export function createFactory({
     // Operator override: start a specific open lobby by hand (the "запускаем руками" path).
     startManual: async (id) => {
       const world = worlds.get(id);
-      if (world) await startWorld(world, 'manual');
+      if (world) {
+        await startWorld(world, 'manual');
+        await persistLive();
+      }
     },
     async start() {
       if (running) return;
@@ -178,6 +198,10 @@ export function createFactory({
           `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} timeout=${cfg.lobbyTimeoutMs}ms ` +
           `session=${cfg.sessionMs}ms mode=${cfg.lobbyMode ? 'lobby' : 'instant-open'}`,
       );
+      if (initialLive.length) {
+        log(`[factory] restored ${initialLive.length} live world(s) from disk`);
+        await persistLive();
+      }
       const loop = async () => {
         if (!running) return;
         try {
@@ -185,6 +209,7 @@ export function createFactory({
         } catch (error) {
           log(`[factory] tick error: ${error?.message || error}`);
         }
+        await persistLive();
         timer = setTimeout(loop, cfg.tickMs);
       };
       await loop();

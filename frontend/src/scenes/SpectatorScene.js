@@ -6,6 +6,7 @@ import { createWorldSource } from '../chain/source.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { btnCss, wireBtn } from './arenaUI.js';
+import { setRoute } from '../routing.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
 // ore, shop, robot models) at 1:1 scale, but drives a CONTINUOUS real-time
@@ -42,6 +43,10 @@ function squadCounts(n) {
 export default class SpectatorScene extends GameScene {
   constructor() { super('Spectator'); }
 
+  preload() {
+    super.preload();
+  }
+
   init(data) {
     this.specMode = data?.mode || 'coop-gem';
     this.specSeed = data?.seed ?? 1234;
@@ -49,6 +54,7 @@ export default class SpectatorScene extends GameScene {
   }
 
   create() {
+    setRoute('Spectator', { mode: this.specMode, seed: this.specSeed, programId: this.specProgramId }, { replace: true });
     this.cleanupSceneDOM();
     this.spectator = true;
     this.mode = GAME_MODES[this.specMode] || {
@@ -127,9 +133,13 @@ export default class SpectatorScene extends GameScene {
     this.statsTimer = 0;
     this.worldDirty = true;
     this.buildHUD();
-    this.robotChirpSound = this.sound.add('robot-chirp', { volume: 0.42 });
-    this.robotQuestionSound = this.sound.add('robot-question', { volume: 0.42 });
-    this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound];
+    this.robotChirpSound = this.cache.audio.exists('robot-chirp')
+      ? this.sound.add('robot-chirp', { volume: 0.42 })
+      : null;
+    this.robotQuestionSound = this.cache.audio.exists('robot-question')
+      ? this.sound.add('robot-question', { volume: 0.42 })
+      : null;
+    this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound].filter(Boolean);
     this.scale.on('resize', this.onSpecResize, this);
   }
 
@@ -642,6 +652,7 @@ export default class SpectatorScene extends GameScene {
 
   goLobby() {
     this.scale.off('resize', this.onSpecResize, this);
+    setRoute('Lobby');
     this.scene.start('Lobby');
   }
 

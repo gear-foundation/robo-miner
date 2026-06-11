@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../..'); // operator/src/factory/drivers → repo root
 const SESSION_ACTIVE = 1;
 
-export async function createChainDriver({ env, log = console.log }) {
+export async function createChainDriver({ env, log = console.log, reservedProgramIds = [] }) {
   const { connectChain } = await import('../../chain/client.js');
   const chain = await connectChain(env);
 
@@ -46,6 +46,7 @@ export async function createChainDriver({ env, log = console.log }) {
   const pool = await loadPool();
   let codeId = env.codeId || pool.codeId || null;
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
+  const reservedPrograms = new Set((reservedProgramIds || []).filter(Boolean).map(String));
 
   async function loadPool() {
     try {
@@ -98,17 +99,20 @@ export async function createChainDriver({ env, log = console.log }) {
     async provision() {
       // Reuse an already-deployed program before paying to create a new one.
       // loadMap's UploadMap reopens it (clears agents → CREATED).
-      if (reuseIdx < pool.programs.length) {
+      while (reuseIdx < pool.programs.length) {
         const programId = pool.programs[reuseIdx];
         reuseIdx += 1;
+        if (reservedPrograms.has(programId)) continue;
         log(`[chain] reusing program ${programId}`);
         await keeper.ensureNow(programId); // a reused program may be low — top up before opening
+        reservedPrograms.add(programId);
         return { programId };
       }
       const code = await ensureCode();
       const programId = await chain.createProgram(code, BigInt(env.topUp));
       await chain.sendAdmin(programId, chain.encode.create());
       pool.programs.push(programId);
+      reservedPrograms.add(programId);
       reuseIdx += 1; // this program is now assigned to a world — don't reuse it for the next one
       await savePool();
       log(`[chain] program created + initialized ${programId}`);

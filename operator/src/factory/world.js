@@ -35,6 +35,15 @@ export function newWorld(now) {
   };
 }
 
+export function syncWorldCounter(worlds = []) {
+  let max = counter;
+  for (const world of worlds) {
+    const match = /^w(\d+)$/i.exec(String(world?.id || ''));
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  }
+  counter = max;
+}
+
 // Should this open lobby start now? Two automatic triggers, plus the manual path:
 //   • cap reached      → auto-start immediately.
 //   • >= min and idle  → either auto-start (if configured) or become eligible for

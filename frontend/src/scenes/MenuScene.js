@@ -6,6 +6,7 @@ import {
   BODY_COLOR_IDS, BODY_COLOR_LABELS, BODY_COLOR_SWATCH, pickRandomBodyColor,
   makeCanvasGraphicsAdapter,
 } from '../render/robot.js';
+import { setRoute } from '../routing.js';
 // Title / splash scene. Shows the game logo, the robot, and the
 // "Start Digging" button. On start, the robot plays a little fall-
 // through-the-ground animation before we hand off to the Game scene.
@@ -31,6 +32,7 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create() {
+    setRoute('Menu', {}, { replace: true });
     this.cleanupMenuDOM();
     // Boot muted by default — sound is opt-in via the speaker button, so the app
     // never auto-plays the menu music when a tab/preview loads it.
@@ -328,6 +330,7 @@ export default class MenuScene extends Phaser.Scene {
 
   openArena() {
     this.scale.off('resize', this.onResize, this);
+    setRoute('Lobby');
     this.scene.start('Lobby');
   }
 
@@ -1170,6 +1173,7 @@ export default class MenuScene extends Phaser.Scene {
   handoff() {
     this.stopMenuDrillSound();
     this.scale.off('resize', this.onResize, this);
+    setRoute('Game');
     this.scene.start('Game');
   }
 

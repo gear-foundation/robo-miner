@@ -17,6 +17,7 @@ pub enum WorldEvents {
     AgentDied(u64, [u8; 32], u32, u32, u32),
     AgentExited(u64, [u8; 32]),
     ResourcesMinted(u64, [u8; 32], u32, u32, u32),
+    StoneMoved(u64, [u8; 32], u32, u32, u32, u32),
 }
 
 #[event]

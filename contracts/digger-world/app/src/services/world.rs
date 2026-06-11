@@ -6,7 +6,7 @@ use crate::{
     events::WorldEvents,
     map::{
         ensure_map_loaded, ensure_move_allowed, gravity_target, index_of, is_dug_tile,
-        next_spawn_x, target_position, tile_at,
+        next_spawn_x, settle_stones_above_open_cell, target_position, tile_at,
     },
     state::{
         WorldState, active_agent, ensure_registration_open, ensure_session_active, next_action_seq,
@@ -170,6 +170,9 @@ impl WorldService<'_> {
         }
 
         let (gravity_x, gravity_y) = gravity_target(&state.map, agent_before.x, agent_before.y)?;
+        let stone_falls =
+            settle_stones_above_open_cell(&mut state.map, x, y, Some((gravity_x, gravity_y)))?;
+        let stone_crush = stone_falls.iter().find(|fall| fall.crushed_agent).copied();
         let session_id = state.session.session_id;
         let action_seq = next_action_seq(&mut state);
         let mut resource_event: Option<(u32, u32)> = None;
@@ -196,17 +199,24 @@ impl WorldService<'_> {
             _ => {}
         }
 
-        if gravity_x != from_x || gravity_y != from_y {
+        if let Some(fall) = stone_crush {
+            agent.x = fall.to_x;
+            agent.y = fall.to_y;
+            agent.hp = 0;
+            agent.status = AGENT_DEAD;
+        } else if gravity_x != from_x || gravity_y != from_y {
             agent.x = gravity_x;
             agent.y = gravity_y;
         }
         agent.last_action_seq = action_seq;
         let view = agent_view(agent);
-        let gravity_event = if gravity_x != from_x || gravity_y != from_y {
+        let gravity_event = if stone_crush.is_none() && (gravity_x != from_x || gravity_y != from_y)
+        {
             Some((from_x, from_y, gravity_x, gravity_y))
         } else {
             None
         };
+        let stone_death_event = stone_crush.map(|fall| (fall.to_x, fall.to_y));
 
         self.emit_event(WorldEvents::TileDrilled(
             session_id,
@@ -230,6 +240,18 @@ impl WorldService<'_> {
             .expect("failed to emit resource extracted event");
         }
 
+        for fall in &stone_falls {
+            self.emit_event(WorldEvents::StoneMoved(
+                session_id,
+                caller.into_bytes(),
+                fall.from_x,
+                fall.from_y,
+                fall.to_x,
+                fall.to_y,
+            ))
+            .expect("failed to emit stone moved event");
+        }
+
         if let Some((from_x, from_y, to_x, to_y)) = gravity_event {
             self.emit_event(WorldEvents::AgentMoved(
                 session_id,
@@ -240,6 +262,17 @@ impl WorldService<'_> {
                 to_y,
             ))
             .expect("failed to emit gravity moved event");
+        }
+
+        if let Some((death_x, death_y)) = stone_death_event {
+            self.emit_event(WorldEvents::AgentDied(
+                session_id,
+                caller.into_bytes(),
+                death_x,
+                death_y,
+                TILE_STONE as u32,
+            ))
+            .expect("failed to emit stone crush event");
         }
 
         Ok(view)

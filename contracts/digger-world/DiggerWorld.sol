@@ -20,6 +20,8 @@ interface IDiggerWorld {
 
     event ResourcesMinted(uint64, uint8[32], uint32, uint32, uint32);
 
+    event StoneMoved(uint64, uint8[32], uint32, uint32, uint32, uint32);
+
     event TileDrilled(uint64, uint8[32], uint32, uint32, uint32, uint32);
 
     event Killed(uint8[32]);

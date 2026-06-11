@@ -80,6 +80,16 @@ pub(crate) fn validate_uploaded_map(
         return Err("uploaded map has invalid total resource count".into());
     }
 
+    for y in 0..MAP_HEIGHT.saturating_sub(1) {
+        for x in 0..MAP_WIDTH {
+            let index = index_of(x, y).expect("map coordinate is valid");
+            let below_index = index_of(x, y + 1).expect("map coordinate is valid");
+            if map[index] == TILE_STONE && map[below_index] == TILE_EMPTY {
+                return Err("uploaded map has unsupported stone".into());
+            }
+        }
+    }
+
     Ok(map)
 }
 
@@ -161,6 +171,70 @@ pub(crate) fn gravity_target(map: &[u8], x: u32, y: u32) -> Result<(u32, u32), S
         target_y = target_y.saturating_add(1);
     }
     Ok((x, target_y))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct StoneFall {
+    pub(crate) from_x: u32,
+    pub(crate) from_y: u32,
+    pub(crate) to_x: u32,
+    pub(crate) to_y: u32,
+    pub(crate) crushed_agent: bool,
+}
+
+pub(crate) fn settle_stones_above_open_cell(
+    map: &mut [u8],
+    x: u32,
+    y: u32,
+    agent_position: Option<(u32, u32)>,
+) -> Result<Vec<StoneFall>, String> {
+    ensure_map_loaded(map)?;
+    if x >= MAP_WIDTH || y >= MAP_HEIGHT {
+        return Err("position is outside map bounds".into());
+    }
+    if tile_at(map, x, y)? != TILE_EMPTY {
+        return Ok(Vec::new());
+    }
+
+    let mut falls = Vec::new();
+    let mut open_y = y;
+    while open_y > 0 && tile_at(map, x, open_y - 1)? == TILE_STONE {
+        let from_y = open_y - 1;
+
+        let mut to_y = from_y;
+        let mut crushed_agent = false;
+        while to_y + 1 < MAP_HEIGHT && tile_at(map, x, to_y + 1)? == TILE_EMPTY {
+            to_y = to_y.saturating_add(1);
+            if agent_position == Some((x, to_y)) {
+                crushed_agent = true;
+                break;
+            }
+        }
+
+        if to_y == from_y {
+            break;
+        }
+
+        let from_index = index_of(x, from_y)?;
+        let to_index = index_of(x, to_y)?;
+        map[from_index] = TILE_EMPTY;
+        map[to_index] = TILE_STONE;
+        falls.push(StoneFall {
+            from_x: x,
+            from_y,
+            to_x: x,
+            to_y,
+            crushed_agent,
+        });
+
+        if crushed_agent {
+            break;
+        }
+
+        open_y = from_y;
+    }
+
+    Ok(falls)
 }
 
 #[cfg(test)]
@@ -393,6 +467,23 @@ mod tests {
     }
 
     #[test]
+    fn uploaded_map_rejects_stone_over_empty() {
+        let config = WorldConfig::default_40x64();
+        let mut uploaded: Vec<u32> = generate_map(42, &config)
+            .iter()
+            .copied()
+            .map(u32::from)
+            .collect();
+        uploaded[index_of(3, 1).unwrap()] = TILE_STONE as u32;
+        uploaded[index_of(3, 2).unwrap()] = TILE_EMPTY as u32;
+
+        assert_eq!(
+            validate_uploaded_map(&uploaded, &config),
+            Err("uploaded map has unsupported stone".into())
+        );
+    }
+
+    #[test]
     fn target_position_checks_bounds() {
         assert_eq!(target_position(2, 2, DIR_UP), Ok((2, 1)));
         assert_eq!(target_position(2, 2, DIR_RIGHT), Ok((3, 2)));
@@ -470,5 +561,155 @@ mod tests {
         map[index_of(3, 2).unwrap()] = TILE_EMPTY;
 
         assert_eq!(gravity_target(&map, 3, 1), Ok((3, 1)));
+    }
+
+    #[test]
+    fn stone_gravity_falls_through_empty_tiles() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_STONE;
+        map[index_of(3, 2).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 3).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 4).unwrap()] = TILE_DIRT;
+
+        let falls = settle_stones_above_open_cell(&mut map, 3, 2, None).unwrap();
+
+        assert_eq!(
+            falls,
+            vec![StoneFall {
+                from_x: 3,
+                from_y: 1,
+                to_x: 3,
+                to_y: 3,
+                crushed_agent: false,
+            }]
+        );
+        assert_eq!(map[index_of(3, 1).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 3).unwrap()], TILE_STONE);
+    }
+
+    #[test]
+    fn stone_gravity_crushes_agent_in_fall_path() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_STONE;
+        map[index_of(3, 2).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 3).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 4).unwrap()] = TILE_DIRT;
+
+        let falls = settle_stones_above_open_cell(&mut map, 3, 2, Some((3, 3))).unwrap();
+
+        assert_eq!(
+            falls,
+            vec![StoneFall {
+                from_x: 3,
+                from_y: 1,
+                to_x: 3,
+                to_y: 3,
+                crushed_agent: true,
+            }]
+        );
+        assert_eq!(map[index_of(3, 1).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 3).unwrap()], TILE_STONE);
+    }
+
+    #[test]
+    fn stone_gravity_settles_contiguous_stone_chain() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_STONE;
+        map[index_of(3, 2).unwrap()] = TILE_STONE;
+        map[index_of(3, 3).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 4).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 5).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 6).unwrap()] = TILE_DIRT;
+
+        let falls = settle_stones_above_open_cell(&mut map, 3, 3, None).unwrap();
+
+        assert_eq!(
+            falls,
+            vec![
+                StoneFall {
+                    from_x: 3,
+                    from_y: 2,
+                    to_x: 3,
+                    to_y: 5,
+                    crushed_agent: false,
+                },
+                StoneFall {
+                    from_x: 3,
+                    from_y: 1,
+                    to_x: 3,
+                    to_y: 4,
+                    crushed_agent: false,
+                }
+            ]
+        );
+        assert_eq!(map[index_of(3, 1).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 2).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 4).unwrap()], TILE_STONE);
+        assert_eq!(map[index_of(3, 5).unwrap()], TILE_STONE);
+    }
+
+    #[test]
+    fn drilling_dirt_under_stone_crushes_agent_below_it() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_STONE;
+        map[index_of(3, 2).unwrap()] = TILE_DIRT;
+        map[index_of(3, 3).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 4).unwrap()] = TILE_DIRT;
+
+        map[index_of(3, 2).unwrap()] = TILE_EMPTY;
+        let falls = settle_stones_above_open_cell(&mut map, 3, 2, Some((3, 3))).unwrap();
+
+        assert_eq!(
+            falls,
+            vec![StoneFall {
+                from_x: 3,
+                from_y: 1,
+                to_x: 3,
+                to_y: 3,
+                crushed_agent: true,
+            }]
+        );
+        assert_eq!(map[index_of(3, 1).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 3).unwrap()], TILE_STONE);
+    }
+
+    #[test]
+    fn stone_gravity_stops_on_ladder_before_agent() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_STONE;
+        map[index_of(3, 2).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 3).unwrap()] = TILE_LADDER;
+        map[index_of(3, 4).unwrap()] = TILE_EMPTY;
+
+        let falls = settle_stones_above_open_cell(&mut map, 3, 2, Some((3, 4))).unwrap();
+
+        assert_eq!(
+            falls,
+            vec![StoneFall {
+                from_x: 3,
+                from_y: 1,
+                to_x: 3,
+                to_y: 2,
+                crushed_agent: false,
+            }]
+        );
+        assert_eq!(map[index_of(3, 1).unwrap()], TILE_EMPTY);
+        assert_eq!(map[index_of(3, 2).unwrap()], TILE_STONE);
+        assert_eq!(map[index_of(3, 3).unwrap()], TILE_LADDER);
     }
 }

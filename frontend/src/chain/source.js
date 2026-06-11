@@ -30,6 +30,7 @@ import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
 import { CHAIN, chainReady } from './config.js';
 import { decodeWorldEvent, worldQueries, worldActions } from './world.js';
+import { skinFromAddress } from '../render/robot.js';
 
 // Pick the data source. Local engine today; the chain source once a World
 // contract is deployed and .env is filled (CHAIN.enabled + ids).
@@ -528,7 +529,7 @@ export class ChainSource {
     if (miner || !opts.create) return miner || null;
 
     const index = this.s.miners.length;
-    const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][index % 5];
+    const skin = skinFromAddress(event.owner); // deterministic robot look per address
     const x = normalizeEventNumber(event.x, 0);
     const y = normalizeEventNumber(event.y, this.world?.surface ?? 4);
     const created = {
@@ -550,8 +551,8 @@ export class ChainSource {
       respawnAtMs: null,
       spawnX: x,
       spawnY: this.world?.surface ?? y,
-      hat: index % 3 === 0 ? 'cap' : index % 3 === 1 ? 'visor' : 'antenna',
-      color,
+      hat: skin.hat,
+      color: skin.bodyColor,
       radar: 2,
       maxLadders: 10,
     };
@@ -772,7 +773,7 @@ export class ChainSource {
     const facing = Number(row.state[3] ?? 0);
     const y = rawToVisualY(rawY, surface, rawSurface, yOffset);
     const cargo = row.inventory.reduce((sum, v) => sum + Number(v || 0), 0);
-    const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][row.index % 5];
+    const skin = skinFromAddress(row.owner); // deterministic robot look per address
     const spawnX = Number(row.state[11] ?? x);
     return {
       id: row.index,
@@ -793,8 +794,8 @@ export class ChainSource {
       respawnAtMs: null,
       spawnX: Number.isFinite(spawnX) ? spawnX : x,
       spawnY: surface,
-      hat: row.index % 3 === 0 ? 'cap' : row.index % 3 === 1 ? 'visor' : 'antenna',
-      color,
+      hat: skin.hat,
+      color: skin.bodyColor,
       radar: 2,
       maxLadders: 10,
     };

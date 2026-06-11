@@ -146,6 +146,21 @@ export function pickRandomHat() {
   return weighted[Math.floor(Math.random() * weighted.length)];
 }
 
+// Deterministic cosmetic skin from the address: the address bytes pick one of
+// the existing on-palette body colours (incl. the classic grays + carbon black)
+// and one hat — colour and hat from different hash slices. Same address always
+// renders the same robot, and the look stays in the curated palette.
+export function skinFromAddress(address) {
+  const s = String(address || '').toLowerCase();
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  const hats = ['hardhat', 'pirate', 'party', 'top', 'cap', 'crown', 'beanie', 'horns'];
+  return {
+    bodyColor: BODY_COLOR_IDS[h % BODY_COLOR_IDS.length],
+    hat: hats[(h >>> 17) % hats.length],
+  };
+}
+
 export function drawRobot(g, cx, cy, size, opts = {}) {
   const {
     facing = 'right',

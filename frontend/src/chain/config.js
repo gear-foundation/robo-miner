@@ -32,12 +32,18 @@ export const CHAIN = {
     .filter(Boolean),
   // Optional thin registry / leaderboard program (aggregate across maps).
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
+  backendUrl: env.VITE_BACKEND_URL || '',
 
   // Fallback poll interval (ms) if push event subscription isn't used.
   pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
 
   // Logical contract surface. The new Config()[6] is starting_hp, not surface.
   contractSurfaceY: Number(env.VITE_CONTRACT_SURFACE_Y || 1),
+
+  // Operator SSE stream of per-action events (decoded from injected-tx receipts).
+  // When set, the spectator consumes this for smooth event-driven animation
+  // instead of polling chain snapshots (the chain has no event subscription).
+  streamUrl: env.VITE_AGENT_STREAM_URL || '',
 };
 
 // True only when chain mode is on AND the minimum endpoints/ids are present, so

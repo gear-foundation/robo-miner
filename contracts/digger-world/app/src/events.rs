@@ -8,6 +8,7 @@ use sails_rs::prelude::*;
 pub enum WorldEvents {
     AgentRegistered(u64, [u8; 32]),
     AgentSpawned(u64, [u8; 32], u32, u32),
+    SessionStarted(u64),
     AgentMoved(u64, [u8; 32], u32, u32, u32, u32),
     TileDrilled(u64, [u8; 32], u32, u32, u32, u32),
     ResourceExtracted(u64, [u8; 32], u32, u32, u32, u32),
@@ -24,6 +25,7 @@ pub enum WorldEvents {
 #[type_info(crate = sails_rs::type_info)]
 #[reflect_hash(crate = sails_rs)]
 pub enum AdminEvents {
+    Killed([u8; 32]),
     MapGenerated(u64, u64),
     SessionStarted(u64),
     SessionFinished(u64),

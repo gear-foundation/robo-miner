@@ -887,7 +887,7 @@ async function sendInjectedUpload(api, codec, accountAddress, programId, payload
     const reply = promise.reply || {};
     const replyPayload = injectedReplyField(reply, "payload");
     if (!replyPayload) {
-      throw new Error(`injected promise returned no reply payload: ${compactJson(promise.raw)}`);
+      throw new Error(`injected receipt returned no reply payload: ${compactJson(promise.raw)}`);
     }
 
     const session = codec.decodeResult(replyPayload, "Vec<u128>");

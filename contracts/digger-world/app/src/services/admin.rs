@@ -1,10 +1,10 @@
-use sails_rs::{cell::RefCell, prelude::*};
+use sails_rs::{cell::RefCell, gstd::exec, prelude::*};
 
 use crate::{
     constants::{SESSION_ACTIVE, SESSION_CREATED, SESSION_FINISHED},
     events::AdminEvents,
     map::{ensure_map_loaded, generate_map, validate_uploaded_map},
-    state::{WorldState, ensure_admin, session_view},
+    state::{WorldState, ensure_admin, ensure_min_participants_to_start, session_view},
 };
 
 pub struct AdminService<'a> {
@@ -20,6 +20,24 @@ impl<'a> AdminService<'a> {
 #[service(events = AdminEvents)]
 impl AdminService<'_> {
     #[export(unwrap_result)]
+    pub fn kill(&mut self, inheritor: ActorId) -> Result<(), String> {
+        {
+            let state = self.state.borrow();
+            let caller = Syscall::message_source();
+            ensure_admin(&state, caller)?;
+        }
+
+        if inheritor == ActorId::zero() {
+            return Err("inheritor cannot be zero".into());
+        }
+
+        self.emit_event(AdminEvents::Killed(inheritor.into_bytes()))
+            .expect("failed to emit killed event");
+
+        exec::exit(inheritor);
+    }
+
+    #[export(unwrap_result)]
     pub fn start_session(&mut self) -> Result<Vec<u128>, String> {
         let caller = Syscall::message_source();
         let mut state = self.state.borrow_mut();
@@ -29,6 +47,10 @@ impl AdminService<'_> {
         if state.session.status == SESSION_ACTIVE {
             return Err("session is already active".into());
         }
+        if state.session.status != SESSION_CREATED {
+            return Err("session cannot be started".into());
+        }
+        ensure_min_participants_to_start(&state)?;
 
         state.session.status = SESSION_ACTIVE;
         let session_id = state.session.session_id;

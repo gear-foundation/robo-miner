@@ -114,7 +114,9 @@ export default class SpectatorScene extends GameScene {
     this.eventLog = []; this.txCount = 0; this.consoleOpen = false; this.consoleTimer = 0;
 
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, this.world.W * TILE, this.world.H * TILE);
+    // One tile of slack on left/right/bottom for the decorative stone frame
+    // (drawFrameRing) — the playfield itself fills all W columns + full depth.
+    cam.setBounds(-TILE, 0, (this.world.W + 2) * TILE, (this.world.H + 1) * TILE);
     cam.setBackgroundColor('#4a7bbf');
     cam.setRoundPixels(true);
     cam.setZoom(1);
@@ -129,6 +131,31 @@ export default class SpectatorScene extends GameScene {
     this.robotQuestionSound = this.sound.add('robot-question', { volume: 0.42 });
     this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound];
     this.scale.on('resize', this.onSpecResize, this);
+  }
+
+  // The contract map has NO stone border — all W columns and the full depth are
+  // playable, because the contract clamps movement at the map edges itself. The
+  // frame is therefore pure UI chrome: a stone ring drawn just OUTSIDE the
+  // playfield (left/right columns + bottom row), so it frames the map the way the
+  // local game does without stealing a single contract-addressable cell.
+  drawWorld() {
+    super.drawWorld();
+    this.drawFrameRing(this.worldGfx);
+  }
+
+  drawFrameRing(g) {
+    if (!this.world) return;
+    const W = this.world.W;
+    const H = this.world.H;
+    const surfaceY = this.world.surface ?? SURFACE_Y;
+    const data = BLOCK_DATA[BLOCK.STONE];
+    // Render the frame with the SAME tile path as the interior stones (drawTile
+    // → 'stone' texture / procedural fallback) so it matches them exactly.
+    for (let gy = surfaceY; gy <= H; gy += 1) {
+      this.drawTile(g, -1, gy, BLOCK.STONE, data);
+      this.drawTile(g, W, gy, BLOCK.STONE, data);
+    }
+    for (let gx = -1; gx <= W; gx += 1) this.drawTile(g, gx, H, BLOCK.STONE, data);
   }
 
   showLoading() {

@@ -29,6 +29,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { waitForInjectedReply } from "./lib/injected-receipt.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -121,7 +123,7 @@ Inputs:
   --verify-only     Query World.MapSnapshot and compare it with the input map.
   --validator       "default" or "slot". Defaults to DIGGER_VALIDATOR_MODE/default.
   --promise-timeout-ms
-                    Max time to wait for injected promise before state polling fallback.
+                    Max time to wait for injected receipt before state polling fallback.
   --query-timeout-ms
                     Max time to wait for calculateReplyForHandle.
 
@@ -133,7 +135,7 @@ Environment:
   DIGGER_PROGRAM_ID Existing Digger Mirror address.
   DIGGER_MAP_FILE   Alternative to --file.
   DIGGER_PROMISE_TIMEOUT_MS
-                    Injected promise timeout in milliseconds.
+                    Injected receipt timeout in milliseconds.
   DIGGER_QUERY_TIMEOUT_MS
                     calculateReplyForHandle timeout in milliseconds.
   DIGGER_SEED       Fallback upload seed.
@@ -823,9 +825,9 @@ async function main() {
     });
 
     const reply = await withTimeout(
-      injected.sendAndWaitForPromise(),
+      waitForInjectedReply(injected),
       promiseTimeoutMs,
-      "injected promise",
+      "injected receipt",
     );
 
     if (reply) {
@@ -845,7 +847,7 @@ async function main() {
         console.log("[tx] decoded result", stringify(decodeUploadResult(sails, reply.payload)));
       }
     } else {
-      console.warn("[tx] continuing with stateHash polling without injected promise");
+      console.warn("[tx] continuing with stateHash polling without injected receipt");
     }
 
     const nextStateHash = await waitForStateHashChange(

@@ -19,6 +19,10 @@ Thumbs.db
 .idea/
 .vscode/
 
+# claude tooling + operator runtime state (not source)
+.claude/
+/state/
+
 # logs
 *.log
 npm-debug.log*

@@ -21,6 +21,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { waitForInjectedReply } from "./lib/injected-receipt.js";
+
 loadEnv({ quiet: true });
 
 const OWNER = "0xee98b6381b0a6a18a4a4e6d74355b015319a6809" as Hex;
@@ -1190,7 +1192,7 @@ async function primeSeenMessages(
   programId: Hex,
 ): Promise<Set<string>> {
   const seen = new Set<string>();
-  const transitions = await provider.send<StateTransition[]>("block_outcome", [], { timeout: 30_000 });
+  const transitions = await readLatestOutcome(provider);
   for (const transition of transitions) {
     if (normalizeAddress(transition.actorId) !== programId) continue;
     for (const message of transition.messages ?? []) seen.add(message.id);
@@ -1207,7 +1209,8 @@ async function watchFreshOutcomeMessages(
   const startedAt = Date.now();
   const found: unknown[] = [];
   while (Date.now() - startedAt < timeoutMs) {
-    const transitions = await provider.send<StateTransition[]>("block_outcome", [], { timeout: 30_000 });
+    const transitions = await readLatestOutcome(provider);
+    if (transitions.length === 0) return found;
     for (const transition of transitions) {
       if (normalizeAddress(transition.actorId) !== programId) continue;
       for (const message of transition.messages ?? []) {
@@ -1234,6 +1237,17 @@ async function watchFreshOutcomeMessages(
   return found;
 }
 
+async function readLatestOutcome(provider: WsVaraEthProvider): Promise<StateTransition[]> {
+  try {
+    return await provider.send<StateTransition[]>("block_outcome", [], { timeout: 30_000 });
+  } catch (error) {
+    if (/method not found|not found|unsupported/i.test(error instanceof Error ? error.message : String(error))) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 function decodePromisePayload(payload: Hex) {
   try {
     const decoded = decodeFunctionData({ abi: ABI, data: payload });
@@ -1250,7 +1264,7 @@ function decodePromisePayload(payload: Hex) {
     const errorPayload = typeof reply === "string" && reply.startsWith("0x") ? hexToUtf8Text(reply as Hex) : undefined;
 
     return {
-      source: "sendAndWaitForPromise reply payload",
+      source: "injected receipt reply payload",
       decodeRule: "Solidity ABI callback data; Digger reply callbacks carry uint128[] AgentView or SessionView",
       functionName: decoded.functionName,
       messageId: typeof rawArgs[0] === "string" ? rawArgs[0] : undefined,
@@ -1265,7 +1279,7 @@ function decodePromisePayload(payload: Hex) {
     };
   } catch (error) {
     return {
-      source: "sendAndWaitForPromise reply payload",
+      source: "injected receipt reply payload",
       decodeRule: "Tried Solidity ABI callback decode; if it is a panic payload, decode bytes as UTF-8 text",
       decodeError: error instanceof Error ? error.message : String(error),
       payload,
@@ -1313,7 +1327,7 @@ async function sendInjectedAction(
   const recipient = tx.setDefaultValidator();
   console.log(JSON.stringify({ prepared: { recipient, messageId: tx.messageId, txHash: tx.txHash } }));
 
-  const reply = await tx.sendAndWaitForPromise();
+  const reply = await waitForInjectedReply(tx);
   const decodedPayload = decodePromisePayload(reply.payload);
   console.log(JSON.stringify({
     promise: {
@@ -1501,7 +1515,7 @@ async function main() {
       decoder: {
         actionPayload: "Injected tx payload is Solidity ABI calldata for worldDrill(bool,uint32) or worldMoveAgent(bool,uint32)",
         replyPayload: {
-          source: "tx.sendAndWaitForPromise()",
+          source: "tx receipt",
           callbacks: [
             "replyOn_adminStartSession(bytes32,uint128[])",
             "replyOn_adminResetMap(bytes32,uint128[])",

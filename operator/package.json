@@ -8,6 +8,12 @@
     "gen": "node src/operator.js",
     "start": "node src/operator.js",
     "query": "node src/query.js",
+    "factory": "node src/factory/index.js",
+    "factory:forever": "node src/factory/index.js --duration 0",
+    "factory:chain": "node --env-file-if-exists=.env src/factory/index.js --chain",
+    "sim:register": "node --env-file-if-exists=.env src/sim/register-agents.js",
+    "sim:play": "node --env-file-if-exists=.env src/sim/play-agents.js",
+    "sim:reset": "node --env-file-if-exists=.env src/sim/reset-world.js",
     "gamemaster": "node src/gamemaster.js",
     "gamemaster:create": "node src/gamemaster.js create",
     "gamemaster:list": "node src/gamemaster.js list",
@@ -17,9 +23,9 @@
     "@gear-js/api": "^0.45.0",
     "@polkadot/api": "^16.5.6",
     "@polkadot/util": "^14.0.3",
-    "@vara-eth/api": "latest",
+    "@vara-eth/api": "^0.5.0",
     "kzg-wasm": "1.0.0",
     "sails-js": "https://github.com/gear-tech/sails/releases/download/js/v1.0.0-beta.1/sails-js.tgz",
-    "viem": "^2.39.0"
+    "viem": "npm:@vara-eth/viem@2.47.7-1"
   }
 }

@@ -581,12 +581,12 @@ async function main() {
       : await createProgram(connection.api, "redeem", redeemCodeId, topUp);
 
     if (!args.skipResInit) {
-      const createRes = resSails.ctors.Create.encodePayload(ZERO_ACTOR, initialMinterActor) as Hex;
+      const createRes = resSails.ctors!.Create.encodePayload(ZERO_ACTOR, initialMinterActor) as Hex;
       await sendMirrorMessage(connection.api, resProgram, "res.create", createRes, 0n, promiseTimeoutMs);
     }
 
     if (!args.skipRedeemInit) {
-      const createRedeem = redeemSails.ctors.Create.encodePayload(actorIdFromAddress(resProgram), rates.scrst, rates.bcrst, rates.hcrst) as Hex;
+      const createRedeem = redeemSails.ctors!.Create.encodePayload(actorIdFromAddress(resProgram), rates.scrst, rates.bcrst, rates.hcrst) as Hex;
       await sendMirrorMessage(connection.api, redeemProgram, "redeem.create", createRedeem, 0n, promiseTimeoutMs);
     }
 

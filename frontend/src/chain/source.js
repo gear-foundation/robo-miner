@@ -93,25 +93,10 @@ function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
     }
   }
 
-  // The contract snapshot is logical game state. The spectator adds the same
-  // visual shell the local worlds have: sky above the playable surface and an
-  // unbreakable-looking stone frame around the mine. The current contract has
-  // rawSurface=1, while the show view uses surface=4, so raw underground rows
-  // are shifted down instead of overwritten by the decorative sky band.
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (y < surface) {
-        grid[i] = BLOCK.SKY;
-        continue;
-      }
-      if (x === 0 || x === W - 1 || y === H - 1) {
-        grid[i] = BLOCK.STONE;
-        continue;
-      }
-    }
-  }
-
+  // Render the contract tiles as-is (sky above the surface is already filled).
+  // Do NOT overwrite edge tiles with a decorative stone frame — the uploaded map
+  // already carries its own stone floor/frame, and forcing edges to stone would
+  // hide dug tiles and bury agents standing at the bottom row or side columns.
   return { grid, H, yOffset };
 }
 
@@ -162,6 +147,7 @@ export class ChainSource {
     this._seenEventKeys = new Set();
     this._lastGrid = null;
     this._lastAgents = new Map();
+    this._outcomeUnavailableNotified = false;
     this.ready = this._boot();
   }
 
@@ -231,6 +217,22 @@ export class ChainSource {
   // polling remains a slower safety net for rehydrate / missed blocks.
   async subscribe() {
     this._unsub = null;
+    if (CHAIN.streamUrl) {
+      // Event-driven: the operator pushes per-action deltas (from injected-tx
+      // receipts) over SSE; we apply them one at a time so each move/dig
+      // animates smoothly (no jerky snapshot batches). Initial map+agents came
+      // from load(); the chain has no event subscription, so this is the stream.
+      const url = `${CHAIN.streamUrl.replace(/\/$/, '')}/events`;
+      this._stream = new EventSource(url);
+      this._stream.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev && ev.type && ev.type !== 'hello') this._applyChainEvent(ev);
+        } catch { /* ignore non-JSON keep-alives */ }
+      };
+      this._stream.onerror = () => { /* EventSource auto-reconnects */ };
+      return;
+    }
     await this._primeEventCursor();
   }
 
@@ -240,20 +242,24 @@ export class ChainSource {
     this.timeMs += dtMs;
     this._advanceAnimations(dtMs);
 
-    this._eventPollInMs -= dtMs;
-    if (this._eventPollInMs <= 0 && !this._draining) {
-      this._eventPollInMs = this._eventPollEveryMs;
-      this._drainNewBlocks().catch((error) => {
-        this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-      });
-    }
+    // In stream mode the SSE consumer feeds events directly; skip chain polling
+    // (it would fight the push stream and re-introduce snapshot jumps).
+    if (!this._stream) {
+      this._eventPollInMs -= dtMs;
+      if (this._eventPollInMs <= 0 && !this._draining) {
+        this._eventPollInMs = this._eventPollEveryMs;
+        this._drainNewBlocks().catch((error) => {
+          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+        });
+      }
 
-    this._snapshotInMs -= dtMs;
-    if (this._snapshotInMs <= 0 && !this._polling) {
-      this._snapshotInMs = this._snapshotEveryMs;
-      this._refresh({ emitEvents: false }).catch((error) => {
-        this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-      });
+      this._snapshotInMs -= dtMs;
+      if (this._snapshotInMs <= 0 && !this._polling) {
+        this._snapshotInMs = this._snapshotEveryMs;
+        this._refresh({ emitEvents: false }).catch((error) => {
+          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+        });
+      }
     }
     this.events = this._pending.splice(0);
     if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'map_generated'].includes(e.type))) {
@@ -286,6 +292,20 @@ export class ChainSource {
     try {
       const latest = await this._api.query.block.header();
       if (!latest?.hash || latest.hash === this._lastBlockHash) return;
+
+      if (typeof this._api?.query?.block?.outcome !== 'function') {
+        if (!this._outcomeUnavailableNotified) {
+          this._pending.push({
+            type: 'chain_events_unavailable',
+            message: 'block outcome RPC is unavailable; using snapshot diff fallback',
+          });
+          this._outcomeUnavailableNotified = true;
+        }
+        await this._refresh({ emitEvents: true });
+        this._lastBlockHash = latest.hash;
+        this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
+        return;
+      }
 
       const chain = [];
       let cursor = latest;
@@ -337,14 +357,17 @@ export class ChainSource {
 
   _decodeSailsEvent(payload) {
     if (!payload) return null;
-    const bytes = Array.isArray(payload) ? Uint8Array.from(payload) : payload;
-    for (const decoder of this._eventDecoders) {
-      try {
-        const event = decoder.decode(bytes);
-        if (event) return { ...event, chainEvent: decoder.name };
-      } catch {
-        // Payloads are matched by trying each Sails event header.
+    // Decode through the Sails program (handles the service-route prefix) — the
+    // per-event raw decode misses the routing header and silently fails.
+    const hex = typeof payload === 'string' ? payload : `0x${Buffer.from(payload).toString('hex')}`;
+    try {
+      const decoded = this._program.decodeEvent(hex);
+      if (decoded?.kind === 'event' && decoded.entry?.kind === 'event') {
+        const mapped = decodeWorldEvent(decoded.entry.event, decoded.data);
+        if (mapped) return { ...mapped, chainEvent: decoded.entry.event };
       }
+    } catch {
+      // payload isn't a decodable program event
     }
     return null;
   }
@@ -393,13 +416,19 @@ export class ChainSource {
         miner.spawnY = this.world?.surface ?? event.y;
         break;
       case 'moved':
-        this._moveMiner(miner, event);
+        this._enqueueAct(miner, {
+          kind: 'move',
+          fromX: Number.isFinite(event.fromX) ? event.fromX : undefined,
+          fromY: Number.isFinite(event.fromY) ? event.fromY : undefined,
+          tx: event.x,
+          ty: event.y,
+        });
         break;
       case 'dug':
         this._setRawTile(event.x, event.rawY, event.rawNewBlock ?? 0);
         if (miner) {
           miner.stats.tilesDug += 1;
-          miner.act = { kind: 'dig', tx: event.x, ty: event.y, blockType: event.block, t: 0, dur: CHAIN_DIG_PULSE_MS };
+          this._enqueueAct(miner, { kind: 'dig', tx: event.x, ty: event.y, blockType: event.block });
         }
         break;
       case 'resource_extracted':
@@ -437,6 +466,7 @@ export class ChainSource {
           miner.alive = false;
           miner.exited = true;
           miner.act = null;
+          miner.actQueue = [];
           miner.respawnAtMs = null;
         }
         break;
@@ -536,6 +566,7 @@ export class ChainSource {
     miner.drawX = x;
     miner.drawY = y;
     miner.act = null;
+    miner.actQueue = [];
     if ('alive' in opts) miner.alive = opts.alive;
     if (opts.alive) {
       miner.exited = false;
@@ -543,24 +574,41 @@ export class ChainSource {
     }
   }
 
-  _moveMiner(miner, event) {
+  // Event bus: incoming per-action deltas are queued per miner and played one at
+  // a time (drill pulse, then the slide), each at its own fixed pace, so a small
+  // burst of SSE events animates smoothly in order instead of teleporting.
+  _enqueueAct(miner, act) {
     if (!miner) return;
-    const fromX = Number.isFinite(event.fromX) ? event.fromX : miner.tx;
-    const fromY = Number.isFinite(event.fromY) ? event.fromY : miner.ty;
-    const toX = Number.isFinite(event.x) ? event.x : fromX;
-    const toY = Number.isFinite(event.y) ? event.y : fromY;
-    if (toX < fromX) miner.facing = 'left';
-    else if (toX > fromX) miner.facing = 'right';
-    else if (toY < fromY) miner.facing = 'up';
-    else if (toY > fromY) miner.facing = 'down';
-    miner.tx = toX;
-    miner.ty = toY;
-    miner.drawX = fromX;
-    miner.drawY = fromY;
-    miner.alive = true;
-    miner.exited = false;
-    miner.respawnAtMs = null;
-    miner.act = { kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_MOVE_MS };
+    if (!miner.actQueue) miner.actQueue = [];
+    miner.actQueue.push(act);
+  }
+
+  _startAct(miner, act) {
+    // Each act plays at its own fixed, natural duration — we do NOT speed it up
+    // when the queue grows. The bots pace themselves (one action per agent every
+    // ~1s+), so the per-miner queue stays short; if a small burst arrives (e.g.
+    // a drill + its gravity fall), the acts just play in order, each at full
+    // speed, and the miner settles. Faithful replay, never a rushed teleport.
+    if (act.kind === 'move') {
+      const fromX = Number.isFinite(act.fromX) ? act.fromX : miner.tx;
+      const fromY = Number.isFinite(act.fromY) ? act.fromY : miner.ty;
+      const toX = Number.isFinite(act.tx) ? act.tx : fromX;
+      const toY = Number.isFinite(act.ty) ? act.ty : fromY;
+      if (toX < fromX) miner.facing = 'left';
+      else if (toX > fromX) miner.facing = 'right';
+      else if (toY < fromY) miner.facing = 'up';
+      else if (toY > fromY) miner.facing = 'down';
+      miner.tx = toX;
+      miner.ty = toY;
+      miner.drawX = fromX;
+      miner.drawY = fromY;
+      miner.alive = true;
+      miner.exited = false;
+      miner.respawnAtMs = null;
+      miner.act = { kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_MOVE_MS };
+    } else if (act.kind === 'dig') {
+      miner.act = { kind: 'dig', tx: act.tx, ty: act.ty, blockType: act.blockType, t: 0, dur: CHAIN_DIG_PULSE_MS };
+    }
   }
 
   _setRawTile(x, rawY, rawTile) {
@@ -576,7 +624,6 @@ export class ChainSource {
     const i = y * W + x;
     let next = renderTile(rawTile);
     if (y < this.world.surface) next = BLOCK.SKY;
-    else if (x === 0 || x === W - 1 || y === this.world.H - 1) next = BLOCK.STONE;
     if (this.world.grid[i] !== next) {
       this.world.grid[i] = next;
       this.worldDirty = true;
@@ -585,6 +632,8 @@ export class ChainSource {
 
   _advanceAnimations(dtMs) {
     for (const m of this.s.miners) {
+      // Pull the next queued act when idle (drill → fall → next drill …).
+      if (!m.act && m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
       const a = m.act;
       if (!a) continue;
       a.t += dtMs;
@@ -599,6 +648,9 @@ export class ChainSource {
           m.drawY = a.ty;
         }
         m.act = null;
+        // Chain straight into the next queued act (drill → fall → next drill)
+        // so sequential acts play back-to-back, each still at its full duration.
+        if (m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
       }
     }
   }
@@ -632,8 +684,18 @@ export class ChainSource {
         validation: { ok: true, warnings: [] },
       };
     } else {
+      let gridChanged = this.world.grid.length !== grid.length;
+      if (!gridChanged) {
+        for (let i = 0; i < grid.length; i += 1) {
+          if (this.world.grid[i] !== grid[i]) { gridChanged = true; break; }
+        }
+      }
       this._emitGridDiffs(this.world.grid, grid, W, emitEvents);
       this.world.grid = grid;
+      // Force a tile redraw whenever the map actually changed — don't depend on
+      // the async event drain (block_outcome events are unavailable on this
+      // endpoint, so the snapshot poll is the only source of truth).
+      if (gridChanged) this.worldDirty = true;
       this.world.rawGrid = Uint32Array.from(snap.rawGrid);
       this.world.W = W;
       this.world.H = H;

@@ -13,10 +13,7 @@ import {
   type IVaraEthProvider,
   type StateTransition,
 } from "@vara-eth/api";
-import {
-  normalizeBlockEvent,
-  normalizeStateTransition,
-} from "@vara-eth/api/util";
+import { normalizeBlockEvent } from "@vara-eth/api/util";
 import { config as loadEnv } from "dotenv";
 import { SailsProgram } from "sails-js";
 import { SailsIdlParser } from "sails-js/parser";
@@ -33,6 +30,19 @@ const DEFAULTS = {
 } as const;
 
 const IDL_PATH = path.join(ROOT, "target/wasm32-gear/release/digger_world.idl");
+
+function normalizeStateTransitionCompat(transition: Record<string, unknown>) {
+  if (typeof transition.actor_id === "string" && typeof transition.actorId !== "string") {
+    transition.actorId = transition.actor_id;
+  }
+  const messages = Array.isArray(transition.messages) ? transition.messages : [];
+  for (const rawMessage of messages) {
+    const message = rawMessage as Record<string, unknown>;
+    if (typeof message.reply_details === "object" && message.replyDetails == null) {
+      message.replyDetails = message.reply_details;
+    }
+  }
+}
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 type Hex = `0x${string}`;
@@ -339,7 +349,7 @@ async function readBlockOutcome(
     parameters,
     { timeout: timeoutMs },
   );
-  transitions.forEach(normalizeStateTransition);
+  transitions.forEach((transition) => normalizeStateTransitionCompat(transition as unknown as Record<string, unknown>));
   return transitions;
 }
 

@@ -29,6 +29,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { waitForInjectedReply } from "./lib/injected-receipt.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -125,7 +127,7 @@ Flow:
   - reads World.Session and starts it when needed;
   - reads World.AgentOf and registers when needed;
   - sends Admin/World actions through the selected transport;
-  - default transport is injected sendAndWaitForPromise; use --transport mirror only as fallback;
+  - default transport is injected receipt; use --transport mirror only as fallback;
   - decodes each returned reply into AgentView and chooses the next action from that reply.
 
 Environment:
@@ -498,11 +500,11 @@ async function sendInjected<T>(
   });
 
   const reply = await withTimeout(
-    injected.sendAndWaitForPromise(),
+    waitForInjectedReply(injected),
     promiseTimeoutMs,
-    `${label} injected promise`,
+    `${label} injected receipt`,
   );
-  if (!reply?.payload) throw new Error(`${label} did not return an injected promise payload`);
+  if (!reply?.payload) throw new Error(`${label} did not return an injected receipt payload`);
   assertSuccessReply(reply.code, sails, reply.payload);
   const decoded = decode(reply.payload);
   console.log(`[${label}] reply`, stringify(decoded));
@@ -679,7 +681,7 @@ async function main() {
   );
   const steps = parseNonNegativeInt(args.steps || envValue("DIGGER_PLAY_STEPS") || DEFAULTS.DIGGER_PLAY_STEPS, "steps");
   const timeoutMs = parsePositiveInt(valueOrDefault("DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), "timeout");
-  const promiseTimeoutMs = parsePositiveInt(valueOrDefault("DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), "promise timeout");
+  const promiseTimeoutMs = parsePositiveInt(valueOrDefault("DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), "receipt timeout");
   const queryTimeoutMs = parsePositiveInt(valueOrDefault("DIGGER_QUERY_TIMEOUT_MS", args.queryTimeoutMs), "query timeout");
   const validatorMode = (args.validatorMode || envValue("DIGGER_VALIDATOR_MODE") || DEFAULTS.DIGGER_VALIDATOR_MODE) as ValidatorMode;
   const transport = valueOrDefault("DIGGER_PLAY_TRANSPORT", args.transport) as "mirror" | "injected";

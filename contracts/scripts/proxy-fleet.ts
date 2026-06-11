@@ -30,6 +30,8 @@ import {
 } from "viem";
 import { nonceManager, privateKeyToAccount } from "viem/accounts";
 
+import { waitForInjectedReply } from "./lib/injected-receipt.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
@@ -501,7 +503,7 @@ async function sendInjectedMessage(
   const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
   validatorMode === "slot" ? await injected.setSlotValidator() : injected.setDefaultValidator();
   console.log(`[${label}] injected`, { programId, messageId: injected.messageId, txHash: injected.txHash });
-  const reply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const reply = await withTimeout(waitForInjectedReply(injected), promiseTimeoutMs, `${label} injected receipt`);
   if (reply) assertSuccessReply(reply.code, reply.payload);
   return waitForStateHashChange(api, programId, previous, stateTimeoutMs);
 }
@@ -517,7 +519,7 @@ async function sendInjectedMessageAndWaitForReplyOnly(
   const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
   validatorMode === "slot" ? await injected.setSlotValidator() : injected.setDefaultValidator();
   console.log(`[${label}] injected`, { programId, messageId: injected.messageId, txHash: injected.txHash });
-  const reply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
+  const reply = await withTimeout(waitForInjectedReply(injected), promiseTimeoutMs, `${label} injected receipt`);
   if (reply) assertSuccessReply(reply.code, reply.payload);
 }
 

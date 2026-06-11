@@ -32,6 +32,16 @@ export default class MenuScene extends Phaser.Scene {
 
   create() {
     this.cleanupMenuDOM();
+    // Boot muted by default — sound is opt-in via the speaker button, so the app
+    // never auto-plays the menu music when a tab/preview loads it.
+    let bootVol = 0;
+    try {
+      const v = localStorage.getItem('robo.volume');
+      if (v != null) bootVol = Math.max(0, Math.min(1, parseFloat(v)));
+    } catch { /* localStorage unavailable */ }
+    this._volume = bootVol;
+    this.game.sound.volume = bootVol;
+    this.game.sound.mute = bootVol === 0;
     const W = this.scale.width, H = this.scale.height;
 
     // Horizon y: where grass meets sky. Robot feet land exactly on this line.
@@ -978,8 +988,8 @@ export default class MenuScene extends Phaser.Scene {
   // remember the choice.
   createSoundButtonDOM() {
     if (this.soundBtnEl) return;
-    // Restore stored volume.
-    let stored = 1;
+    // Restore stored volume; default to muted (sound is opt-in).
+    let stored = 0;
     try {
       const v = localStorage.getItem('robo.volume');
       if (v != null) stored = Math.max(0, Math.min(1, parseFloat(v)));

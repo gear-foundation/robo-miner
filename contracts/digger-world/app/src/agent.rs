@@ -85,6 +85,10 @@ pub(crate) fn inventory_view(agent: &Agent) -> Vec<u32> {
     ]
 }
 
+pub(crate) fn owner_view(agent: &Agent) -> ActorId {
+    agent.owner
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -109,6 +109,7 @@ export async function createChainDriver({ env, log = console.log }) {
       const programId = await chain.createProgram(code, BigInt(env.topUp));
       await chain.sendAdmin(programId, chain.encode.create());
       pool.programs.push(programId);
+      reuseIdx += 1; // this program is now assigned to a world — don't reuse it for the next one
       await savePool();
       log(`[chain] program created + initialized ${programId}`);
       await keeper.ensureNow(programId);

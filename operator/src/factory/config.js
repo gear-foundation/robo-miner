@@ -30,6 +30,10 @@ export function loadChainEnv(overrides = {}) {
     idlPath: process.env.DIGGER_IDL_PATH || '',
     contractSurface: num('CONTRACT_SURFACE_Y', 1),
     timeoutMs: num('DIGGER_EVENT_TIMEOUT_MS', 180000),
+    // WS resilience — keep reconnecting on a dropped node connection (so the
+    // factory + balanceKeeper survive transient drops instead of dying).
+    wsReconnectAttempts: num('WS_RECONNECT_ATTEMPTS', 1000000),
+    wsReconnectDelay: num('WS_RECONNECT_DELAY_MS', 2000),
 
     // ── balanceKeeper (proactive executable-balance top-up) ──────────────────
     // Measured: ~0.56 VARA/s for 10 busy agents; top-up lands ~90s late. So keep

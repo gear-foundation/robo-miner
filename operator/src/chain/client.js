@@ -59,8 +59,21 @@ export async function connectChain(env) {
   const publicClient = createPublicClient({ transport: ethTransport });
   const walletClient = createWalletClient({ account, transport: ethTransport });
   const provider = env.varaWs.startsWith('ws')
-    ? new WsVaraEthProvider(env.varaWs, { requestTimeout: env.timeoutMs })
+    ? new WsVaraEthProvider(env.varaWs, {
+        requestTimeout: env.timeoutMs,
+        // Resilience: keep reconnecting on a dropped WS instead of dying. Without
+        // this a transient disconnect silently kills the factory + balanceKeeper
+        // and a world's executable balance drains to 0 (program becomes
+        // unresponsive). High attempts ≈ "never give up"; fixed short backoff.
+        reconnectAttempts: Number(env.wsReconnectAttempts ?? 1_000_000),
+        reconnectDelay: Number(env.wsReconnectDelay ?? 2000),
+      })
     : new HttpVaraEthProvider(env.varaWs, { requestTimeout: env.timeoutMs });
+  if (typeof provider.on === 'function') {
+    provider.on('disconnected', () => console.warn('[chain] WS disconnected — auto-reconnecting…'));
+    provider.on('connected', () => console.log('[chain] WS connected'));
+    provider.on('error', (e) => console.warn(`[chain] WS error: ${e?.error?.message || ''}`));
+  }
   const api = await createVaraEthApi(provider, publicClient, env.router, walletClientToSigner(walletClient));
   const accountAddress = await api.eth.signer.getAddress();
 

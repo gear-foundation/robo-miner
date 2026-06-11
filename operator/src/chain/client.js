@@ -146,6 +146,28 @@ export async function connectChain(env) {
     return reply;
   }
 
+  // Program's executable balance pays for every injected agent action. It is NOT
+  // wvara.balanceOf(programId) (that reads 0) — it lives in the program state and
+  // is read via the Vara.eth node: stateHash → readState.executableBalance (wei).
+  async function readExecutableBalance(programId) {
+    const mirror = mirrorFor(programId);
+    const stateHash = await mirror.stateHash();
+    const st = await api.query.program.readState(stateHash);
+    return st.executableBalance; // bigint, 1 VARA = 1e12
+  }
+
+  // Top up a program's executable balance. The WVARA permit spender MUST be the
+  // PROGRAM (mirror) address, not the router. Lands ~90s later (validator lag).
+  async function topUpExecutableBalance(programId, value) {
+    const deadline = permitDeadline();
+    const { signature } = await api.eth.wvara.prepareAndSignPermitData(programId, value, deadline);
+    const mirror = mirrorFor(programId);
+    const tx = await mirror.executableBalanceTopUpWithPermit(value, deadline, signature);
+    return tx.sendAndWaitForReceipt();
+  }
+
+  const wvaraBalanceOf = (address) => api.eth.wvara.balanceOf(address);
+
   const admin = sails.services.Admin.functions;
   const world = sails.services.World;
 
@@ -159,6 +181,9 @@ export async function connectChain(env) {
     createProgram,
     sendAdmin,
     sendInjected,
+    readExecutableBalance,
+    topUpExecutableBalance,
+    wvaraBalanceOf,
     query,
     encode: {
       create: () => sails.ctors.Create.encodePayload(),
@@ -169,14 +194,18 @@ export async function connectChain(env) {
       register: (owner) => world.functions.Register.encodePayload(owner),
       moveAgent: (direction) => world.functions.MoveAgent.encodePayload(direction),
       drill: (direction) => world.functions.Drill.encodePayload(direction),
+      placeLadder: (direction) => world.functions.PlaceLadder.encodePayload(direction),
+      surface: () => world.functions.Surface.encodePayload(),
       agents: () => world.queries.Agents.encodePayload(),
       session: () => world.queries.Session.encodePayload(),
       agentOf: (owner) => world.queries.AgentOf.encodePayload(owner),
+      mapSnapshot: () => world.queries.MapSnapshot.encodePayload(),
     },
     decode: {
       agents: (payload) => world.queries.Agents.decodeResult(payload),
       session: (payload) => world.queries.Session.decodeResult(payload),
       agentOf: (payload) => world.queries.AgentOf.decodeResult(payload),
+      mapSnapshot: (payload) => world.queries.MapSnapshot.decodeResult(payload),
       // The reply of register/move/drill is the agent_view [status,x,y,…] — the
       // per-action result straight from the injected-tx receipt (no snapshot).
       actionView: (fn, payload) => world.functions[fn].decodeResult(payload),

@@ -46,9 +46,12 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       admission: {
         minAgents: cfg.lobbyMin,
         targetAgents: cfg.lobbyCap,
-        // World Registry uses .length for the agent count; ids are synthetic until
-        // we surface the real on-chain owners from World.Agents().
-        registeredAgents: Array.from({ length: world.agents }, (_, i) => `${world.id}-agent-${i}`),
+        // Real on-chain owner ActorIds (World.Agents()); falls back to synthetic
+        // only if owners haven't been polled yet.
+        registeredAgents:
+          world.owners && world.owners.length
+            ? world.owners
+            : Array.from({ length: world.agents }, (_, i) => `${world.id}-agent-${i}`),
       },
       map: { hash: world.mapHash || null },
       paths: {},

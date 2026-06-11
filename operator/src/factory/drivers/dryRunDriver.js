@@ -21,6 +21,15 @@ function fakeHash() {
   return `0x${Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0')}`;
 }
 
+// A 32-byte ActorId-shaped id (deterministic per world+slot) so dry-run output
+// matches chain mode's real World.Agents() owners.
+function synthOwner(worldId, i) {
+  let hex = '';
+  const s = `${worldId}-agent-${i}`;
+  for (let k = 0; k < s.length; k += 1) hex += s.charCodeAt(k).toString(16).padStart(2, '0');
+  return `0x${(hex + '0'.repeat(64)).slice(0, 64)}`;
+}
+
 export function createDryRunDriver({ clock = Date.now } = {}) {
   const sim = new Map(); // worldId → { target, nextJoinAt }
 
@@ -51,12 +60,16 @@ export function createDryRunDriver({ clock = Date.now } = {}) {
     async pollAgents(world) {
       const state = sim.get(world.id);
       const now = clock();
-      if (!state) return world.agents;
-      if (world.agents < state.target && now >= state.nextJoinAt) {
+      let count = world.agents;
+      if (state && world.agents < state.target && now >= state.nextJoinAt) {
         state.nextJoinAt = now + 300 + Math.floor(Math.random() * 700);
-        return world.agents + 1;
+        count = world.agents + 1;
       }
-      return world.agents;
+      // Synthetic owners shaped like real World.Agents() ActorIds (32-byte hex),
+      // so registry/discovery output is identical to chain mode for testing.
+      return Array.from({ length: count }, (_, i) => synthOwner(world.id, i));
     },
+    ensureBalance() {}, // no executable balance off-chain
+    balanceSnapshot: () => [],
   };
 }

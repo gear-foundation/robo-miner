@@ -24,6 +24,7 @@ export function newWorld(now) {
     mapHash: null,
     sessionId: 0,
     agents: 0, // registered agent count (from chain agents() / sim)
+    owners: [], // real on-chain owner ActorIds (World.Agents()) — who actually joined
     createdAt: now,
     openedAt: null,
     lastJoinAt: null,
@@ -61,6 +62,7 @@ export function worldView(world, cfg) {
     seed: world.seed,
     sessionId: world.sessionId,
     agents: world.agents,
+    owners: world.owners || [],
     minAgents: cfg.lobbyMin,
     capAgents: cfg.lobbyCap,
     eligibleManualStart: world.eligibleManualStart,

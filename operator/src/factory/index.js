@@ -9,10 +9,40 @@
 // Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in the env / operator/.env.
 // The factory state machine is identical in both modes — only the driver differs.
 
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadConfig, loadChainEnv } from './config.js';
 import { createFactory } from './factory.js';
 import { createDryRunDriver } from './drivers/dryRunDriver.js';
 import { createRegistryPublisher } from './registry.js';
+import { createDiscoveryServer } from './discovery.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '../../..'); // operator/src/factory → repo root
+
+// Durable PAST list: retired worlds are persisted so the lobby's PAST tab
+// survives factory restarts (the in-memory pool starts empty each run).
+function pastFilePath() {
+  const stateDir = process.env.GAMEMASTER_STATE_DIR || 'state';
+  const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
+  return path.join(dir, 'factory-past.json');
+}
+async function loadPast() {
+  try {
+    const data = JSON.parse(await readFile(pastFilePath(), 'utf8'));
+    return Array.isArray(data?.worlds) ? data.worlds : [];
+  } catch {
+    return [];
+  }
+}
+async function savePast(worlds) {
+  const file = pastFilePath();
+  await mkdir(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  await writeFile(tmp, `${JSON.stringify({ updatedAt: new Date().toISOString(), worlds }, null, 2)}\n`);
+  await rename(tmp, file);
+}
 
 function argValue(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -58,10 +88,28 @@ const publisher = createRegistryPublisher({
 });
 console.log(`[factory] publishing worlds → ${publisher.file} (World Registry reads this)`);
 
-const factory = createFactory({ driver, config, publish: publisher.publish });
+const initialPast = useChain ? await loadPast() : [];
+if (initialPast.length) console.log(`[factory] restored ${initialPast.length} past world(s) → PAST tab`);
+const factory = createFactory({
+  driver,
+  config,
+  publish: publisher.publish,
+  initialPast,
+  onPast: useChain ? savePast : null,
+});
+
+// Agent-facing discovery: the single address agents scan for current matches.
+const discovery = createDiscoveryServer({
+  factory,
+  env: chainEnv,
+  cfg: config,
+  port: Number(process.env.DISCOVERY_PORT || 8780),
+});
+discovery.start();
 
 process.on('SIGINT', () => {
   factory.stop();
+  discovery.stop();
   driver.disconnect?.();
   console.log('\n[factory] stopped (SIGINT)');
   process.exit(0);

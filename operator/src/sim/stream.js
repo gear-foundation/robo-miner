@@ -9,6 +9,7 @@
 import http from 'node:http';
 import { loadChainEnv } from '../factory/config.js';
 import { connectChain, actorIdFromAddress } from '../chain/client.js';
+import { decideAction, agentFromView, carried, TILE, MAP_WIDTH } from './agent-brain.js';
 
 const env = loadChainEnv();
 const world = process.argv[2];
@@ -45,6 +46,12 @@ function broadcast(ev) {
 }
 server.listen(port, () => console.log(`[stream] SSE on http://localhost:${port}/events · world ${world}`));
 
+// ── shared world map (read once, kept in sync as agents act + periodic resync) ─
+async function readMap() {
+  const conn = agents[0]?.conn;
+  return conn.decode.mapSnapshot((await conn.query(world, conn.encode.mapSnapshot())).payload).map(Number);
+}
+
 // ── agents ──────────────────────────────────────────────────────────────────
 const agents = [];
 for (let i = 0; i < agentCount; i += 1) {
@@ -52,92 +59,89 @@ for (let i = 0; i < agentCount; i += 1) {
   const account = privateKeyToAccount(key);
   const conn = await connectChain({ ...env, adminKey: key });
   const owner = actorIdFromAddress(account.address);
-  const v = conn.decode.agentOf((await conn.query(world, conn.encode.agentOf(owner))).payload).map(Number);
-  agents.push({ i, owner, conn, x: v[1], y: v[2], status: v[0] });
+  const agent = agentFromView(conn.decode.agentOf((await conn.query(world, conn.encode.agentOf(owner))).payload));
+  agents.push({ i, owner, conn, agent, state: { mode: 'mine' } });
 }
-console.log(`[stream] driving ${agents.length} agents (status: ${agents.map((a) => a.status).join('')})`);
-
-// ── drive loop: continuous digging ───────────────────────────────────────────
-// Each agent digs straight down while there is room below; once it hits the
-// floor (or stone) it sweeps sideways along the open space, bouncing off the
-// walls. So no agent ever permanently stalls at a boundary and the event stream
-// keeps flowing — whenever a spectator connects, things are moving. (Failed
-// actions surface as a contract "panic" via #[export(unwrap_result)]; we treat
-// them as "blocked, try another direction".)
-const MAP_W = 40;
-const MAP_H = 64;
-const flip = (dir) => (dir === DIR.LEFT ? DIR.RIGHT : DIR.LEFT);
-const sideTarget = (a, dir) => (dir === DIR.LEFT ? [a.x - 1, a.y] : [a.x + 1, a.y]);
+let map = await readMap();
+console.log(`[stream] driving ${agents.length} agents (status: ${agents.map((a) => a.agent.status).join('')})`);
 
 let running = true;
 process.on('SIGINT', () => { running = false; try { server.close(); } catch {} process.exit(0); });
 
-// Drill straight down; broadcast the dug tile + any gravity fall. true on success.
-async function tryDrillDown(a) {
-  const tx = a.x;
-  const ty = a.y + 1;
-  try {
-    const reply = await a.conn.sendInjected(world, a.conn.encode.drill(DIR.DOWN));
-    const v = a.conn.decode.actionView('Drill', reply.payload).map(Number);
-    broadcast({ type: 'dug', owner: a.owner, x: tx, y: ty, block: 1 });
-    if (v[1] !== a.x || v[2] !== a.y) broadcast({ type: 'moved', owner: a.owner, fromX: a.x, fromY: a.y, x: v[1], y: v[2] });
-    a.x = v[1]; a.y = v[2]; a.status = v[0];
-    return true;
-  } catch { return false; }
-}
+const isResourceTile = (t) => t === TILE.SCRST || t === TILE.BCRST || t === TILE.HCRST;
 
-// Sweep one tile sideways: open the tile if it is dirt, then step into it.
-// Returns false if that direction is blocked (wall / stone / out of bounds).
-async function trySweep(a, dir) {
-  const [tx, ty] = sideTarget(a, dir);
-  try {
-    const reply = await a.conn.sendInjected(world, a.conn.encode.drill(dir));
-    const v = a.conn.decode.actionView('Drill', reply.payload).map(Number);
-    broadcast({ type: 'dug', owner: a.owner, x: tx, y: ty, block: 1 });
-    if (v[1] !== a.x || v[2] !== a.y) broadcast({ type: 'moved', owner: a.owner, fromX: a.x, fromY: a.y, x: v[1], y: v[2] });
-    a.x = v[1]; a.y = v[2]; a.status = v[0];
-  } catch (e) {
-    // "tile is already open" → just walk into it; anything else → blocked.
-    if (!/already open/i.test(String(e?.message || e))) return false;
+// Execute one planned action: send the injected tx, decode the resulting agent
+// view from the receipt, broadcast the matching event(s), and fold the effect
+// into the shared local map. Returns false if the tx was rejected.
+async function sendAction(a, action) {
+  const c = a.conn;
+  const before = a.agent;
+  let reply;
+  let fn;
+  if (action.fn === 'drill') { reply = await c.sendInjected(world, c.encode.drill(action.dir.value)); fn = 'Drill'; }
+  else if (action.fn === 'move') { reply = await c.sendInjected(world, c.encode.moveAgent(action.dir.value)); fn = 'MoveAgent'; }
+  else if (action.fn === 'placeLadder') { reply = await c.sendInjected(world, c.encode.placeLadder(action.dir.value)); fn = 'PlaceLadder'; }
+  else if (action.fn === 'surface') { reply = await c.sendInjected(world, c.encode.surface()); fn = 'Surface'; }
+  else return false;
+
+  const after = agentFromView(c.decode.actionView(fn, reply.payload));
+  const owner = a.owner;
+  const moved = after.x !== before.x || after.y !== before.y;
+
+  if (action.fn === 'drill') {
+    const { x, y } = action.target;
+    const oldTile = map[y * MAP_WIDTH + x];
+    map[y * MAP_WIDTH + x] = TILE.EMPTY;
+    broadcast({ type: 'dug', owner, x, y, block: oldTile });
+    if (isResourceTile(oldTile) && carried(after) > carried(before)) {
+      broadcast({ type: 'resource_extracted', owner, x, y, amount: carried(after) - carried(before) });
+    }
+    if (moved) broadcast({ type: 'moved', owner, fromX: before.x, fromY: before.y, x: after.x, y: after.y });
+  } else if (action.fn === 'move') {
+    if (moved) broadcast({ type: 'moved', owner, fromX: before.x, fromY: before.y, x: after.x, y: after.y });
+  } else if (action.fn === 'placeLadder') {
+    const { x, y } = action.target;
+    map[y * MAP_WIDTH + x] = TILE.LADDER;
+    broadcast({ type: 'ladder_placed', owner, x, y, laddersRemaining: after.ladders });
+    if (moved) broadcast({ type: 'moved', owner, fromX: before.x, fromY: before.y, x: after.x, y: after.y });
+  } else if (action.fn === 'surface') {
+    broadcast({ type: 'surfaced', owner, x: after.x, y: after.y, amount: carried(before) });
   }
-  try {
-    const r2 = await a.conn.sendInjected(world, a.conn.encode.moveAgent(dir));
-    const v2 = a.conn.decode.actionView('MoveAgent', r2.payload).map(Number);
-    if (v2[1] !== a.x || v2[2] !== a.y) broadcast({ type: 'moved', owner: a.owner, fromX: a.x, fromY: a.y, x: v2[1], y: v2[2] });
-    a.x = v2[1]; a.y = v2[2]; a.status = v2[0];
-    return true;
-  } catch { return false; }
+
+  a.agent = after;
+  return true;
 }
 
-// One step of an agent's behaviour: dig straight down while there is room
-// below, else sweep sideways along the floor bouncing off the walls. true if it acted.
-async function stepAgent(a) {
-  if (a.dir == null) a.dir = a.i % 2 ? DIR.RIGHT : DIR.LEFT;
-  if (a.y < MAP_H - 1 && await tryDrillDown(a)) return true;
-  if (a.dir === DIR.LEFT && a.x <= 0) a.dir = DIR.RIGHT;
-  else if (a.dir === DIR.RIGHT && a.x >= MAP_W - 1) a.dir = DIR.LEFT;
-  if (await trySweep(a, a.dir)) return true;
-  a.dir = flip(a.dir); // that way was blocked → try the other
-  return trySweep(a, a.dir);
-}
-
-// Each agent runs its OWN loop at its OWN pace, so actions are NOT synchronized:
-// events arrive as a steady spread-out stream instead of lock-step bursts, and
-// one slow tx no longer stalls the others. STREAM_AGENT_DELAY_MS is the bot's
-// think-time between its own actions (on top of the ~1s injected-tx latency).
+// Each agent runs its OWN loop at its OWN pace (desynced, steady event stream).
+// STREAM_AGENT_DELAY_MS is the bot's think-time between actions (on top of the
+// ~1s injected-tx latency). A rejected action (out-of-bounds / race) is retried
+// next tick from fresh state.
 const AGENT_DELAY = Number(process.env.STREAM_AGENT_DELAY_MS || 500);
 let emitted = 0;
 
 async function driveAgent(a) {
   await sleep((a.i * 137) % 700); // phase offset so agents don't fire in unison
   while (running) {
-    if (a.status === 1 && await stepAgent(a)) emitted += 1;
+    if (a.agent.status === 1) {
+      const { action, mode } = decideAction(a.agent, map, a.state);
+      a.state.mode = mode;
+      if (action) {
+        try { if (await sendAction(a, action)) emitted += 1; }
+        catch { /* rejected / race — re-plan next tick from fresh state */ }
+      }
+    }
     await sleep(AGENT_DELAY);
   }
 }
 
 agents.forEach((a) => { driveAgent(a).catch(() => {}); });
+
+// Heartbeat + periodic map resync (absorbs other agents' edits + gravity drift).
+let ticks = 0;
 while (running) {
   await sleep(3000);
-  console.log(`[stream] emitted ~${emitted}; clients=${clients.size}; delay=${AGENT_DELAY}ms`);
+  ticks += 1;
+  if (ticks % 3 === 0) { try { map = await readMap(); } catch {} }
+  const modes = agents.reduce((m, a) => { m[a.state.mode] = (m[a.state.mode] || 0) + 1; return m; }, {});
+  console.log(`[stream] emitted ~${emitted}; clients=${clients.size}; modes=${JSON.stringify(modes)}; delay=${AGENT_DELAY}ms`);
 }

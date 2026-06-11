@@ -34,6 +34,11 @@ export const CHAIN = {
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
   backendUrl: env.VITE_BACKEND_URL || '',
 
+  // Operator discovery feed (factory /worlds + /matches). When set, the lobby
+  // lists live worlds straight from the operator (current vs past + agent
+  // counts), no colleague backend required. Takes precedence over backendUrl.
+  matchesUrl: env.VITE_MATCHES_URL || '',
+
   // Fallback poll interval (ms) if push event subscription isn't used.
   pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
 

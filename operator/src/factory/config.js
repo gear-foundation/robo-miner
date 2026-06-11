@@ -24,12 +24,21 @@ export function loadChainEnv(overrides = {}) {
     ethRpc: process.env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
     varaWs: process.env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
     router: process.env.ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-    topUp: process.env.DIGGER_TOP_UP || '100000000000000',
+    topUp: process.env.DIGGER_TOP_UP || '300000000000000', // 300 VARA initial executable balance
     codeId: process.env.DIGGER_CODE_ID || '',
     wasmPath: process.env.DIGGER_WASM_PATH || '',
     idlPath: process.env.DIGGER_IDL_PATH || '',
     contractSurface: num('CONTRACT_SURFACE_Y', 1),
     timeoutMs: num('DIGGER_EVENT_TIMEOUT_MS', 180000),
+
+    // ── balanceKeeper (proactive executable-balance top-up) ──────────────────
+    // Measured: ~0.56 VARA/s for 10 busy agents; top-up lands ~90s late. So keep
+    // a comfortable floor and a cooldown longer than the lag. All env-tunable.
+    balanceMinVara: num('BALANCE_MIN_VARA', 150), // top up when EB dips below this
+    balanceTopUpVara: num('BALANCE_TOPUP_VARA', 400), // amount per top-up
+    balanceCheckMs: num('BALANCE_CHECK_MS', 30000), // how often to read each world's EB
+    balanceCooldownMs: num('BALANCE_COOLDOWN_MS', 120000), // ≥ the ~90s top-up lag
+
     ...overrides,
   };
 }
@@ -56,6 +65,7 @@ export function loadConfig(overrides = {}) {
     //   then StartSession opens play. Flip this when the lobby contract lands.
     lobbyMode: bool('FACTORY_LOBBY_MODE', false),
     recycle: bool('FACTORY_RECYCLE', true), // reuse a program via reset_map after finish
+    pastLimit: num('FACTORY_PAST_LIMIT', 50), // how many retired worlds to keep for the PAST tab
     contractSurface: num('CONTRACT_SURFACE_Y', 1),
 
     // ── loop ─────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateMap, randomSeed, gridHash } from '../../genmap.js';
+import { createBalanceKeeper } from '../balanceKeeper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../..'); // operator/src/factory/drivers → repo root
@@ -27,6 +28,19 @@ const SESSION_ACTIVE = 1;
 export async function createChainDriver({ env, log = console.log }) {
   const { connectChain } = await import('../../chain/client.js');
   const chain = await connectChain(env);
+
+  // Keeps each live world's executable balance funded so injected actions never
+  // start failing mid-session (the world would otherwise silently stall).
+  const keeper = createBalanceKeeper({
+    chain,
+    log,
+    options: {
+      minVara: env.balanceMinVara,
+      topUpVara: env.balanceTopUpVara,
+      checkMs: env.balanceCheckMs,
+      cooldownMs: env.balanceCooldownMs,
+    },
+  });
 
   const poolFile = path.resolve(ROOT, process.env.GAMEMASTER_STATE_DIR || 'state', 'factory-programs.json');
   const pool = await loadPool();
@@ -60,10 +74,12 @@ export async function createChainDriver({ env, log = console.log }) {
     return { sessionId: arr[0], seed: arr[1], status: arr[2], actionSeq: arr[3] };
   }
 
-  async function readAgentCount(programId) {
+  async function readAgents(programId) {
     const reply = await chain.query(programId, chain.encode.agents());
     const arr = chain.decode.agents(reply.payload);
-    return Array.isArray(arr) ? arr.length : 0;
+    // World.Agents() → [ActorId] (32-byte hex, '0x'+12 zero bytes + the agent's
+    // 20-byte EOA). These are the real owners that registered.
+    return Array.isArray(arr) ? arr.map(String) : [];
   }
 
   async function uploadFreshMap(programId) {
@@ -86,6 +102,7 @@ export async function createChainDriver({ env, log = console.log }) {
         const programId = pool.programs[reuseIdx];
         reuseIdx += 1;
         log(`[chain] reusing program ${programId}`);
+        await keeper.ensureNow(programId); // a reused program may be low — top up before opening
         return { programId };
       }
       const code = await ensureCode();
@@ -94,6 +111,7 @@ export async function createChainDriver({ env, log = console.log }) {
       pool.programs.push(programId);
       await savePool();
       log(`[chain] program created + initialized ${programId}`);
+      await keeper.ensureNow(programId);
       return { programId };
     },
     async loadMap(world) {
@@ -116,8 +134,13 @@ export async function createChainDriver({ env, log = console.log }) {
     },
     async retire() {},
     async pollAgents(world) {
-      return readAgentCount(world.programId);
+      return readAgents(world.programId); // real on-chain owner ActorIds
     },
+    // Proactive top-up so a live world never runs its executable balance dry.
+    ensureBalance(world) {
+      keeper.ensure(world.programId);
+    },
+    balanceSnapshot: () => keeper.snapshot(),
     disconnect: () => chain.disconnect(),
   };
 }

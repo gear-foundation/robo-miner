@@ -9,15 +9,25 @@ import { WORLD, newWorld, decideStart, worldView } from './world.js';
 
 const POOL_STATUSES = [WORLD.PROVISIONING, WORLD.OPEN, WORLD.ACTIVE];
 
-export function createFactory({ driver, config, clock = Date.now, log = console.log, publish = null }) {
+export function createFactory({
+  driver,
+  config,
+  clock = Date.now,
+  log = console.log,
+  publish = null,
+  initialPast = [], // archived worlds restored from disk (survive restarts)
+  onPast = null, // persist callback whenever the past list changes
+}) {
   const cfg = config;
-  const worlds = new Map(); // id → world
+  const worlds = new Map(); // id → world (live: provisioning/open/active/finished)
+  const pastStore = [...initialPast]; // retired worlds, kept for the PAST tab
   let running = false;
   let timer = null;
 
-  const list = () => [...worlds.values()];
-  const countOpen = () => list().filter((w) => w.status === WORLD.OPEN).length;
-  const poolBusy = () => list().filter((w) => POOL_STATUSES.includes(w.status)).length;
+  const active = () => [...worlds.values()];
+  const list = () => [...worlds.values(), ...pastStore]; // live + past (for publish/snapshot)
+  const countOpen = () => active().filter((w) => w.status === WORLD.OPEN).length;
+  const poolBusy = () => active().filter((w) => POOL_STATUSES.includes(w.status)).length;
 
   async function provisionOne() {
     const world = newWorld(clock());
@@ -50,7 +60,9 @@ export function createFactory({ driver, config, clock = Date.now, log = console.
 
   async function pollLobby(world) {
     const now = clock();
-    const count = await driver.pollAgents(world);
+    const owners = await driver.pollAgents(world);
+    const count = Array.isArray(owners) ? owners.length : owners;
+    if (Array.isArray(owners)) world.owners = owners; // keep real participant list fresh
     if (count > world.agents) {
       world.agents = count;
       world.lastJoinAt = now;
@@ -113,7 +125,13 @@ export function createFactory({ driver, config, clock = Date.now, log = console.
     } else {
       await driver.retire?.(world);
       world.status = WORLD.RETIRED;
-      log(`[factory] x ${world.id} retired (program ${world.programId})`);
+      world.finishedAt = world.finishedAt || clock();
+      worlds.delete(world.id); // move out of the live map into the durable past list
+      pastStore.push(world);
+      const limit = cfg.pastLimit || 50;
+      while (pastStore.length > limit) pastStore.shift();
+      try { await onPast?.(pastStore); } catch (error) { log(`[factory] past persist error: ${error?.message || error}`); }
+      log(`[factory] x ${world.id} retired → PAST (${pastStore.length} kept) program=${world.programId}`);
     }
   }
 
@@ -122,10 +140,16 @@ export function createFactory({ driver, config, clock = Date.now, log = console.
     while (countOpen() < cfg.minOpenWorlds && poolBusy() < cfg.poolSize) {
       await provisionOne();
     }
-    for (const world of list()) {
-      if (world.status === WORLD.OPEN) await pollLobby(world);
-      else if (world.status === WORLD.ACTIVE) await tickActive(world);
-      else if (world.status === WORLD.FINISHED) await recycleWorld(world);
+    for (const world of active()) {
+      if (world.status === WORLD.OPEN) {
+        driver.ensureBalance?.(world); // proactive top-up so the open world stays fundable
+        await pollLobby(world);
+      } else if (world.status === WORLD.ACTIVE) {
+        driver.ensureBalance?.(world); // keep the running session funded (agents pay from it)
+        await tickActive(world);
+      } else if (world.status === WORLD.FINISHED) {
+        await recycleWorld(world);
+      }
     }
     // Publish the world list for the colleague's World Registry to serve (gamemaster.json).
     if (publish) {

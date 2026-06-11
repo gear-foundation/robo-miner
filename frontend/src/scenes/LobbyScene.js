@@ -23,7 +23,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.cleanupDOM();
     this.tab = 'current'; // current | past
     this.worlds = {
-      current: CHAIN.worldProgramIds.filter((id) => chainReady(id)),
+      current: CHAIN.worldProgramIds.filter((id) => chainReady(id)).map((programId) => ({ programId })),
       past: [],
     };
     const W = this.scale.width, H = this.scale.height;
@@ -46,7 +46,6 @@ export default class LobbyScene extends Phaser.Scene {
       font-family:'Courier New',monospace; color:#fff; padding:30px 20px 60px;`;
     root.innerHTML = `<div style="text-align:center">
       <div style="font-size:40px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">🤖 AGENT ARENA</div>
-      <div style="opacity:.8;margin-top:6px">${CHAIN.enabled ? 'watch the bots dig deep, dodge the lava, and chase the diamond' : 'pick a mode — watch the bots dig, search and race on a shared map'}</div>
     </div>`;
 
     const back = wireBtn(document.createElement('button'));
@@ -120,13 +119,31 @@ export default class LobbyScene extends Phaser.Scene {
   // bucket into current (active/open) vs past (finished). No-op without a
   // backend — the chain-seeded current bucket stays.
   async refreshWorlds() {
-    if (!CHAIN.enabled || !backendEnabled()) return;
+    if (!CHAIN.enabled) return;
+    // Prefer the operator discovery feed: live current/past + agent counts,
+    // no colleague backend required.
+    if (CHAIN.matchesUrl) {
+      try {
+        const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
+        const data = await (await fetch(`${base}/worlds`)).json();
+        const isPast = (s) => s === 'finished' || s === 'retired' || s === 'archived';
+        const rec = (w) => ({ programId: w.programId, status: w.status, agents: w.agents, maxAgents: w.maxAgents });
+        const ws = (data?.worlds || []).filter((w) => w.programId);
+        this.worlds.current = ws.filter((w) => !isPast(w.status)).map(rec);
+        this.worlds.past = ws.filter((w) => isPast(w.status)).map(rec);
+        this.renderGrid();
+        return;
+      } catch (error) {
+        console.warn('[matches] failed to load worlds', error);
+      }
+    }
+    if (!backendEnabled()) return;
     try {
       const manifest = await fetchManifest();
-      const ids = (list) => (list || []).map((w) => w.programId).filter(Boolean);
-      const active = ids(manifest?.active);
+      const rec = (w) => ({ programId: w.programId, status: w.status, agents: w.agents, maxAgents: w.targetAgents });
+      const active = (manifest?.active || []).filter((w) => w.programId).map(rec);
       if (active.length) this.worlds.current = active;
-      this.worlds.past = ids(manifest?.past);
+      this.worlds.past = (manifest?.past || []).filter((w) => w.programId).map(rec);
       this.renderGrid();
     } catch (error) {
       console.warn('[backend] failed to load worlds', error);
@@ -148,7 +165,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.gridEl.appendChild(empty);
       return;
     }
-    list.forEach((programId) => this.gridEl.appendChild(this.makeChainCard(programId)));
+    list.forEach((rec) => this.gridEl.appendChild(this.makeChainCard(rec)));
   }
 
   makeCard(key) {
@@ -184,10 +201,12 @@ export default class LobbyScene extends Phaser.Scene {
     return card;
   }
 
-  makeChainCard(programId) {
-    // Same card as the local modes: a scaled-down snapshot of the mine on top
-    // (regenerated from a per-world seed via the shared 'agents' generator), then
-    // the program address as the title + size/agents below.
+  makeChainCard(rec) {
+    // Accepts a world record { programId, status, agents, maxAgents } (or a bare
+    // programId string for the env fallback). Same card as the local modes: a
+    // scaled-down mine on top, program address as title + live counts below.
+    const programId = typeof rec === 'string' ? rec : rec.programId;
+    const info = (typeof rec === 'string' ? {} : rec) || {};
     const seed = hashStr(programId);
     const world = generateWorld(seed, 'agents');
     const thumb = roomThumbnail(world, { cols: 84, rows: 60 });
@@ -206,9 +225,17 @@ export default class LobbyScene extends Phaser.Scene {
     const short = `${programId.slice(0, 10)}…${programId.slice(-8)}`;
     const body = document.createElement('div');
     body.style.cssText = 'padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:6px';
+    const countLine = Number.isFinite(info.agents)
+      ? `${info.agents}/${info.maxAgents ?? 10} agents${info.status ? ` · ${info.status}` : ''}`
+      : 'up to 10 agents';
+    const desc = info.status === 'active'
+      ? 'Session running — agents are mining.'
+      : ['finished', 'archived', 'retired'].includes(info.status)
+        ? 'Finished — explore the dug-out mine.'
+        : 'Open lobby — agents register and dig.';
     body.innerHTML = `<div title="${programId}" style="font-size:16px;font-weight:bold;color:#ffdd55;word-break:break-all">${short}</div>
-      <div style="font-size:12px;opacity:.85;flex:1;line-height:1.35">Live mine — watch agents register and dig.</div>
-      <div style="font-size:11px;opacity:.65">map ${world.W}×${world.H} · up to 10 agents</div>`;
+      <div style="font-size:12px;opacity:.85;flex:1;line-height:1.35">${desc}</div>
+      <div style="font-size:11px;opacity:.65">map ${world.W}×${world.H} · ${countLine}</div>`;
 
     const watch = wireBtn(document.createElement('button'));
     watch.textContent = '▶  WATCH';

@@ -43,7 +43,7 @@ const DEFAULTS = {
 } as const;
 
 const VMT_PROGRAM_ID = "0x3cdbb99b69a90d7d74f4936f4c69744127488491" as Address;
-const REDEEM_PROGRAM_ID = "0xa302b35865311778adc5b17dbe47406e7e6a117c" as Address;
+const REDEEM_PROGRAM_ID = "0x09865cd1d98c974ae13cd44dbc12603a7c372cae" as Address;
 
 const VMT_IDL = String.raw`
 !@sails: 1.0.0-beta.5
@@ -131,7 +131,7 @@ program DiggerResVmt {
 const REDEEM_IDL = String.raw`
 !@sails: 1.0.0-beta.5
 
-service Redeem@0x9077a36884dff78d {
+service Redeem@0x74c0432f9f172e15 {
     events {
         RedeemCanceled(u128, [u8; 32], u128, u128, u128, u128),
         Redeemed([u8; 32], u128, u128, u128, u128),
@@ -167,15 +167,18 @@ service Redeem@0x9077a36884dff78d {
         TotalRedeemedHcrst() -> u128 throws String;
         @query
         TotalRedeemedScrst() -> u128 throws String;
+        @query
+        VaraUnit() -> u128 throws String;
     }
 }
 
-service Admin@0x55e01d646e511900 {
+service Admin@0x30a6e4a3e0432e45 {
     events {
         AdminAdded([u8; 32]),
         AdminRemoved([u8; 32]),
         FundsWithdrawn([u8; 32], u128, u128),
         Paused([u8; 32]),
+        RateConfigUpdated(u128, u128, u128, u128),
         RatesUpdated(u128, u128, u128),
         ResContractUpdated([u8; 32], [u8; 32]),
         Unpaused([u8; 32]),
@@ -192,6 +195,7 @@ service Admin@0x55e01d646e511900 {
         RemoveAdmin(admin: ActorId) -> bool throws String;
         @query
         ResContract() -> ActorId throws String;
+        SetRateConfig(vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetRates(scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetResContract(res_contract: ActorId) throws String;
         Unpause() throws String;
@@ -202,11 +206,11 @@ service Admin@0x55e01d646e511900 {
 
 program DiggerRedeem {
     constructors {
-        Create(res_contract: ActorId, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
+        Create(res_contract: ActorId, vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
     }
     services {
-        Redeem@0x9077a36884dff78d,
-        Admin@0x55e01d646e511900,
+        Redeem@0x74c0432f9f172e15,
+        Admin@0x30a6e4a3e0432e45,
     }
 }
 `;
@@ -225,6 +229,7 @@ type Args = {
   queryTimeoutMs?: string;
   validatorMode?: ValidatorMode;
   noConfigure?: boolean;
+  noRedeem?: boolean;
 };
 
 type Connection = {
@@ -244,6 +249,8 @@ function parseArgs(argv: string[]): Args {
     };
 
     switch (arg) {
+      case "--":
+        break;
       case "--proxy":
         args.proxy = next();
         break;
@@ -279,6 +286,10 @@ function parseArgs(argv: string[]): Args {
       }
       case "--no-configure":
         args.noConfigure = true;
+        break;
+      case "--no-redeem":
+      case "--dry-run":
+        args.noRedeem = true;
         break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
@@ -584,12 +595,21 @@ async function main() {
       queryTimeoutMs,
       "VMT.IsApproved(proxy, redeem)",
     );
-    console.log("[redeem:vmt-approval]", { proxyActor, redeemActor, isProxyApproved });
+    const isSignerApproved = await queryPayload(
+      connection,
+      vmtProgramId,
+      vmtSails.services.Vmt.queries.IsApproved.encodePayload(signerActor, redeemActor) as Hex,
+      (payload) => vmtSails.services.Vmt.queries.IsApproved.decodeResult<boolean>(payload),
+      queryTimeoutMs,
+      "VMT.IsApproved(signer, redeem)",
+    );
+    console.log("[redeem:vmt-approval]", { proxyActor, signerActor, redeemActor, isProxyApproved, isSignerApproved });
 
     const redeemState = {
       scrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ScrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ScrstRate", payload), queryTimeoutMs, "Redeem.ScrstRate"),
       bcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.BcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "BcrstRate", payload), queryTimeoutMs, "Redeem.BcrstRate"),
       hcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.HcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "HcrstRate", payload), queryTimeoutMs, "Redeem.HcrstRate"),
+      varaUnit: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.VaraUnit.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "VaraUnit", payload), queryTimeoutMs, "Redeem.VaraUnit"),
       reserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ReserveBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ReserveBalance", payload), queryTimeoutMs, "Redeem.ReserveBalance"),
       availableReserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.AvailableReserve.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "AvailableReserve", payload), queryTimeoutMs, "Redeem.AvailableReserve"),
       locked: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.LockedBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "LockedBalance", payload), queryTimeoutMs, "Redeem.LockedBalance"),
@@ -599,10 +619,86 @@ async function main() {
       Object.entries(redeemState).map(([key, value]) => [key, value.toString()]),
     ));
 
+    const signerTotal = signerBalances.scrst + signerBalances.bcrst + signerBalances.hcrst;
+    const expectedPayout =
+      (signerBalances.scrst * redeemState.scrstRate +
+        signerBalances.bcrst * redeemState.bcrstRate +
+        signerBalances.hcrst * redeemState.hcrstRate) * redeemState.varaUnit;
+    console.log("[redeem:plan]", {
+      signer: {
+        scrst: signerBalances.scrst.toString(),
+        bcrst: signerBalances.bcrst.toString(),
+        hcrst: signerBalances.hcrst.toString(),
+      },
+      expectedPayout: expectedPayout.toString(),
+      availableReserve: redeemState.availableReserve.toString(),
+      canRedeemNowFromSigner: signerTotal > 0n,
+      dryRun: Boolean(args.noRedeem),
+    });
+
+    if (!args.noRedeem && signerTotal > 0n) {
+      if (!isSignerApproved) {
+        await sendInjected(
+          connection,
+          vmtProgramId,
+          "VMT.Vmt.Approve(redeem)",
+          vmtSails.services.Vmt.functions.Approve.encodePayload(redeemActor) as Hex,
+          (payload) => vmtSails.services.Vmt.functions.Approve.decodeResult<boolean>(payload),
+          validatorMode,
+          promiseTimeoutMs,
+        );
+      }
+
+      const redeemedAmount = await sendInjected(
+        connection,
+        redeemProgramId,
+        "Redeem.Redeem",
+        redeemSails.services.Redeem.functions.Redeem.encodePayload(
+          signerBalances.scrst,
+          signerBalances.bcrst,
+          signerBalances.hcrst,
+        ) as Hex,
+        (payload) => BigInt(String(redeemSails.services.Redeem.functions.Redeem.decodeResult<unknown>(payload))),
+        validatorMode,
+        promiseTimeoutMs,
+      );
+
+      const balancesAfter = {
+        scrst: await balanceOf(signerActor, scrstTokenId, "VMT.BalanceOf signer SCRST after"),
+        bcrst: await balanceOf(signerActor, bcrstTokenId, "VMT.BalanceOf signer BCRST after"),
+        hcrst: await balanceOf(signerActor, hcrstTokenId, "VMT.BalanceOf signer HCRST after"),
+      };
+      const redeemStateAfter = {
+        reserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ReserveBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ReserveBalance", payload), queryTimeoutMs, "Redeem.ReserveBalance after"),
+        availableReserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.AvailableReserve.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "AvailableReserve", payload), queryTimeoutMs, "Redeem.AvailableReserve after"),
+        locked: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.LockedBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "LockedBalance", payload), queryTimeoutMs, "Redeem.LockedBalance after"),
+        pending: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.PendingRedeemCount.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "PendingRedeemCount", payload), queryTimeoutMs, "Redeem.PendingRedeemCount after"),
+        totalPaid: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.TotalPaid.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "TotalPaid", payload), queryTimeoutMs, "Redeem.TotalPaid after"),
+      };
+      console.log("[redeem:complete]", {
+        redeemedAmount: redeemedAmount?.toString(),
+        signerBalanceDelta: {
+          scrst: (balancesAfter.scrst - signerBalances.scrst).toString(),
+          bcrst: (balancesAfter.bcrst - signerBalances.bcrst).toString(),
+          hcrst: (balancesAfter.hcrst - signerBalances.hcrst).toString(),
+        },
+        signerBalancesAfter: {
+          scrst: balancesAfter.scrst.toString(),
+          bcrst: balancesAfter.bcrst.toString(),
+          hcrst: balancesAfter.hcrst.toString(),
+        },
+        redeemStateAfter: Object.fromEntries(
+          Object.entries(redeemStateAfter).map(([key, value]) => [key, value.toString()]),
+        ),
+      });
+    }
+
     console.log("[redeem:next]", {
-      canRedeemNowFromSigner: signerBalances.scrst + signerBalances.bcrst + signerBalances.hcrst > 0n,
+      canRedeemNowFromSigner: signerTotal > 0n,
       proxyHasTokens: proxyBalances.scrst + proxyBalances.bcrst + proxyBalances.hcrst > 0n,
-      note: "Current DiggerProxy has no Redeem/Approve forwarding method, so proxy-owned VMT cannot be redeemed until proxy is extended or tokens are minted/transferred to signer.",
+      note: signerTotal > 0n
+        ? "Signer-owned VMT can be redeemed directly by this script."
+        : "Current DiggerProxy has no Redeem/Approve forwarding method, so proxy-owned VMT cannot be redeemed until proxy is extended or tokens are minted/transferred to signer.",
     });
   } finally {
     await connection.disconnect().catch(() => undefined);

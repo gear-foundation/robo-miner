@@ -74,6 +74,8 @@ const EVENT_TYPES = {
     AgentSurfaced: "(u64, [u8; 32], u32, u32, u32)",
     LadderPlaced: "(u64, [u8; 32], u32, u32, u32)",
     ResourceExtracted: "(u64, [u8; 32], u32, u32, u32, u32)",
+    ResourcesMinted: "(u64, [u8; 32], u32, u32, u32)",
+    StoneMoved: "(u64, [u8; 32], u32, u32, u32, u32)",
     TileDrilled: "(u64, [u8; 32], u32, u32, u32, u32)",
   },
 };

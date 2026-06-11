@@ -367,6 +367,13 @@ async function loadSails(idlPath: string): Promise<SailsProgram> {
   return new SailsProgram(parser.parse(idl));
 }
 
+function requireConstructors(program: SailsProgram, label: string): NonNullable<SailsProgram["ctors"]> {
+  if (!program.ctors) {
+    throw new Error(`${label} IDL does not expose constructors`);
+  }
+  return program.ctors;
+}
+
 function normalizeReplyCode(code: ReplyCode | string): Hex {
   return typeof code === "string" ? (code as Hex) : bytesToHex(code.toBytes());
 }
@@ -546,6 +553,8 @@ async function main() {
 
   const resSails = await loadSails(RES_IDL_PATH);
   const redeemSails = await loadSails(REDEEM_IDL_PATH);
+  const resCtors = requireConstructors(resSails, "res-vmt");
+  const redeemCtors = requireConstructors(redeemSails, "redeem");
   const smoke = Boolean(args.smoke && !args.noSmoke);
 
   console.log("[economy] prepared", {
@@ -581,12 +590,12 @@ async function main() {
       : await createProgram(connection.api, "redeem", redeemCodeId, topUp);
 
     if (!args.skipResInit) {
-      const createRes = resSails.ctors.Create.encodePayload(ZERO_ACTOR, initialMinterActor) as Hex;
+      const createRes = resCtors.Create.encodePayload(ZERO_ACTOR, initialMinterActor) as Hex;
       await sendMirrorMessage(connection.api, resProgram, "res.create", createRes, 0n, promiseTimeoutMs);
     }
 
     if (!args.skipRedeemInit) {
-      const createRedeem = redeemSails.ctors.Create.encodePayload(actorIdFromAddress(resProgram), rates.scrst, rates.bcrst, rates.hcrst) as Hex;
+      const createRedeem = redeemCtors.Create.encodePayload(actorIdFromAddress(resProgram), rates.scrst, rates.bcrst, rates.hcrst) as Hex;
       await sendMirrorMessage(connection.api, redeemProgram, "redeem.create", createRedeem, 0n, promiseTimeoutMs);
     }
 

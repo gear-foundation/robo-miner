@@ -95,6 +95,7 @@ type SessionView = {
 };
 
 const SESSION_ACTIVE = 1n;
+const MIN_SESSION_PARTICIPANTS = 8;
 
 function printUsage() {
   console.log(`Usage:
@@ -902,6 +903,27 @@ async function readWorldSession(
   return sessionFromDecoded(worldSails.services.World.queries.Session.decodeResult<unknown>(replyPayload));
 }
 
+async function readWorldAgentCount(
+  connection: Connection,
+  worldSails: SailsProgram,
+  worldProgramId: Address,
+  queryTimeoutMs: number,
+): Promise<number> {
+  const payload = worldSails.services.World.queries.Agents.encodePayload() as Hex;
+  const replyPayload = await queryProgram(
+    connection.api,
+    connection.accountAddress,
+    worldProgramId,
+    payload,
+    queryTimeoutMs,
+    "World.Agents",
+    worldSails,
+  );
+  const agents = worldSails.services.World.queries.Agents.decodeResult<unknown>(replyPayload);
+  if (!Array.isArray(agents)) throw new Error("World.Agents returned a non-array result");
+  return agents.length;
+}
+
 async function waitForWorldSessionActive(
   connection: Connection,
   worldSails: SailsProgram,
@@ -1114,32 +1136,6 @@ async function main() {
       actionSeq: session.actionSeq.toString(),
     });
 
-    if (session.status !== SESSION_ACTIVE) {
-      const startPayload = worldSails.services.Admin.functions.StartSession.encodePayload() as Hex;
-      await sendInjectedMessage(
-        connection.api,
-        worldProgramId,
-        "world-start-session",
-        startPayload,
-        validatorMode,
-        promiseTimeoutMs,
-        timeoutMs,
-        worldSails,
-      );
-      session = await waitForWorldSessionActive(
-        connection,
-        worldSails,
-        worldProgramId,
-        timeoutMs,
-      );
-      console.log("[world] session active", {
-        sessionId: session.sessionId.toString(),
-        seed: session.seed.toString(),
-        status: session.status.toString(),
-        actionSeq: session.actionSeq.toString(),
-      });
-    }
-
     let agent: string[] | null = null;
     try {
       agent = await queryWorldAgent(
@@ -1177,6 +1173,57 @@ async function main() {
         timeoutMs,
       );
       console.log("[world] proxy registered", { proxyActorId, agent });
+    }
+
+    session = await readWorldSession(
+      connection,
+      worldSails,
+      worldProgramId,
+      queryTimeoutMs,
+    );
+    const agentCount = await readWorldAgentCount(
+      connection,
+      worldSails,
+      worldProgramId,
+      queryTimeoutMs,
+    );
+    console.log("[world] post-register session", {
+      sessionId: session.sessionId.toString(),
+      seed: session.seed.toString(),
+      status: session.status.toString(),
+      actionSeq: session.actionSeq.toString(),
+      agentCount,
+    });
+
+    if (session.status !== SESSION_ACTIVE && agentCount >= MIN_SESSION_PARTICIPANTS) {
+      const startPayload = worldSails.services.Admin.functions.StartSession.encodePayload() as Hex;
+      await sendInjectedMessage(
+        connection.api,
+        worldProgramId,
+        "world-start-session",
+        startPayload,
+        validatorMode,
+        promiseTimeoutMs,
+        timeoutMs,
+        worldSails,
+      );
+      session = await waitForWorldSessionActive(
+        connection,
+        worldSails,
+        worldProgramId,
+        timeoutMs,
+      );
+      console.log("[world] session active", {
+        sessionId: session.sessionId.toString(),
+        seed: session.seed.toString(),
+        status: session.status.toString(),
+        actionSeq: session.actionSeq.toString(),
+      });
+    } else if (session.status !== SESSION_ACTIVE) {
+      console.log("[world] session remains in registration phase", {
+        agentCount,
+        minToStart: MIN_SESSION_PARTICIPANTS,
+      });
     }
 
     if (!args.noWriteEnv && codeId) {

@@ -16,6 +16,7 @@
     "deploy-proxy:dry-run": "tsx scripts/deploy-proxy.ts --dry-run",
     "proxy-fleet": "tsx scripts/proxy-fleet.ts",
     "mint-resources": "tsx scripts/mint-resources.ts",
+    "redeem-resources": "tsx scripts/redeem-resources.ts",
     "play-agent": "tsx scripts/play-agent.ts",
     "agent-step-events": "tsx scripts/agent-step-events.ts",
     "events": "tsx scripts/read-events.ts",

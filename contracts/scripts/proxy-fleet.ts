@@ -54,6 +54,7 @@ const ENV_PATH = path.join(ROOT, ".env");
 const ZERO_HASH = `0x${"0".repeat(64)}` as Hex;
 
 const SESSION_ACTIVE = 1n;
+const MIN_SESSION_PARTICIPANTS = 8;
 const AGENT_ACTIVE = 1n;
 const MAP_WIDTH = 40;
 const MAP_HEIGHT = 64;
@@ -63,7 +64,9 @@ const DIR_DOWN = 2;
 const DIR_LEFT = 3;
 const DIR_CURRENT = 4;
 const SIDE_LOOKAHEAD_DEPTH = 0;
-const SIDE_LOOKAHEAD_RADIUS = 10;
+const DEFAULT_SIDE_LOOKAHEAD_RADIUS = 10;
+let sideLookaheadRadius = DEFAULT_SIDE_LOOKAHEAD_RADIUS;
+let resourceStrategy: ResourceStrategy = "nearest";
 const RESOURCE_SEARCH_MAX_DISTANCE = 24;
 const RESOURCE_DISTANCE_PENALTY = 16;
 const RESOURCE_DESCENT_PENALTY = 32;
@@ -81,11 +84,14 @@ const TILE_SURFACE = 20;
 
 type ValidatorMode = "default" | "slot";
 type GoldStrategy = "round-robin" | "nearest";
+type ResourceStrategy = "nearest" | "local";
 
 type CliArgs = {
   create?: string;
   steps?: string;
   maxRounds?: string;
+  sideLookaheadRadius?: string;
+  resourceStrategy?: ResourceStrategy;
   goldStrategy?: GoldStrategy;
   topUp?: string;
   ethRpc?: string;
@@ -210,7 +216,11 @@ Options:
                     Mine one HCRST and carry it back to surface via ladders.
   --surface-carried Carry current backpack resources back to surface and bank them.
   --gold-strategy   HCRST strategy: round-robin or nearest. Default round-robin.
+  --resource-strategy
+                    Resource strategy: nearest or local. local only chases side-lookahead resources.
   --max-rounds      Safety limit for --until-gold. Rounds for round-robin, moves for nearest. Default 200.
+  --side-lookahead-radius
+                    Horizontal resource lookahead radius. Default 10.
   --proxy-indexes   One-based proxy indexes to play, comma-separated. Example: 2,5.
   --no-deploy       Skip creating new proxies; only use env list.
   --no-play         Deploy/register only.
@@ -240,12 +250,23 @@ function parseArgs(argv: string[]): CliArgs {
       case "--max-rounds":
         args.maxRounds = next();
         break;
+      case "--side-lookahead-radius":
+        args.sideLookaheadRadius = next();
+        break;
       case "--gold-strategy": {
         const value = next();
         if (value !== "round-robin" && value !== "nearest") {
           throw new Error("--gold-strategy must be either round-robin or nearest");
         }
         args.goldStrategy = value;
+        break;
+      }
+      case "--resource-strategy": {
+        const value = next();
+        if (value !== "nearest" && value !== "local") {
+          throw new Error("--resource-strategy must be either nearest or local");
+        }
+        args.resourceStrategy = value;
         break;
       }
       case "--top-up":
@@ -676,6 +697,14 @@ async function readSession(connection: Connection, worldSails: SailsProgram, wor
   return sessionFromResult(worldSails.services.World.queries.Session.decodeResult<unknown>(reply));
 }
 
+async function readAgentCount(connection: Connection, worldSails: SailsProgram, worldProgramId: Address, queryTimeoutMs: number) {
+  const payload = worldSails.services.World.queries.Agents.encodePayload() as Hex;
+  const reply = await queryProgram(connection, worldProgramId, payload, queryTimeoutMs, "World.Agents");
+  const decoded = worldSails.services.World.queries.Agents.decodeResult<unknown>(reply);
+  if (!Array.isArray(decoded)) throw new Error("World.Agents returned non-array");
+  return decoded.length;
+}
+
 async function ensureSessionActive(
   connection: Connection,
   worldSails: SailsProgram,
@@ -693,6 +722,11 @@ async function ensureSessionActive(
     actionSeq: session.actionSeq.toString(),
   });
   if (session.status === SESSION_ACTIVE) return session;
+
+  const agentCount = await readAgentCount(connection, worldSails, worldProgramId, queryTimeoutMs);
+  if (agentCount < MIN_SESSION_PARTICIPANTS) {
+    throw new Error(`World session is not active and only ${agentCount}/${MIN_SESSION_PARTICIPANTS} agents are registered`);
+  }
 
   await sendInjectedMessage(
     connection.api,
@@ -839,7 +873,7 @@ function sideLookaheadResources(agent: AgentView, map: number[], allowedTiles?: 
     if (!canPlanAtDepth(agent, y)) continue;
     if (!verticalPathCanBeOpened(agent, map, y)) continue;
 
-    for (let offset = -SIDE_LOOKAHEAD_RADIUS; offset <= SIDE_LOOKAHEAD_RADIUS; offset += 1) {
+    for (let offset = -sideLookaheadRadius; offset <= sideLookaheadRadius; offset += 1) {
       if (offset === 0) continue;
       const x = agent.x + offset;
       if (x < 0 || x >= MAP_WIDTH) continue;
@@ -1061,8 +1095,10 @@ function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
   const sideLookahead = planSideLookaheadAction(agent, map);
   if (sideLookahead) return sideLookahead;
 
-  const nearestResource = planNearestResourceAction(agent, map);
-  if (nearestResource) return nearestResource;
+  if (resourceStrategy === "nearest") {
+    const nearestResource = planNearestResourceAction(agent, map);
+    if (nearestResource) return nearestResource;
+  }
 
   const target = targetOf(agent, DIR_DOWN);
   if (target && canPlanAtDepth(agent, target.y)) {
@@ -1070,6 +1106,14 @@ function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
     const depthReason = `; ${ladderBudgetReason(agent, target.y)}`;
     if (isDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `drill ${tileName(tile)}${depthReason}` };
     if (isTraversable(tile)) return { fn: "MoveAgent", direction: DIR_DOWN, target, reason: `move into ${tileName(tile)}${depthReason}` };
+  }
+
+  const horizontalExplore = planHorizontalExploreAction(agent, map);
+  if (horizontalExplore) return horizontalExplore;
+
+  if (agent.y > 0) {
+    const surfaceAction = chooseSurfaceAction(agent, map);
+    if (surfaceAction) return surfaceAction;
   }
 
   return null;
@@ -1298,6 +1342,24 @@ function planHorizontalActionToX(agent: AgentView, map: number[], targetX: numbe
   const fullReason = `${reason}; next ${tileName(tile)} at ${target.x},${target.y}`;
   if (isTraversable(tile)) return { fn: "MoveAgent", direction, target, reason: fullReason };
   if (isDrillable(tile)) return { fn: "Drill", direction, target, reason: fullReason };
+  return null;
+}
+
+function planHorizontalExploreAction(agent: AgentView, map: number[]): PlannedAction | null {
+  const directions = agent.x < MAP_WIDTH - 1 ? [DIR_RIGHT, DIR_LEFT] : [DIR_LEFT, DIR_RIGHT];
+
+  for (const direction of directions) {
+    const target = targetOf(agent, direction);
+    if (!target) continue;
+
+    const tile = tileAt(map, target.x, target.y);
+    if (tile === TILE_LAVA || tile < 0) continue;
+
+    const reason = `horizontal exploration at depth ${agent.y}; next ${tileName(tile)} at ${target.x},${target.y}`;
+    if (isTraversable(tile)) return { fn: "MoveAgent", direction, target, reason };
+    if (isDrillable(tile)) return { fn: "Drill", direction, target, reason };
+  }
+
   return null;
 }
 
@@ -1794,17 +1856,20 @@ async function main() {
   const untilGold = Boolean(args.untilGold || goldAndSurface);
   const steps = args.noPlay || untilGold || surfaceCarried ? 0 : parseNonNegativeInt(args.steps, 2, "--steps");
   const maxRounds = parsePositiveInt(args.maxRounds, 200, "--max-rounds");
+  sideLookaheadRadius = parsePositiveInt(args.sideLookaheadRadius || envValue("DIGGER_SIDE_LOOKAHEAD_RADIUS"), DEFAULT_SIDE_LOOKAHEAD_RADIUS, "--side-lookahead-radius");
   const timeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_EVENT_TIMEOUT_MS"], "DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), 180_000, "--timeout-ms");
   const promiseTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_PROMISE_TIMEOUT_MS"], "DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), 60_000, "--promise-timeout-ms");
   const queryTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_QUERY_TIMEOUT_MS"], "DIGGER_QUERY_TIMEOUT_MS", args.queryTimeoutMs), 30_000, "--query-timeout-ms");
   const validatorMode = (args.validatorMode || envValue("DIGGER_VALIDATOR_MODE") || DEFAULTS.DIGGER_VALIDATOR_MODE) as ValidatorMode;
   const goldStrategy = (args.goldStrategy || envValue("DIGGER_GOLD_STRATEGY") || "round-robin") as GoldStrategy;
+  resourceStrategy = (args.resourceStrategy || envValue("DIGGER_RESOURCE_STRATEGY") || "nearest") as ResourceStrategy;
   const topUp = parseAmount(args.topUp || envValue("DIGGER_PROXY_TOP_UP") || DEFAULTS.DIGGER_PROXY_TOP_UP, "DIGGER_PROXY_TOP_UP");
   const worldProgramId = normalizeAddress(requireValue(envValue("DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID");
   const codeId = normalizeHex32(requireValue(envValue("DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID");
 
   if (validatorMode !== "default" && validatorMode !== "slot") throw new Error("validator mode must be default or slot");
   if (goldStrategy !== "round-robin" && goldStrategy !== "nearest") throw new Error("gold strategy must be round-robin or nearest");
+  if (resourceStrategy !== "nearest" && resourceStrategy !== "local") throw new Error("resource strategy must be nearest or local");
 
   const [proxySails, worldSails] = await Promise.all([loadSails(PROXY_IDL_PATH), loadSails(WORLD_IDL_PATH)]);
   const connection = await connect(args, timeoutMs);
@@ -1819,6 +1884,8 @@ async function main() {
       goldAndSurface,
       surfaceCarried,
       goldStrategy,
+      resourceStrategy,
+      sideLookaheadRadius,
       maxRounds,
       validatorMode,
       topUp: topUp.toString(),
@@ -1828,8 +1895,6 @@ async function main() {
     if (codeState !== CodeState.Validated) {
       throw new Error(`DIGGER_PROXY_CODE_ID is not validated; state=${String(codeState)}`);
     }
-
-    await ensureSessionActive(connection, worldSails, worldProgramId, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
 
     const proxies = envProxyList();
     const newProxies: Address[] = [];
@@ -1849,6 +1914,10 @@ async function main() {
       await registerProxy(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
     }
     await updateProxyList(allProxies);
+
+    if (!args.noPlay && (steps > 0 || untilGold || goldAndSurface || surfaceCarried)) {
+      await ensureSessionActive(connection, worldSails, worldProgramId, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
+    }
 
     if (surfaceCarried && !args.noPlay) {
       for (const proxy of playProxies) {

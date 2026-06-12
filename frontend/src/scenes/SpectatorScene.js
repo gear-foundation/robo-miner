@@ -108,7 +108,8 @@ export default class SpectatorScene extends GameScene {
     // Each agent's home column → a surface totem (its personal base/sell spot).
     this.totemSpots = this.rt.s.miners.map((m) => m.spawnX);
 
-    this.worldGfx = this.add.graphics();
+    this.frameGfx = this.add.graphics(); this.frameGfx.setDepth(0);
+    this.worldGfx = this.add.graphics(); this.worldGfx.setDepth(1);
     this.digFxGfx = this.add.graphics(); this.digFxGfx.setDepth(3);
     this.debrisGfx = this.add.graphics(); this.debrisGfx.setDepth(4);
     this.robotGfx = this.add.graphics(); this.robotGfx.setDepth(5);
@@ -120,7 +121,7 @@ export default class SpectatorScene extends GameScene {
     this.eventLog = []; this.txCount = 0; this.consoleOpen = false; this.consoleTimer = 0;
 
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, this.world.W * TILE, this.world.H * TILE);
+    cam.setBounds(-TILE, 0, (this.world.W + 2) * TILE, (this.world.H + 1) * TILE);
     cam.setBackgroundColor('#4a7bbf');
     cam.setRoundPixels(true);
     cam.setZoom(1);

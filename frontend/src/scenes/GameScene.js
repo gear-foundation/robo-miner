@@ -230,11 +230,14 @@ export default class GameScene extends Phaser.Scene {
     try { this.robotColor = localStorage.getItem('robo.color') || 'classic'; }
     catch { this.robotColor = 'classic'; }
 
+    this.frameGfx = this.add.graphics();
     this.worldGfx = this.add.graphics();
     this.cloudGfx = this.add.graphics();       // parallax clouds, redrawn every frame
     this.digOverlayGfx = this.add.graphics();  // cracks on block being dug
     this.debrisGfx = this.add.graphics();      // flying cube chunks from broken blocks
     this.robotGfx = this.add.graphics();
+    this.frameGfx.setDepth(0);
+    this.worldGfx.setDepth(1);
     this.cloudGfx.setDepth(2);
     // Clouds live in screen space, not world space — they drift on their
     // own and stay put when the player walks left/right. Without this the
@@ -302,7 +305,7 @@ export default class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.destroySceneDOM());
     this.events.once('destroy', () => this.destroySceneDOM());
 
-    this.cameras.main.setBounds(0, 0, WORLD_W * TILE, WORLD_H * TILE);
+    this.cameras.main.setBounds(-TILE, 0, (WORLD_W + 2) * TILE, (WORLD_H + 1) * TILE);
     // Sky-blue fallback so any sub-pixel uncovered strip on the canvas edge
     // reads as sky, not a black flicker, during smooth-camera movement.
     this.cameras.main.setBackgroundColor('#4a7bbf');
@@ -2153,6 +2156,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   drawWorld() {
+    this.drawVisualFrame();
+
     const g = this.worldGfx;
     g.clear();
     this.tilePoolCursor = 0;
@@ -2232,6 +2237,24 @@ export default class GameScene extends Phaser.Scene {
     // (no central shop → no extra walking to bank/refuel/upgrade).
     if (this.world.model === 'digger') this.drawTotems(g);
     else this.drawShop(g);
+  }
+
+  drawVisualFrame() {
+    const g = this.frameGfx;
+    if (!g || !this.world) return;
+    g.clear();
+
+    const surfaceY = this.world?.surface ?? SURFACE_Y;
+    const worldW = this.world.W;
+    const worldH = this.world.H;
+
+    for (let y = surfaceY; y < worldH; y++) {
+      this.drawTile(g, -1, y, BLOCK.STONE, BLOCK_DATA[BLOCK.STONE]);
+      this.drawTile(g, worldW, y, BLOCK.STONE, BLOCK_DATA[BLOCK.STONE]);
+    }
+    for (let x = -1; x <= worldW; x++) {
+      this.drawTile(g, x, worldH, BLOCK.STONE, BLOCK_DATA[BLOCK.STONE]);
+    }
   }
 
   // Per-spot "sell totem": a short wooden post with a glowing orb on top,

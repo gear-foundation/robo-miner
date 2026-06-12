@@ -15,8 +15,7 @@
 //   7. chests           → stub (entity list, not grid blocks)
 //   8. clues            → stub (predecessor hints)
 //   9. signals          → stub (precomputed radar data)
-//  10. frame            → seal world with unbreakable border
-//  11. validate         → reachability / budget checks
+//  10. validate         → reachability / budget checks
 
 import { setDims } from './dims.js';
 import { resolveSpec } from './spec.js';
@@ -34,7 +33,6 @@ import { placeClues } from './steps/clues.js';
 import { placeSignals } from './steps/signals.js';
 import { placeLava } from './steps/lava.js';
 import { placeWater } from './steps/water.js';
-import { frameWorld } from './steps/frame.js';
 import { validate } from './steps/validate.js';
 
 export function generateWorld(seed = Date.now(), spec) {
@@ -60,7 +58,8 @@ export function generateWorld(seed = Date.now(), spec) {
 
 // Digger (agent-arena) generation pass — the brief's simple world: dirt +
 // caves + deep lava + 3 redeemable crystals. No 8-ore base fill, no diamond,
-// chests, POIs, water, or artifacts. Same RNG + frame + reachability machinery.
+// chests, POIs, water, or artifacts. The stone border is a renderer-only frame,
+// so the whole generated grid stays playable and contract-owned.
 function generateDiggerPass(seed, dims) {
   const rnd = makeRng(seed);
   const grid = new Uint8Array(dims.W * dims.H);
@@ -70,7 +69,6 @@ function generateDiggerPass(seed, dims) {
   placeStones(grid, rnd);             // scattered rock obstacles (also fall when undermined)
   placeDeepLava(grid, rnd);           // deep pools guarding the bottom band
   const crystals = placeCrystals(grid, rnd); // SCRST / BCRST / HCRST
-  frameWorld(grid);                   // unbreakable border
 
   const world = {
     grid, seed, W: dims.W, H: dims.H, surface: dims.S, model: 'digger',
@@ -105,8 +103,6 @@ function generatePass(seed, dims) {
 
   placeLava(grid, rnd);
   placeWater(grid, rnd, pockets);
-
-  frameWorld(grid);
 
   const world = { grid, seed, W: dims.W, H: dims.H, surface: dims.S, diamondPos, pockets, pois, chests, chestsAt, signals };
   world.validation = validate(world, ctx);

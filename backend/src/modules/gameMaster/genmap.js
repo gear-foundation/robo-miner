@@ -112,14 +112,6 @@ function validateContractMap(world, map, opts = {}) {
     }
   }
 
-  for (let y = world.surface; y < world.H; y++) {
-    if (map[y * world.W] !== CONTRACT_TILE.STONE) warnings.push(`left wall gap at y=${y}`);
-    if (map[y * world.W + world.W - 1] !== CONTRACT_TILE.STONE) warnings.push(`right wall gap at y=${y}`);
-  }
-  for (let x = 0; x < world.W; x++) {
-    if (map[(world.H - 1) * world.W + x] !== CONTRACT_TILE.STONE) warnings.push(`bottom wall gap at x=${x}`);
-  }
-
   return { counts, warnings };
 }
 

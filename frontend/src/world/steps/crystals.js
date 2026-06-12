@@ -24,6 +24,10 @@ function isDirt(grid, x, y) {
     grid[idx(x, y)] === BLOCK.DIRT;
 }
 
+function canPlaceLooseStone(grid, x, y) {
+  return isDirt(grid, x, y) && grid[idx(x, y + 1)] !== BLOCK.SKY;
+}
+
 function lavaNear(grid, x, y, r) {
   for (let dy = -r; dy <= r; dy++) {
     for (let dx = -r; dx <= r; dx++) {
@@ -68,7 +72,7 @@ function scatterStones(grid, rnd, clumps, f0, f1) {
     for (let j = 0; j < size; j++) {
       const x = cx + (Math.floor(rnd() * 3) - 1);
       const y = cy + Math.floor(rnd() * 2);
-      if (isDirt(grid, x, y)) grid[idx(x, y)] = BLOCK.STONE;
+      if (canPlaceLooseStone(grid, x, y)) grid[idx(x, y)] = BLOCK.STONE;
     }
   }
 }

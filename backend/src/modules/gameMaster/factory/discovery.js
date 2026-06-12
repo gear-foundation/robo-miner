@@ -71,7 +71,22 @@ export function createDiscoveryServer({ factory, env = {}, cfg, port = 8780, log
   return {
     url: `http://localhost:${port}`,
     start() {
-      server.listen(port, () => log(`[discovery] agents scan matches → http://localhost:${port}/matches`));
+      return new Promise((resolve, reject) => {
+        const onError = (error) => {
+          server.off('listening', onListening);
+          const hint = error?.code === 'EADDRINUSE'
+            ? `discovery port ${port} is already in use; set DISCOVERY_PORT to a free port`
+            : `discovery server failed: ${error?.message || error}`;
+          reject(new Error(hint));
+        };
+        const onListening = () => {
+          server.off('error', onError);
+          log(`[discovery] agents scan matches → http://localhost:${port}/matches`);
+          resolve();
+        };
+        server.once('error', onError);
+        server.listen(port, onListening);
+      });
     },
     stop() { try { server.close(); } catch { /* ignore */ } },
   };

@@ -205,7 +205,13 @@ const discovery = createDiscoveryServer({
   cfg: config,
   port: Number(process.env.DISCOVERY_PORT || 8780),
 });
-discovery.start();
+try {
+  await discovery.start();
+} catch (error) {
+  driver.disconnect?.();
+  console.error(`[factory] ${error?.message || error}`);
+  process.exit(1);
+}
 
 process.on('SIGINT', () => {
   factory.stop();

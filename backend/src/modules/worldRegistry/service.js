@@ -15,6 +15,10 @@ export class WorldRegistryService {
     const file = registryFile || path.join(this.config.stateDir, 'gamemaster.json');
     const source = await readJson(file, null);
     const sourceWorlds = Array.isArray(source?.worlds) ? source.worlds : [];
+    return this.syncWorldRecords(sourceWorlds, { source: file, mode: 'local' });
+  }
+
+  async syncWorldRecords(sourceWorlds, { source = 'memory', mode = 'memory' } = {}) {
     const season = this.makeSeason(sourceWorlds);
     const syncedAt = this.now().toISOString();
 
@@ -31,8 +35,8 @@ export class WorldRegistryService {
       db.jobRuns.push({
         id: `world-registry-sync:${syncedAt}`,
         job: 'world-registry-sync',
-        mode: 'local',
-        source: file,
+        mode,
+        source,
         startedAt: syncedAt,
         finishedAt: this.now().toISOString(),
         worlds: sourceWorlds.length,

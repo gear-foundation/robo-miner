@@ -21,7 +21,7 @@ const STATUS_MAP = {
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
-export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now = Date.now }) {
+export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now = Date.now, worldRegistry = null }) {
   const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
   const file = path.join(dir, 'gamemaster.json');
   const deployMode = env.adminKey ? 'live' : 'dry-run';
@@ -64,16 +64,18 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
     async publish(worlds) {
       const ts = new Date(now()).toISOString();
       if (!createdAt) createdAt = ts;
+      const records = worlds.map((world) => toRecord(world, ts));
       const payload = {
         schemaVersion: 1,
         createdAt,
         updatedAt: ts,
-        worlds: worlds.map((world) => toRecord(world, ts)),
+        worlds: records,
       };
       await mkdir(dir, { recursive: true });
       const tmp = `${file}.${process.pid}.tmp`;
       await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
       await rename(tmp, file);
+      await worldRegistry?.syncWorldRecords(records, { source: 'factory', mode: deployMode });
     },
   };
 }

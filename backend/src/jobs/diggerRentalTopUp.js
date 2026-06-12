@@ -2,7 +2,7 @@
 
 import { loadConfig } from '../config/index.js';
 import { createVaraEthChain } from '../chain/varaEth.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
@@ -65,7 +65,7 @@ async function main() {
 
   const config = loadConfig();
   const dryRun = args.dryRun ?? config.diggerRentalMode !== 'live';
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const chain = dryRun ? null : await createVaraEthChain(config);
   const service = new DiggerRentalService({ store, chain, config, logger });
 

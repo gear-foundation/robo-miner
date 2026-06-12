@@ -14,10 +14,15 @@ export const DEFAULT_SOCIAL_REPOST_FUEL_GRANT = 60n * VARA;
 export const DEFAULT_SOCIAL_QUOTE_FUEL_GRANT = 120n * VARA;
 
 export function loadConfig(env = process.env) {
+  const storeBackend = (env.BACKEND_STORE || (env.DATABASE_URL ? 'postgres' : 'json')).toLowerCase();
   return {
     rootDir: BACKEND_ROOT,
     stateDir: path.resolve(BACKEND_ROOT, env.BACKEND_STATE_DIR || env.GAMEMASTER_STATE_DIR || 'state'),
     dbFile: path.resolve(BACKEND_ROOT, env.BACKEND_DB_FILE || path.join(env.BACKEND_STATE_DIR || env.GAMEMASTER_STATE_DIR || 'state', 'backend.json')),
+    storeBackend,
+    databaseUrl: env.DATABASE_URL || '',
+    databaseSchema: env.DATABASE_SCHEMA || 'public',
+    databaseDocumentId: env.DATABASE_DOCUMENT_ID || 'main',
     network: env.CHAIN_NETWORK || 'hoodi',
     ethRpc: env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
     varaEthWs: env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',

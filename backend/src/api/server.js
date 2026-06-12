@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { AdminService } from '../modules/admin/service.js';
 import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
@@ -14,7 +14,7 @@ import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
 const config = loadConfig();
-const store = new JsonStore(config.dbFile);
+const store = createStore(config);
 const logger = createLogger('api');
 const registry = new WorldRegistryService({
   store,

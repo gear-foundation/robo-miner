@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { loadConfig } from '../config/index.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 
 function usage() {
@@ -63,7 +63,7 @@ async function main() {
 
   const config = loadConfig();
   const service = new DiggerRegistryService({
-    store: new JsonStore(config.dbFile),
+    store: createStore(config),
     config,
   });
 

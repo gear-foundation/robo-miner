@@ -300,22 +300,42 @@ available. Production-like verification requires `SOCIAL_X_BEARER_TOKEN`.
 
 ## Storage
 
-The backend uses a JSON store for the current MVP runtime. By default it writes
-to:
+Production should use Postgres for shared backend state. The backend keeps the
+same `store.read()` / `store.update()` contract, but stores the canonical state
+document in a locked Postgres row so `api`, `scheduler`, and indexer jobs can
+share one database safely.
 
 ```txt
-<BACKEND_STATE_DIR>/backend.json
+BACKEND_STORE=postgres
+DATABASE_URL=postgres://user:pass@host:5432/dbname
+DATABASE_SCHEMA=public
+DATABASE_DOCUMENT_ID=main
 ```
 
-Default:
+Local dry-runs can still use the JSON fallback:
 
 ```txt
+BACKEND_STORE=json
 BACKEND_STATE_DIR=state
 BACKEND_DB_FILE=state/backend.json
 ```
 
-Set `BACKEND_DB_FILE` when a test, smoke run, or deployment should use a
-separate database file.
+To migrate an existing JSON state file into Postgres:
+
+```bash
+cd backend
+DATABASE_URL=postgres://user:pass@host:5432/dbname npm run db:migrate-json-to-postgres
+```
+
+Pass `-- --force` only when intentionally overwriting an existing Postgres
+state document.
+
+When `BACKEND_STORE=postgres`, the live factory persists its pool/live/past
+documents in Postgres and also publishes world records directly into the shared
+Postgres-backed registry. It still writes compatibility JSON files locally, but
+API, scheduler, and factory containers do not need a shared filesystem for
+`backend.json`, `gamemaster.json`, `factory-live.json`, `factory-past.json`, or
+`factory-programs.json`.
 
 The always-on worker runs registry sync, snapshot projection, and rental top-up:
 

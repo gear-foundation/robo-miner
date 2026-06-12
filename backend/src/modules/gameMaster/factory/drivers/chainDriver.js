@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../../..'); // backend/src/modules/gameMaster/factory/drivers → repo root
 const SESSION_ACTIVE = 1;
 
-export async function createChainDriver({ env, log = console.log, reservedProgramIds = [] }) {
+export async function createChainDriver({ env, log = console.log, reservedProgramIds = [], documentStore = null }) {
   const { connectDiggerWorldChain } = await import('../../../../chain/diggerWorld.js');
   const chain = await connectDiggerWorldChain(env);
 
@@ -43,21 +43,32 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
   });
 
   const poolFile = path.resolve(ROOT, process.env.GAMEMASTER_STATE_DIR || 'state', 'factory-programs.json');
+  const poolDocumentId = 'factory:factory-programs';
   const pool = await loadPool();
   let codeId = env.codeId || pool.codeId || null;
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
   const reservedPrograms = new Set((reservedProgramIds || []).filter(Boolean).map(String));
 
   async function loadPool() {
+    const doc = await documentStore?.read(poolDocumentId, undefined);
+    if (doc !== undefined) return normalizePool(doc);
     try {
-      return JSON.parse(await readFile(poolFile, 'utf8'));
+      return normalizePool(JSON.parse(await readFile(poolFile, 'utf8')));
     } catch {
       return { codeId: null, programs: [] };
     }
   }
   async function savePool() {
+    await documentStore?.write(poolDocumentId, pool);
     await mkdir(path.dirname(poolFile), { recursive: true });
     await writeFile(poolFile, `${JSON.stringify(pool, null, 2)}\n`);
+  }
+
+  function normalizePool(value) {
+    return {
+      codeId: value?.codeId || null,
+      programs: Array.isArray(value?.programs) ? value.programs : [],
+    };
   }
 
   async function ensureCode() {

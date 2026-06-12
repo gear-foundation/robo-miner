@@ -2,7 +2,7 @@
 
 import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { programsFromConfig } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
@@ -41,7 +41,7 @@ async function main() {
   }
 
   const config = loadConfig();
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const jobs = {
     registry: () => runRegistry({ store, config }),
     snapshot: () => runSnapshot({ store, config }),

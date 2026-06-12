@@ -2,7 +2,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { loadConfig } from '../config/index.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { loadContractIdls } from '../modules/indexer/idlRegistry.js';
 import { programsFromConfig, VaraEthLiveReader } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
@@ -88,7 +88,7 @@ async function main() {
       const events = JSON.parse(await readFile(args.file, 'utf8'));
       logger.info('apply_events.start', { file: args.file, count: Array.isArray(events) ? events.length : 1 });
       const projector = new IndexerProjector({
-        store: new JsonStore(config.dbFile),
+        store: createStore(config),
         config,
       });
       const results = await projector.applyEvents(Array.isArray(events) ? events : [events]);
@@ -100,7 +100,7 @@ async function main() {
       const payload = JSON.parse(await readFile(args.file, 'utf8'));
       logger.info('ingest_injected.start', { file: args.file });
       const service = new InjectedIngestService({
-        store: new JsonStore(config.dbFile),
+        store: createStore(config),
         config,
       });
       logger.info('ingest_injected.ok', { dbFile: config.dbFile, result: await service.ingest(payload) });
@@ -124,7 +124,7 @@ async function main() {
 }
 
 async function runSnapshotOnce(config) {
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const reader = new SnapshotReader({ config: await addDbPrograms(config, store) });
   const projector = new IndexerProjector({ store, config });
   await reader.connect();
@@ -143,7 +143,7 @@ async function runSnapshotOnce(config) {
 }
 
 async function runSnapshotWatch(config) {
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const reader = new SnapshotReader({ config: await addDbPrograms(config, store) });
   const projector = new IndexerProjector({ store, config });
   await reader.connect();
@@ -165,7 +165,7 @@ async function runSnapshotWatch(config) {
 }
 
 async function runLiveOnce(config) {
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const reader = new VaraEthLiveReader({ config: await addDbPrograms(config, store) });
   const projector = new IndexerProjector({ store, config });
   await reader.connect();
@@ -186,7 +186,7 @@ async function runLiveOnce(config) {
 }
 
 async function runWatch(config) {
-  const store = new JsonStore(config.dbFile);
+  const store = createStore(config);
   const reader = new VaraEthLiveReader({ config: await addDbPrograms(config, store) });
   const projector = new IndexerProjector({ store, config });
   let lastHash = null;

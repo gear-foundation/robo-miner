@@ -13,6 +13,9 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadConfig, loadChainEnv } from './config.js';
+import { loadConfig as loadBackendConfig } from '../../../config/index.js';
+import { createDocumentStore, createStore } from '../../../db/store.js';
+import { WorldRegistryService } from '../../worldRegistry/service.js';
 import { createFactory } from './factory.js';
 import { createDryRunDriver } from './drivers/dryRunDriver.js';
 import { createRegistryPublisher } from './registry.js';
@@ -22,6 +25,8 @@ import { WORLD } from './world.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..'); // backend/src/modules/gameMaster/factory → repo root
+const backendConfig = loadBackendConfig();
+const documentStore = createDocumentStore(backendConfig);
 
 // Durable factory state: live worlds keep the same programId/session across
 // operator restarts; retired worlds survive for the lobby's PAST tab.
@@ -36,6 +41,8 @@ const registryFilePath = () => stateFilePath('gamemaster.json');
 const RESTORABLE_LIVE = new Set([WORLD.OPEN, WORLD.ACTIVE, WORLD.FINISHED]);
 
 async function readJson(file, fallback = null) {
+  const doc = await documentStore?.read(documentIdFor(file), undefined);
+  if (doc !== undefined) return doc;
   try {
     return JSON.parse(await readFile(file, 'utf8'));
   } catch {
@@ -44,10 +51,15 @@ async function readJson(file, fallback = null) {
 }
 
 async function writeJson(file, payload) {
+  await documentStore?.write(documentIdFor(file), payload);
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
   await rename(tmp, file);
+}
+
+function documentIdFor(file) {
+  return `factory:${path.basename(file, '.json')}`;
 }
 
 async function loadPast() {
@@ -164,7 +176,7 @@ if (useChain) {
   config = loadConfig({ lobbyMode: true });
   chainEnv = loadChainEnv();
   const { createChainDriver } = await import('./drivers/chainDriver.js');
-  driver = await createChainDriver({ env: chainEnv, reservedProgramIds });
+  driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore });
 } else {
   config = loadConfig(
     realTimers
@@ -188,6 +200,7 @@ const publisher = createRegistryPublisher({
   cfg: config,
   env: chainEnv,
   stateDir: process.env.GAMEMASTER_STATE_DIR || 'state',
+  worldRegistry: createWorldRegistry(),
 });
 const archives = createArchiveStore({
   root: ROOT,
@@ -253,4 +266,12 @@ if (durationMs > 0) {
     }
     process.exit(0);
   }, durationMs);
+}
+
+function createWorldRegistry() {
+  if (backendConfig.storeBackend !== 'postgres') return null;
+  return new WorldRegistryService({
+    store: createStore(backendConfig),
+    config: backendConfig,
+  });
 }

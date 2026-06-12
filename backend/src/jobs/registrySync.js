@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { loadConfig } from '../config/index.js';
-import { JsonStore } from '../db/jsonStore.js';
+import { createStore } from '../db/store.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
@@ -51,7 +51,7 @@ async function main() {
 
   const config = loadConfig();
   const service = new WorldRegistryService({
-    store: new JsonStore(config.dbFile),
+    store: createStore(config),
     config,
   });
   logger.info('run.start', { source: args.source || null, dbFile: config.dbFile });

@@ -77,7 +77,7 @@ npm run factory            # dry-run factory + discovery server
 npm run factory:forever    # dry-run forever
 npm run factory:chain      # live Hoodi factory; requires backend/.env
 npm run sim:register -- <worldProgramId> 10
-npm run sim:play -- <worldProgramId> --forever
+npm run sim:play -- <worldProgramId> 10
 ```
 
 ## World Registry

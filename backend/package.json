@@ -17,7 +17,7 @@
     "factory:forever": "node src/modules/gameMaster/factory/index.js --duration 0",
     "factory:chain": "node --env-file-if-exists=.env src/modules/gameMaster/factory/index.js --chain",
     "sim:register": "node --env-file-if-exists=.env src/modules/gameMaster/sim/register-agents.js",
-    "sim:play": "node --env-file-if-exists=.env src/modules/gameMaster/sim/play-agents.js",
+    "sim:play": "node --env-file-if-exists=.env src/modules/gameMaster/sim/stream.js",
     "sim:stream": "node --env-file-if-exists=.env src/modules/gameMaster/sim/stream.js",
     "sim:reset": "node --env-file-if-exists=.env src/modules/gameMaster/sim/reset-world.js",
     "registry:sync": "node src/jobs/registrySync.js",

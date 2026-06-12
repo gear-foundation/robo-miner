@@ -1,14 +1,15 @@
-// Smart agent brain (pure planner) — ported from contracts/scripts/agent-step-events.ts.
+// Smart agent brain (pure planner).
 //
 // Given an agent view + the current map, decide the next single action so the
-// agent plays the real loop: dig toward the nearest reachable resource while
-// ALWAYS reserving enough ladders to climb home, fill the backpack, then climb
-// back to the surface (placing ladders) and bank. No chain or IO here — the
-// driver feeds it state and executes the returned action.
+// agent plays the real loop: score reachable resources through its own profile
+// while ALWAYS reserving enough ladders to climb home, fill the backpack, then
+// climb back to the surface (placing ladders) and bank. No chain or IO here —
+// the driver feeds it state and executes the returned action. Agents do not
+// share plans or coordinate: each profile is an independent competing miner.
 //
-// Difference from the original: in our contract STONE is undrillable (it's the
-// map boundary / obstacle), so the planner treats stone as a solid wall — never
-// drills or routes through it.
+// STONE is treated as an obstacle for the test brain. The live contract may
+// accept drilling stone, but this bot intentionally focuses on dirt/resources
+// so generated runs stay legible and ladder-safe.
 
 export const MAP_WIDTH = 40;
 export const MAP_HEIGHT = 64;
@@ -33,6 +34,52 @@ const tileAt = (map, x, y) => map[idx(x, y)] ?? TILE.EMPTY;
 const isResource = (t) => t === TILE.SCRST || t === TILE.BCRST || t === TILE.HCRST;
 const isDrillable = (t) => t === TILE.DIRT || isResource(t); // NOT stone (undrillable)
 const isTraversable = (t) => t === TILE.EMPTY || t === TILE.SURFACE || t === TILE.LADDER;
+
+const RESOURCE_VALUE = {
+  [TILE.SCRST]: 1,
+  [TILE.BCRST]: 5,
+  [TILE.HCRST]: 25,
+};
+
+const RESOURCE_NAMES = {
+  [TILE.SCRST]: 'scrst',
+  [TILE.BCRST]: 'bcrst',
+  [TILE.HCRST]: 'hcrst',
+};
+
+const BASE_PROFILE = {
+  name: 'balanced',
+  valueWeight: 0.35,
+  depthWeight: 0.015,
+  returnLoad: 1,
+  ladderBuffer: 1,
+  resourceWeights: {},
+};
+
+const PROFILE_PRESETS = [
+  { name: 'balanced', valueWeight: 0.35, depthWeight: 0.015, returnLoad: 1, ladderBuffer: 1 },
+  { name: 'sprinter', valueWeight: 0.05, depthWeight: 0, returnLoad: 0.8, ladderBuffer: 2 },
+  { name: 'scrst-harvester', valueWeight: 0.15, depthWeight: 0.01, returnLoad: 0.9, ladderBuffer: 1, resourceWeights: { [TILE.SCRST]: 6 } },
+  { name: 'bcrst-hunter', valueWeight: 0.45, depthWeight: 0.02, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.BCRST]: 10 } },
+  { name: 'hcrst-hunter', valueWeight: 0.75, depthWeight: 0.025, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.HCRST]: 18 } },
+  { name: 'deep-scout', valueWeight: 0.25, depthWeight: 0.08, returnLoad: 1, ladderBuffer: 1 },
+  { name: 'cautious', valueWeight: 0.2, depthWeight: 0.005, returnLoad: 0.6, ladderBuffer: 4 },
+  { name: 'greedy', valueWeight: 0.9, depthWeight: 0.03, returnLoad: 1, ladderBuffer: 0 },
+  { name: 'mid-value', valueWeight: 0.5, depthWeight: 0.015, returnLoad: 0.8, ladderBuffer: 2, resourceWeights: { [TILE.BCRST]: 8, [TILE.HCRST]: 6 } },
+  { name: 'rare-or-deep', valueWeight: 0.65, depthWeight: 0.06, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.HCRST]: 10 } },
+];
+
+function normalizeProfile(profile = {}) {
+  return {
+    ...BASE_PROFILE,
+    ...profile,
+    resourceWeights: { ...BASE_PROFILE.resourceWeights, ...(profile.resourceWeights || {}) },
+  };
+}
+
+export function createAgentProfile(index = 0) {
+  return normalizeProfile(PROFILE_PRESETS[index % PROFILE_PRESETS.length]);
+}
 
 export function agentFromView(view) {
   const v = view.map(Number);
@@ -126,8 +173,6 @@ function findResourcePlans(agent, map, targetResource) {
   plans.sort((a, b) => a.cost - b.cost);
   return plans;
 }
-
-const findNearestResourcePlan = (agent, map, target) => findResourcePlans(agent, map, target)[0] ?? null;
 
 // BFS to the surface (y=0) over ALREADY-OPEN tiles only (empty/surface/ladder).
 function findSurfacePath(agent, map) {
@@ -254,11 +299,28 @@ function chooseMineAction(agent, map, plan) {
   return { fn: 'move', dir, target, tile };
 }
 
-function findReturnSafeMineAction(agent, map, target) {
-  for (const plan of findResourcePlans(agent, map, target)) {
+function resourcePriority(profile, tile) {
+  return (RESOURCE_VALUE[tile] || 0) * profile.valueWeight + (profile.resourceWeights[tile] || 0);
+}
+
+function planScore(profile, plan) {
+  return plan.cost - resourcePriority(profile, plan.resource.tile) - plan.resource.y * profile.depthWeight;
+}
+
+function findReturnSafeMineAction(agent, map, profile) {
+  const plans = findResourcePlans(agent, map, null)
+    .map((plan) => ({ ...plan, score: planScore(profile, plan) }))
+    .sort((a, b) => a.score - b.score || a.cost - b.cost);
+
+  for (const plan of plans) {
     if (!returnSafeForPlan(agent, map, plan)) continue;
     const action = chooseMineAction(agent, map, plan);
     if (!action) continue;
+    action.plan = {
+      profile: profile.name,
+      target: RESOURCE_NAMES[plan.resource.tile] || 'resource',
+      score: Number(plan.score.toFixed(3)),
+    };
     if (returnSafeAfter(agent, map, action).safe) return action;
   }
   return null;
@@ -285,11 +347,13 @@ function chooseSurfaceAction(agent, map) {
 // per agent. Returns { action, mode } or { action: null } when nothing is doable.
 export function decideAction(agent, map, state = {}) {
   let mode = state.mode || 'mine';
+  const profile = normalizeProfile(state.profile);
 
   if (mode === 'mine') {
     const ret = surfaceReturnPlan(agent, map);
-    const tight = ret && ret.laddersNeeded >= agent.ladders;
-    if (carried(agent) > 0 && (agent.y === 0 || carried(agent) >= agent.capacity || tight)) {
+    const tight = ret && ret.laddersNeeded + profile.ladderBuffer >= agent.ladders;
+    const returnAt = Math.max(1, Math.ceil(agent.capacity * profile.returnLoad));
+    if (carried(agent) > 0 && (agent.y === 0 || carried(agent) >= returnAt || tight)) {
       mode = 'surface';
     }
   }
@@ -306,7 +370,7 @@ export function decideAction(agent, map, state = {}) {
   }
 
   // mine: head for the nearest return-safe resource.
-  const safe = findReturnSafeMineAction(agent, map, null);
+  const safe = findReturnSafeMineAction(agent, map, profile);
   if (safe) return { action: safe, mode: 'mine' };
 
   // Nothing return-safe: if carrying, go bank; else nudge downward to open the map.

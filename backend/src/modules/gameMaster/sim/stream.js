@@ -9,7 +9,7 @@
 import http from 'node:http';
 import { loadChainEnv } from '../factory/config.js';
 import { actorIdFromAddress, connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
-import { decideAction, agentFromView, carried, TILE, MAP_WIDTH } from './agent-brain.js';
+import { decideAction, agentFromView, carried, createAgentProfile, TILE, MAP_WIDTH } from './agent-brain.js';
 
 const env = loadChainEnv();
 const world = process.argv[2];
@@ -52,6 +52,10 @@ async function readMap() {
   return conn.decode.mapSnapshot((await conn.query(world, conn.encode.mapSnapshot())).payload).map(Number);
 }
 
+async function readAgent(a) {
+  return agentFromView(a.conn.decode.agentOf((await a.conn.query(world, a.conn.encode.agentOf(a.owner))).payload));
+}
+
 // ── agents ──────────────────────────────────────────────────────────────────
 const agents = [];
 for (let i = 0; i < agentCount; i += 1) {
@@ -60,10 +64,12 @@ for (let i = 0; i < agentCount; i += 1) {
   const conn = await connectDiggerWorldChain({ ...env, adminKey: key });
   const owner = actorIdFromAddress(account.address);
   const agent = agentFromView(conn.decode.agentOf((await conn.query(world, conn.encode.agentOf(owner))).payload));
-  agents.push({ i, owner, conn, agent, state: { mode: 'mine' } });
+  const profile = createAgentProfile(i);
+  agents.push({ i, owner, conn, agent, state: { mode: 'mine', profile } });
 }
 let map = await readMap();
-console.log(`[stream] driving ${agents.length} agents (status: ${agents.map((a) => a.agent.status).join('')})`);
+console.log(`[stream] driving ${agents.length} independent agents (status: ${agents.map((a) => a.agent.status).join('')})`);
+console.log(`[stream] profiles: ${agents.map((a) => `${a.i}:${a.state.profile.name}`).join(', ')}`);
 
 let running = true;
 process.on('SIGINT', () => { running = false; try { server.close(); } catch {} process.exit(0); });
@@ -114,9 +120,9 @@ async function sendAction(a, action) {
 
 // Each agent runs its OWN loop at its OWN pace (desynced, steady event stream).
 // STREAM_AGENT_DELAY_MS is the bot's think-time between actions (on top of the
-// ~1s injected-tx latency). A rejected action (out-of-bounds / race) is retried
-// next tick from fresh state.
-const AGENT_DELAY = Number(process.env.STREAM_AGENT_DELAY_MS || 500);
+// ~1s injected-tx latency). A rejected action (out-of-bounds / race) triggers
+// an immediate state refresh, then the agent re-plans on the next tick.
+const AGENT_DELAY = Number(process.env.STREAM_AGENT_DELAY_MS || 300);
 let emitted = 0;
 
 async function driveAgent(a) {
@@ -127,7 +133,15 @@ async function driveAgent(a) {
       a.state.mode = mode;
       if (action) {
         try { if (await sendAction(a, action)) emitted += 1; }
-        catch { /* rejected / race — re-plan next tick from fresh state */ }
+        catch {
+          try {
+            a.agent = await readAgent(a);
+            map = await readMap();
+          } catch {
+            // If the node is temporarily unavailable, the periodic resync below
+            // will catch up. The agent simply waits for the next tick.
+          }
+        }
       }
     }
     await sleep(AGENT_DELAY);
@@ -136,7 +150,8 @@ async function driveAgent(a) {
 
 agents.forEach((a) => { driveAgent(a).catch(() => {}); });
 
-// Heartbeat + periodic map resync (absorbs other agents' edits + gravity drift).
+// Heartbeat + periodic map resync for the test brain's full-map planning. This
+// is not a frontend animation source; spectators still move from emitted events.
 let ticks = 0;
 while (running) {
   await sleep(3000);

@@ -370,8 +370,8 @@ export class ChainSource {
 
   // 3) Live event path. Vara.eth exposes block queries here, so the frontend
   // tracks new block headers, reads block outcomes, decodes Sails event payloads
-  // emitted by this program, and applies those deltas immediately. Snapshot
-  // polling remains a slower safety net for rehydrate / missed blocks.
+  // emitted by this program, and applies those deltas immediately. After the
+  // initial read, live motion is event-only; snapshots must not drive animation.
   async subscribe() {
     this._unsub = null;
     if (CHAIN.streamUrl) {
@@ -385,7 +385,16 @@ export class ChainSource {
           // Ignore keep-alives / malformed development stream messages.
         }
       };
-      this._stream.onerror = () => { /* EventSource auto-reconnects */ };
+      this._stream.onerror = () => {
+        if (this._streamFallbackStarted) return;
+        this._streamFallbackStarted = true;
+        this._pending.push({ type: 'chain_error', message: 'agent stream unavailable; using chain event polling' });
+        try { this._stream?.close?.(); } catch { /* ignore */ }
+        this._stream = null;
+        this._primeEventCursor().catch((error) => {
+          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+        });
+      };
       return;
     }
     await this._primeEventCursor();
@@ -402,14 +411,6 @@ export class ChainSource {
       if (this._eventPollInMs <= 0 && !this._draining) {
         this._eventPollInMs = this._eventPollEveryMs;
         this._drainNewBlocks().catch((error) => {
-          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-        });
-      }
-
-      this._snapshotInMs -= dtMs;
-      if (this._snapshotInMs <= 0 && !this._polling) {
-        this._snapshotInMs = this._snapshotEveryMs;
-        this._refresh({ emitEvents: false }).catch((error) => {
           this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
         });
       }
@@ -450,11 +451,10 @@ export class ChainSource {
         if (!this._outcomeUnavailableNotified) {
           this._pending.push({
             type: 'chain_events_unavailable',
-            message: 'block outcome RPC is unavailable; using snapshot diff fallback',
+            message: 'block outcome RPC is unavailable; live view requires events',
           });
           this._outcomeUnavailableNotified = true;
         }
-        await this._refresh({ emitEvents: true });
         this._lastBlockHash = latest.hash;
         this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
         return;
@@ -475,7 +475,6 @@ export class ChainSource {
 
       if (!foundCursor) {
         this._pending.push({ type: 'chain_gap', from: this._lastBlockHeight, to: latest.height });
-        await this._refresh({ emitEvents: false });
         this._lastBlockHash = latest.hash;
         this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
         return;
@@ -634,7 +633,7 @@ export class ChainSource {
         this.finished = true;
         break;
       case 'map_generated':
-        this._snapshotInMs = 0;
+        this._pending.push({ type: 'chain_error', message: 'map regenerated; reload world to read initial state' });
         break;
       default:
         break;

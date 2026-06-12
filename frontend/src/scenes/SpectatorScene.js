@@ -3,6 +3,7 @@ import { TILE, BLOCK, BLOCK_DATA, SURFACE_Y } from '../config.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
+import { CHAIN } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { btnCss, wireBtn } from './arenaUI.js';
@@ -14,6 +15,14 @@ import { navigateBack } from '../router.js';
 // real durations with smooth interpolation; the agent is polled when its
 // character goes idle. Free-scroll camera; a speed control scales real time.
 const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse animation)
+
+function formatClock(ms) {
+  if (!Number.isFinite(ms)) return 'waiting';
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  return `${mm}:${String(ss).padStart(2, '0')} left`;
+}
 
 function shortAddress(address) {
   const addr = displayAddress(address);
@@ -52,6 +61,8 @@ export default class SpectatorScene extends GameScene {
     this.specSeed = data?.seed ?? 1234;
     this.specProgramId = data?.programId || '';
     this.backTo = data?.backTo || 'Lobby';
+    this.worldMeta = null;
+    this.worldMetaPollMs = 0;
   }
 
   create() {
@@ -132,6 +143,7 @@ export default class SpectatorScene extends GameScene {
     this.statsTimer = 0;
     this.worldDirty = true;
     this.buildHUD();
+    this.refreshWorldMeta();
     this.robotChirpSound = this.cache.audio.exists('robot-chirp')
       ? this.sound.add('robot-chirp', { volume: 0.42 })
       : null;
@@ -246,6 +258,12 @@ export default class SpectatorScene extends GameScene {
     if (this.consoleOpen) {
       this.consoleTimer += dt;
       if (this.consoleTimer >= 120) { this.consoleTimer = 0; this.renderConsole(); }
+    }
+
+    this.worldMetaPollMs += dt;
+    if (this.worldMetaPollMs >= 5000) {
+      this.worldMetaPollMs = 0;
+      this.refreshWorldMeta();
     }
 
     this.statsTimer += dt;
@@ -595,14 +613,45 @@ export default class SpectatorScene extends GameScene {
     if (!this.statsEl) return;
     const ms = this.rt.s.miners;
     const alive = ms.filter((m) => m.alive).length;
-    const dug = ms.reduce((a, m) => a + m.stats.tilesDug, 0);
+    const maxAgents = Number(this.worldMeta?.maxAgents || this.mode.miners || ms.length || 10);
+    const currentAgents = Number(this.worldMeta?.agents ?? ms.length);
+    const status = this.worldMeta?.status || (this.rt.finished ? 'finished' : currentAgents ? 'active' : 'open');
+    const countLabel = status === 'active'
+      ? `${alive}/${maxAgents}`
+      : `${currentAgents}/${maxAgents}`;
+    const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
+      ? Number(this.worldMeta.endsAt) - Date.now()
+      : NaN;
+    const banked = ms.reduce((totals, m) => {
+      totals.scrst += Number(m.bankedResources?.scrst || 0);
+      totals.bcrst += Number(m.bankedResources?.bcrst || 0);
+      totals.hcrst += Number(m.bankedResources?.hcrst || 0);
+      return totals;
+    }, { scrst: 0, bcrst: 0, hcrst: 0 });
     const fps = Math.round(this.game.loop.actualFps);
     const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     this.statsEl.innerHTML =
       `<span style="color:${fc}">${fps} fps</span>　` +
-      `${(this.rt.timeMs / 1000).toFixed(0)}s　agents <b>${alive}/${ms.length}</b>　` +
-      `dug <b>${dug}</b>　team <b style="color:#ffec6e">${this.rt.teamScore} VARA</b>` +
+      `${formatClock(remainingMs)}　agents <b>${countLabel}</b>　` +
+      `SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
+  }
+
+  async refreshWorldMeta() {
+    if (!CHAIN.matchesUrl || !this.specProgramId) return;
+    try {
+      const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
+      const data = await (await fetch(`${base}/worlds`)).json();
+      const found = (data?.worlds || []).find((w) =>
+        String(w.programId || '').toLowerCase() === String(this.specProgramId).toLowerCase(),
+      );
+      if (found) {
+        this.worldMeta = found;
+        this.updateHUD();
+      }
+    } catch {
+      // HUD can still render from chain/local source if discovery is unavailable.
+    }
   }
 
   showFinish() {

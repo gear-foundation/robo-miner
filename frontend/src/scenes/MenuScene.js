@@ -8,6 +8,9 @@ import {
 } from '../render/robot.js';
 import { connectWallet as connectBrowserWallet, getWalletState, shortAddress, startWalletDiscovery, subscribeWallet } from '../chain/wallet.js';
 import { navigateTo } from '../router.js';
+
+const SINGLE_PLAYER_MENU_ENABLED = false;
+
 // Title / splash scene. Shows the game logo, the robot, and the
 // "Start Digging" button. On start, the robot plays a little fall-
 // through-the-ground animation before we hand off to the Game scene.
@@ -127,9 +130,9 @@ export default class MenuScene extends Phaser.Scene {
     this.persist('robo.hat',   this.menuHat);
     this.persist('robo.color', this.menuColor);
 
-    // --- Start button is a DOM element — clean typography, no
-    // hand-drawn graphics artifacts.
-    this.createStartDOM();
+    // Single-player is kept as a direct /play dev route, but hidden from the
+    // public menu while the live agent arena is the primary entrypoint.
+    if (SINGLE_PLAYER_MENU_ENABLED) this.createStartDOM();
     this.createArenaDOM();
     this.createLeaderboardButtonDOM();
     this.createRedeemButtonDOM();
@@ -138,7 +141,9 @@ export default class MenuScene extends Phaser.Scene {
     this.createWalletButtonDOM();
     this.createCustomizerDOM();
     this.createSoundButtonDOM();
-    this.downKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
+    this.downKey = SINGLE_PLAYER_MENU_ENABLED
+      ? this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN)
+      : null;
 
     // Resize handler: rebuild layout.
     this.scale.on('resize', this.onResize, this);
@@ -152,7 +157,7 @@ export default class MenuScene extends Phaser.Scene {
     // pupil look-around animate. While a fall tween is running it already
     // drives drawRobot via onUpdate, so skip to avoid double draws.
     if (this._falling) return;
-    if (Phaser.Input.Keyboard.JustDown(this.downKey)) {
+    if (this.downKey && Phaser.Input.Keyboard.JustDown(this.downKey)) {
       this.handleStartClick();
       return;
     }
@@ -297,9 +302,9 @@ export default class MenuScene extends Phaser.Scene {
     const compact = W < 560;
     const width = compact ? Math.min(320, W - 28) : Math.min(420, W - 32);
     const gap = compact ? 9 : 10;
-    const startH = compact ? 58 : 64;
+    const startH = SINGLE_PLAYER_MENU_ENABLED ? (compact ? 58 : 64) : 0;
     const secondaryH = compact ? 50 : 56;
-    const top = this.groundY + 8;
+    const top = this.groundY + (SINGLE_PLAYER_MENU_ENABLED ? 8 : 24);
     const colGap = 10;
     const colW = compact ? width : Math.floor((width - colGap) / 2);
     const left = (W - width) / 2;
@@ -318,7 +323,8 @@ export default class MenuScene extends Phaser.Scene {
     const index = { arena: 0, leaderboard: 1, redeem: 2, social: 3 }[slot] ?? 0;
     const row = layout.compact ? index : Math.floor(index / 2);
     const col = layout.compact ? 0 : index % 2;
-    const top = layout.top + layout.startH + layout.gap + row * (layout.secondaryH + layout.gap);
+    const startGap = SINGLE_PLAYER_MENU_ENABLED ? layout.gap : 0;
+    const top = layout.top + layout.startH + startGap + row * (layout.secondaryH + layout.gap);
     const left = layout.left + col * (layout.colW + layout.colGap);
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;

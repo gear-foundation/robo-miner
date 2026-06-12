@@ -4,7 +4,7 @@
 // exposes; there is no block_outcome / event subscription) — to SSE clients, so
 // the frontend animates smoothly with no snapshot polling. Reads come from the
 // Vara.eth node only (no Ethereum).
-//   node src/sim/stream.js <worldProgramId> [agents] [port]
+//   node src/modules/gameMaster/sim/stream.js <worldProgramId> [agents] [port]
 
 import http from 'node:http';
 import { loadChainEnv } from '../factory/config.js';

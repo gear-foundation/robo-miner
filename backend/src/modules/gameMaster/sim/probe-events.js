@@ -3,7 +3,7 @@
 // then walk every NEW block via block_header/parentHash and read block_outcome
 // per hash (raw provider.send) — decoding the world's events. Confirms the
 // event-driven path works (the frontend just used a non-existent api helper).
-//   node src/sim/probe-events.js <worldProgramId>
+//   node src/modules/gameMaster/sim/probe-events.js <worldProgramId>
 
 import { loadChainEnv } from '../factory/config.js';
 import { connectChain, actorIdFromAddress } from '../chain/client.js';

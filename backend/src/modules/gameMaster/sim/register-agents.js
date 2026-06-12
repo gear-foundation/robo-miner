@@ -4,7 +4,7 @@
 // distinct on-chain caller; registration is injected (gasless), so the keys
 // need no funds — the world program's executable balance pays.
 //
-//   node src/sim/register-agents.js [worldProgramId] [count]
+//   node src/modules/gameMaster/sim/register-agents.js [worldProgramId] [count]
 // Defaults: first program in state/factory-programs.json, count 10.
 
 import { readFile } from 'node:fs/promises';
@@ -14,7 +14,7 @@ import { loadChainEnv } from '../factory/config.js';
 import { connectChain, actorIdFromAddress } from '../chain/client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../../..');
+const ROOT = path.resolve(__dirname, '../../../../..');
 
 async function firstPoolProgram() {
   try {

@@ -22,7 +22,7 @@ import { generateMap, randomSeed, gridHash } from '../../genmap.js';
 import { createBalanceKeeper } from '../balanceKeeper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../../../..'); // operator/src/factory/drivers → repo root
+const ROOT = path.resolve(__dirname, '../../../../../..'); // backend/src/modules/gameMaster/factory/drivers → repo root
 const SESSION_ACTIVE = 1;
 
 export async function createChainDriver({ env, log = console.log, reservedProgramIds = [] }) {

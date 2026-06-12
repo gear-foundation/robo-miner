@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One-shot: validate the (rebuilt) digger-world code, create + fund a new program,
 // Create(), and upload a fresh framed map. Prints the new program id.
-//   node src/sim/deploy-world.js
+//   node src/modules/gameMaster/sim/deploy-world.js
 // After: put the printed id in frontend/.env VITE_WORLD_PROGRAM_IDS + state/factory-programs.json.
 
 import { connectChain } from '../chain/client.js';

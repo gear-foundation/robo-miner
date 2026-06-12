@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Reset a world: upload a fresh generated map (clears agents, new session →
 // CREATED, registration open). Admin-signed.
-//   node src/sim/reset-world.js <worldProgramId>
+//   node src/modules/gameMaster/sim/reset-world.js <worldProgramId>
 
 import { loadChainEnv } from '../factory/config.js';
 import { connectChain } from '../chain/client.js';

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // World factory (registrar).
 //
-//   node src/factory/index.js                 # fast dry-run demo (~25s, no chain)
-//   node src/factory/index.js --duration 0    # dry-run forever (Ctrl-C to stop)
-//   node src/factory/index.js --real-timers   # dry-run with real 5min / 30min timers
-//   node src/factory/index.js --chain         # LIVE: deploy + run worlds on testnet
+//   node src/modules/gameMaster/factory/index.js                 # fast dry-run demo
+//   node src/modules/gameMaster/factory/index.js --duration 0    # dry-run forever
+//   node src/modules/gameMaster/factory/index.js --real-timers   # real timers
+//   node src/modules/gameMaster/factory/index.js --chain         # live testnet
 //
-// Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in the env / operator/.env.
+// Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in backend/.env or operator/.env.
 // The factory state machine is identical in both modes — only the driver differs.
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -20,7 +20,7 @@ import { createDiscoveryServer } from './discovery.js';
 import { WORLD } from './world.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../../..'); // operator/src/factory → repo root
+const ROOT = path.resolve(__dirname, '../../../../..'); // backend/src/modules/gameMaster/factory → repo root
 
 // Durable factory state: live worlds keep the same programId/session across
 // operator restarts; retired worlds survive for the lobby's PAST tab.

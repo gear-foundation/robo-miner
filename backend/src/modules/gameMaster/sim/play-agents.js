@@ -5,7 +5,7 @@
 // and it looks alive. On this contract MoveAgent only enters an already-dug tile,
 // so digging needs Drill first.
 //
-//   node src/sim/play-agents.js <worldProgramId> [rounds] [--forever] [--agents N] [--delay ms]
+//   node src/modules/gameMaster/sim/play-agents.js <worldProgramId> [rounds] [--forever] [--agents N] [--delay ms]
 // Defaults: first pool program, 8 rounds, 10 agents, 400ms between rounds.
 
 import { readFile } from 'node:fs/promises';
@@ -15,7 +15,7 @@ import { loadChainEnv } from '../factory/config.js';
 import { connectChain } from '../chain/client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '../../..');
+const ROOT = path.resolve(__dirname, '../../../../..');
 const DIR = { UP: 0, RIGHT: 1, DOWN: 2, LEFT: 3 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -198,7 +198,6 @@ function applyRedeemSnapshot(db, snapshot, config) {
 function applyWorldEvent(db, event, config) {
   const [sessionRaw, ownerRaw, a, b, c, d] = event.args;
   const sessionId = toStringNumber(sessionRaw);
-  const ownerActor = actorKey(ownerRaw);
   const programId = event.programId;
   const world = findWorldByProgram(db, programId);
   const worldId = world?.id || programId || 'unknown-world';
@@ -208,6 +207,12 @@ function applyWorldEvent(db, event, config) {
     applyWorldAdminEvent(db, event, world);
     return;
   }
+  if (event.event === 'SessionStarted') {
+    applyWorldSessionEvent(world, event, sessionId, 'active');
+    return;
+  }
+
+  const ownerActor = actorKey(ownerRaw);
 
   const digger = upsertDiggerFromActor(db, ownerActor, {
     seasonId,
@@ -271,6 +276,14 @@ function applyWorldEvent(db, event, config) {
   }
 
   digger.updatedAt = event.timestamp;
+}
+
+function applyWorldSessionEvent(world, event, sessionId, status) {
+  if (!world) return;
+  world.session = { ...(world.session || {}), id: sessionId };
+  world.status = status;
+  world.chain = { ...(world.chain || {}), startedAt: event.timestamp };
+  world.updatedAt = event.timestamp;
 }
 
 function applyWorldAdminEvent(_db, event, world) {

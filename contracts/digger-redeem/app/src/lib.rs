@@ -45,7 +45,12 @@ struct PendingRedeem {
 }
 
 impl RedeemState {
-    fn new_with_rates(admin: ActorId, res_contract: ActorId, vara_unit: u128, rates: Rates) -> Self {
+    fn new_with_rates(
+        admin: ActorId,
+        res_contract: ActorId,
+        vara_unit: u128,
+        rates: Rates,
+    ) -> Self {
         let mut admins = BTreeMap::new();
         admins.insert(admin, true);
 
@@ -227,6 +232,8 @@ pub enum AdminEvents {
     Paused([u8; 32]),
     Unpaused([u8; 32]),
     FundsWithdrawn([u8; 32], u128, u128),
+    PendingRedeemForceCanceled(u128, [u8; 32], u128, u128, u128, u128),
+    PendingRedeemForcePaid(u128, [u8; 32], u128, u128, u128, u128),
 }
 
 pub struct RedeemService<'a> {
@@ -473,7 +480,6 @@ impl RedeemService<'_> {
     pub fn vara_unit(&self) -> Result<u128, String> {
         Ok(self.state.borrow().vara_unit)
     }
-
 }
 
 impl RedeemService<'_> {
@@ -703,6 +709,88 @@ impl AdminService<'_> {
 
         Ok(CommandReply::new(()).with_value(amount))
     }
+
+    #[export(unwrap_result)]
+    pub fn force_cancel_redeem(&mut self, redeem_id: u128) -> Result<(), String> {
+        let caller = Syscall::message_source();
+        let pending = {
+            let mut state = self.state.borrow_mut();
+
+            ensure_admin(&state, caller)?;
+            state
+                .pending_redemptions
+                .remove(&redeem_id)
+                .ok_or_else(|| "redeem request not found".to_string())?
+        };
+
+        {
+            let mut state = self.state.borrow_mut();
+            state.locked_balance -= pending.payout;
+            state.reserve_balance = state
+                .reserve_balance
+                .checked_add(pending.payout)
+                .ok_or_else(|| "reserve balance overflow".to_string())?;
+        }
+
+        self.emit_event(AdminEvents::PendingRedeemForceCanceled(
+            redeem_id,
+            pending.beneficiary.into_bytes(),
+            pending.scrst,
+            pending.bcrst,
+            pending.hcrst,
+            pending.payout,
+        ))
+        .expect("failed to emit pending redeem force cancel event");
+
+        Ok(())
+    }
+
+    #[export(unwrap_result)]
+    pub fn force_pay_redeem(&mut self, redeem_id: u128) -> Result<CommandReply<()>, String> {
+        let caller = Syscall::message_source();
+        let pending = {
+            let mut state = self.state.borrow_mut();
+
+            ensure_admin(&state, caller)?;
+            state
+                .pending_redemptions
+                .remove(&redeem_id)
+                .ok_or_else(|| "redeem request not found".to_string())?
+        };
+
+        {
+            let mut state = self.state.borrow_mut();
+            state.locked_balance -= pending.payout;
+            state.total_paid = state
+                .total_paid
+                .checked_add(pending.payout)
+                .ok_or_else(|| "total paid overflow".to_string())?;
+            state.total_redeemed_scrst = state
+                .total_redeemed_scrst
+                .checked_add(pending.scrst)
+                .ok_or_else(|| "total redeemed SCRST overflow".to_string())?;
+            state.total_redeemed_bcrst = state
+                .total_redeemed_bcrst
+                .checked_add(pending.bcrst)
+                .ok_or_else(|| "total redeemed BCRST overflow".to_string())?;
+            state.total_redeemed_hcrst = state
+                .total_redeemed_hcrst
+                .checked_add(pending.hcrst)
+                .ok_or_else(|| "total redeemed HCRST overflow".to_string())?;
+        }
+
+        self.emit_event(AdminEvents::PendingRedeemForcePaid(
+            redeem_id,
+            pending.beneficiary.into_bytes(),
+            pending.scrst,
+            pending.bcrst,
+            pending.hcrst,
+            pending.payout,
+        ))
+        .expect("failed to emit pending redeem force paid event");
+
+        Ok(CommandReply::new(()).with_value(pending.payout))
+    }
 }
 
 pub struct Program {
@@ -780,9 +868,8 @@ mod tests {
 
     #[test]
     fn detects_payout_overflow() {
-        let error =
-            calculate_payout(VARA_UNIT, &Rates::new(66, 330, 1650), u128::MAX, 0, 0)
-                .expect_err("must fail");
+        let error = calculate_payout(VARA_UNIT, &Rates::new(66, 330, 1650), u128::MAX, 0, 0)
+            .expect_err("must fail");
 
         assert_eq!(error, "SCRST payout overflow");
     }

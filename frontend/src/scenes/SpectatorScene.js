@@ -6,7 +6,7 @@ import { createWorldSource } from '../chain/source.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { btnCss, wireBtn } from './arenaUI.js';
-import { setRoute } from '../routing.js';
+import { navigateBack } from '../router.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
 // ore, shop, robot models) at 1:1 scale, but drives a CONTINUOUS real-time
@@ -51,10 +51,10 @@ export default class SpectatorScene extends GameScene {
     this.specMode = data?.mode || 'coop-gem';
     this.specSeed = data?.seed ?? 1234;
     this.specProgramId = data?.programId || '';
+    this.backTo = data?.backTo || 'Lobby';
   }
 
   create() {
-    setRoute('Spectator', { mode: this.specMode, seed: this.specSeed, programId: this.specProgramId }, { replace: true });
     this.cleanupSceneDOM();
     this.spectator = true;
     this.mode = GAME_MODES[this.specMode] || {
@@ -625,8 +625,7 @@ export default class SpectatorScene extends GameScene {
 
   goLobby() {
     this.scale.off('resize', this.onSpecResize, this);
-    setRoute('Lobby');
-    this.scene.start('Lobby');
+    navigateBack(this, this.backTo || 'Lobby');
   }
 
   teardown() {

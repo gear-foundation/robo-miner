@@ -25,6 +25,8 @@ const WORLD_EVENTS = new Set([
   "LadderPlaced",
   "ResourceExtracted",
   "ResourcesMinted",
+  "SessionStarted",
+  "StoneMoved",
   "TileDrilled",
 ]);
 
@@ -32,7 +34,6 @@ const ADMIN_EVENTS = new Set([
   "MapGenerated",
   "ResourceVmtUpdated",
   "SessionFinished",
-  "SessionStarted",
 ]);
 
 export async function ingestFreshOutcomeMessages(
@@ -117,6 +118,10 @@ function worldEventArgs(eventName: string, fields: Record<string, unknown>) {
       return [...base, numberField(fields, "x"), numberField(fields, "y"), resourceKind(fields), numberField(fields, "carriedTotal")];
     case "ResourcesMinted":
       return [...base, numberField(fields, "scrst"), numberField(fields, "bcrst"), numberField(fields, "hcrst")];
+    case "SessionStarted":
+      return [stringField(fields, "sessionId")];
+    case "StoneMoved":
+      return [...base, numberField(fields, "fromX"), numberField(fields, "fromY"), numberField(fields, "toX"), numberField(fields, "toY")];
     case "TileDrilled":
       return [...base, numberField(fields, "x"), numberField(fields, "y"), numberField(fields, "oldTile"), numberField(fields, "newTile")];
     default:

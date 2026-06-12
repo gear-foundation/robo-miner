@@ -61,7 +61,7 @@ type ActionFunctionName =
   | "worldMintResources";
 type ResourceTile = typeof TILE_RESOURCE_SCRST | typeof TILE_RESOURCE_BCRST | typeof TILE_RESOURCE_HCRST;
 
-const WORLD_HEADER_PREFIX = "0x474d01103126e7ea14da7d8f";
+const WORLD_HEADER_PREFIX = "0x474d0110c947eba8a499d9a7";
 const ADMIN_HEADER_PREFIX = "0x474d01105acb75662050b164";
 const sailsHeader = (prefix: string, route: number, entry = 1): Hex =>
   `${prefix}${route.toString(16).padStart(2, "0")}${entry.toString(16).padStart(4, "0")}` as Hex;
@@ -84,7 +84,8 @@ const SAILS_WORLD_EVENTS = {
   ResourceExtracted: sailsHeader(WORLD_HEADER_PREFIX, 7),
   ResourcesMinted: sailsHeader(WORLD_HEADER_PREFIX, 8),
   SessionStarted: sailsHeader(WORLD_HEADER_PREFIX, 9),
-  TileDrilled: sailsHeader(WORLD_HEADER_PREFIX, 10),
+  StoneMoved: sailsHeader(WORLD_HEADER_PREFIX, 10),
+  TileDrilled: sailsHeader(WORLD_HEADER_PREFIX, 11),
 } as const;
 
 const SAILS_ADMIN_EVENTS = {
@@ -116,7 +117,7 @@ const SESSION_FIELD_ORDER = ["sessionId", "seed", "status", "actionSeq"] as cons
 const ABI = parseAbi([
   "function adminStartSession(bool _callReply) returns (bytes32)",
   "function adminResetMap(bool _callReply, uint64 seed) returns (bytes32)",
-  "function worldRegister(bool _callReply) returns (bytes32)",
+  "function worldRegister(bool _callReply, address owner) returns (bytes32)",
   "function worldDrill(bool _callReply, uint32 direction) returns (bytes32)",
   "function worldMoveAgent(bool _callReply, uint32 direction) returns (bytes32)",
   "function worldPlaceLadder(bool _callReply, uint32 direction) returns (bytes32)",
@@ -167,6 +168,7 @@ type WorldEvent =
   | { name: "ResourceExtracted"; sessionId: string; owner: Hex; x: number; y: number; resource: number; carriedTotal: number }
   | { name: "ResourcesMinted"; sessionId: string; owner: Hex; scrst: number; bcrst: number; hcrst: number }
   | { name: "SessionStarted"; sessionId: string }
+  | { name: "StoneMoved"; sessionId: string; owner: Hex; fromX: number; fromY: number; toX: number; toY: number }
   | { name: "TileDrilled"; sessionId: string; owner: Hex; x: number; y: number; oldTile: number; newTile: number };
 
 type AdminEvent =
@@ -1001,6 +1003,9 @@ function decodeWorldEvent(payload: Hex) {
       case "ResourcesMinted":
         fields = { name, sessionId, owner, scrst: nextU32(), bcrst: nextU32(), hcrst: nextU32() };
         break;
+      case "StoneMoved":
+        fields = { name, sessionId, owner, fromX: nextU32(), fromY: nextU32(), toX: nextU32(), toY: nextU32() };
+        break;
       case "TileDrilled":
         fields = { name, sessionId, owner, x: nextU32(), y: nextU32(), oldTile: nextU32(), newTile: nextU32() };
         break;
@@ -1299,11 +1304,13 @@ async function sendInjectedAction(
   programId: Hex,
   action: PlannedAction,
   eventTimeoutMs: number,
+  owner: Hex,
 ) {
   const payload = action.functionName === "adminResetMap"
     ? encodeFunctionData({ abi: ABI, functionName: action.functionName, args: [true, action.seed ?? 42n] })
-    : action.functionName === "adminStartSession" ||
-      action.functionName === "worldRegister" ||
+    : action.functionName === "worldRegister"
+      ? encodeFunctionData({ abi: ABI, functionName: action.functionName, args: [true, owner] })
+      : action.functionName === "adminStartSession" ||
       action.functionName === "worldSurface"
       ? encodeFunctionData({ abi: ABI, functionName: action.functionName, args: [true] })
       : encodeFunctionData({
@@ -1478,7 +1485,7 @@ async function main() {
         reason: "reset stuck session before a fresh mining run",
         remainingPath: [],
       };
-      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs);
+      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs, account.address);
       const synced = await waitForSessionSeed(api, programId, resetSeed, stateTimeoutMs);
       session = synced.session;
       console.log(JSON.stringify({
@@ -1495,7 +1502,7 @@ async function main() {
         reason: "start active session before mining",
         remainingPath: [],
       };
-      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs);
+      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs, account.address);
       const synced = await waitForSessionActive(api, programId, stateTimeoutMs);
       session = synced.session;
       console.log(JSON.stringify({
@@ -1518,7 +1525,7 @@ async function main() {
         reason: "register mining agent",
         remainingPath: [],
       };
-      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs);
+      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs, account.address);
       const synced = await waitForRegisteredAgent(api, programId, stateTimeoutMs);
       console.log(JSON.stringify({
         readiness: "agent",
@@ -1634,7 +1641,7 @@ async function main() {
           surfacePath: action.remainingPath,
         }));
 
-        const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs);
+        const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs, account.address);
         const replyAgent = "agent" in result.decodedPayload ? result.decodedPayload.agent : undefined;
         const synced = await waitForSyncedActionState(api, programId, before, action, stateTimeoutMs);
         agent = synced.agent;
@@ -1718,7 +1725,7 @@ async function main() {
         fullPlanSafety: safePlan?.planSafety,
       }));
 
-      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs);
+      const result = await sendInjectedAction(api, provider, programId, action, eventTimeoutMs, account.address);
       const replyAgent = "agent" in result.decodedPayload ? result.decodedPayload.agent : undefined;
       const synced = await waitForSyncedActionState(api, programId, before, action, stateTimeoutMs);
       agent = synced.agent;

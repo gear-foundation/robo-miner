@@ -42,8 +42,8 @@ const DEFAULTS = {
   DIGGER_VALIDATOR_MODE: "default",
 } as const;
 
-const VMT_PROGRAM_ID = "0x3cdbb99b69a90d7d74f4936f4c69744127488491" as Address;
-const REDEEM_PROGRAM_ID = "0xa302b35865311778adc5b17dbe47406e7e6a117c" as Address;
+const VMT_PROGRAM_ID = "0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240" as Address;
+const REDEEM_PROGRAM_ID = "0x9c5b14f959efa66d5015dd111912fc851232b787" as Address;
 
 const VMT_IDL = String.raw`
 !@sails: 1.0.0-beta.5

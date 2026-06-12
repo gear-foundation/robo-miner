@@ -14,7 +14,7 @@ This contract is the VARA redeem reserve and the player-facing exchange entrypoi
 - `redeem.redeem(scrst, bcrst, hcrst)`, called by the player with the RES amount they want to exchange;
 - an internal pending redemption flow: `digger-redeem` locks reserve, asks `digger-res-vmt.vmt.burn_for_redeem` to burn RES VMT balances, then pays only after `confirm_redeem`;
 - `confirm_redeem` and `cancel_redeem`, callable only by the configured RES contract;
-- admin controls for pause/unpause, rate updates, RES contract updates, and reserve withdrawal.
+- admin controls for pause/unpause, rate updates, RES contract updates, reserve withdrawal, and manual stuck-pending recovery.
 
 The user-facing flow is:
 
@@ -65,7 +65,7 @@ The contract tracks:
 - `total_paid`: cumulative confirmed payout;
 - per-resource redeemed totals.
 
-Admin withdrawals can only use unlocked reserve. Pending redeem payouts cannot be withdrawn.
+Admin withdrawals can only use unlocked reserve. Pending redeem payouts cannot be withdrawn through `withdraw_funds`; use the force recovery methods below only when a redeem is known to be stuck.
 
 ### Redeem State Machine
 
@@ -108,6 +108,31 @@ digger-res-vmt
 
 `redeem_id` is required because the burn happens through a second contract and the reply comes later. It is the correlation key that prevents a callback from paying or canceling the wrong pending operation.
 
+Manual admin recovery for stuck pending redeems:
+
+```text
+admin
+  -> force_cancel_redeem(redeem_id)
+  -> check caller is admin
+  -> remove pending redeem
+  -> locked_balance -= payout
+  -> reserve_balance += payout
+  -> emit PendingRedeemForceCanceled(redeem_id, player, amounts, payout)
+```
+
+```text
+admin
+  -> force_pay_redeem(redeem_id)
+  -> check caller is admin
+  -> remove pending redeem
+  -> locked_balance -= payout
+  -> total_paid += payout and redeemed totals += amounts
+  -> transfer payout VARA to the admin caller
+  -> emit PendingRedeemForcePaid(redeem_id, player, amounts, payout)
+```
+
+Use `force_cancel_redeem` when the RES burn did not complete and the locked payout should return to available reserve. Use `force_pay_redeem` only when the operator has verified that the player-side redeem should be treated as paid; the payout is sent to the admin caller so the operator can manually settle the stuck case off-chain or through a separate transfer.
+
 ### Admin Flow
 
 Admin actions emit explicit events:
@@ -117,9 +142,11 @@ Admin actions emit explicit events:
 - `set_rate_config(vara_unit, scrst_rate, bcrst_rate, hcrst_rate)` -> `RateConfigUpdated(vara_unit, scrst_rate, bcrst_rate, hcrst_rate)`;
 - `pause()` -> `Paused(admin)`;
 - `unpause()` -> `Unpaused(admin)`;
-- `withdraw_funds(amount)` -> `FundsWithdrawn(admin, amount, reserve_after)`.
+- `withdraw_funds(amount)` -> `FundsWithdrawn(admin, amount, reserve_after)`;
+- `force_cancel_redeem(redeem_id)` -> `PendingRedeemForceCanceled(redeem_id, player, scrst, bcrst, hcrst, payout)`;
+- `force_pay_redeem(redeem_id)` -> `PendingRedeemForcePaid(redeem_id, player, scrst, bcrst, hcrst, payout)`.
 
-Pause blocks new redeems. It does not slash or mutate already banked RES balances in `digger-res-vmt`.
+Pause blocks new redeems. It does not slash or mutate already banked RES balances in `digger-res-vmt`. Force recovery also does not call `digger-res-vmt`; it only clears the local pending redeem record and locked VARA accounting.
 
 ### Events
 
@@ -147,6 +174,24 @@ Expected Vara.eth artifacts:
 - `target/wasm32-gear/release/digger_redeem.wasm`
 - `target/wasm32-gear/release/digger_redeem.opt.wasm`
 - `target/wasm32-gear/release/digger_redeem.idl`
+
+### IDL Consumers
+
+After changing any public service, event, constructor, or return type, rebuild
+the release artifacts and refresh downstream consumers:
+
+- `frontend/src/chain/digger_redeem.idl` must match
+  `contracts/target/wasm32-gear/release/digger_redeem.idl`;
+- `backend/src/modules/indexer/idlRegistry.js` reads the release IDL directly;
+- `contracts/l1-adapter/src/generated` should be regenerated if the L1 adapter
+  is being compiled against the new interface.
+
+Frontend guard:
+
+```bash
+cd frontend
+npm run check:idl
+```
 
 ### ✅ Testing
 

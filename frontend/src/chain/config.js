@@ -33,6 +33,8 @@ export const CHAIN = {
   // Optional thin registry / leaderboard program (aggregate across maps).
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
   backendUrl: env.VITE_BACKEND_URL || '',
+  resVmtProgramId: env.VITE_RES_VMT_PROGRAM_ID || '',
+  redeemProgramId: env.VITE_REDEEM_PROGRAM_ID || '',
 
   // Fallback poll interval (ms) if push event subscription isn't used.
   pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
@@ -45,4 +47,8 @@ export const CHAIN = {
 // a half-filled .env never half-connects.
 export function chainReady(programId = CHAIN.worldProgramId) {
   return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && programId);
+}
+
+export function redeemReady() {
+  return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && CHAIN.resVmtProgramId && CHAIN.redeemProgramId);
 }

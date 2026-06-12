@@ -93,7 +93,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  logger.error('run.failed', errorFields(error));
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    logger.error('run.failed', errorFields(error));
+    process.exit(1);
+  });

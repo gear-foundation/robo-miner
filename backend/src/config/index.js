@@ -10,6 +10,8 @@ loadDotEnv(path.join(BACKEND_ROOT, '.env'));
 const VARA = 1_000_000_000_000n;
 
 export const DEFAULT_DIGGER_DAILY_EXEC_TARGET = 120n * VARA;
+export const DEFAULT_SOCIAL_REPOST_FUEL_GRANT = 60n * VARA;
+export const DEFAULT_SOCIAL_QUOTE_FUEL_GRANT = 120n * VARA;
 
 export function loadConfig(env = process.env) {
   return {
@@ -37,6 +39,13 @@ export function loadConfig(env = process.env) {
     ),
     diggerRentalMode: env.DIGGER_RENTAL_MODE || env.BACKEND_DEPLOY_MODE || 'dry-run',
     diggerRentalSeason: env.DIGGER_RENTAL_SEASON || env.SEASON_ID || 'season-1',
+    socialVerifierMode: env.SOCIAL_VERIFIER_MODE || 'live',
+    socialXBearerToken: env.SOCIAL_X_BEARER_TOKEN || env.X_BEARER_TOKEN || '',
+    socialXSourceUsername: normalizeUsername(env.SOCIAL_X_SOURCE_USERNAME || env.DIGGER_X_USERNAME || 'VaraNetwork'),
+    socialFuelGrantAmounts: {
+      repost: parseBigIntEnv(env.SOCIAL_REPOST_FUEL_GRANT || '', DEFAULT_SOCIAL_REPOST_FUEL_GRANT),
+      quote: parseBigIntEnv(env.SOCIAL_QUOTE_FUEL_GRANT || '', DEFAULT_SOCIAL_QUOTE_FUEL_GRANT),
+    },
   };
 }
 
@@ -81,4 +90,8 @@ function unquote(value) {
     return value.slice(1, -1);
   }
   return value;
+}
+
+function normalizeUsername(value) {
+  return String(value || '').trim().replace(/^@/, '').toLowerCase();
 }

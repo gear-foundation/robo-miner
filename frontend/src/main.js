@@ -1,14 +1,21 @@
 import Phaser from 'phaser';
+import LandingScene from './scenes/LandingScene.js';
 import MenuScene from './scenes/MenuScene.js';
 import GameScene from './scenes/GameScene.js';
 import LobbyScene from './scenes/LobbyScene.js';
+import LeaderboardScene from './scenes/LeaderboardScene.js';
+import RedeemScene from './scenes/RedeemScene.js';
+import SocialFuelScene from './scenes/SocialFuelScene.js';
 import SpectatorScene from './scenes/SpectatorScene.js';
-import { parseRoute } from './routing.js';
+import { initialRoute, installHistoryRouter, normalizeInitialRoute } from './router.js';
+
+normalizeInitialRoute();
 
 class BootScene extends Phaser.Scene {
   constructor() { super('Boot'); }
+
   create() {
-    const route = parseRoute();
+    const route = initialRoute();
     this.scene.start(route.scene, route.data);
   }
 }
@@ -24,19 +31,18 @@ const config = {
     width: window.innerWidth,
     height: window.innerHeight,
   },
-  // Boot reads the real browser URL first, then starts Menu / Game / Lobby /
-  // Spectator. That keeps /world/<programId> reloadable instead of falling
-  // back to the menu after F5.
-  scene: [BootScene, MenuScene, GameScene, LobbyScene, SpectatorScene],
+  scene: [
+    BootScene,
+    LandingScene,
+    MenuScene,
+    GameScene,
+    LobbyScene,
+    LeaderboardScene,
+    RedeemScene,
+    SocialFuelScene,
+    SpectatorScene,
+  ],
 };
 
 const game = new Phaser.Game(config);
-
-window.addEventListener('popstate', () => {
-  const route = parseRoute();
-  game.scene.stop('Menu');
-  game.scene.stop('Game');
-  game.scene.stop('Lobby');
-  game.scene.stop('Spectator');
-  game.scene.start(route.scene, route.data);
-});
+installHistoryRouter(game);

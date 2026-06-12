@@ -5,13 +5,13 @@
 // from world.idl — NEVER hand-encoded (per vara-eth-skills ts-api playbook).
 //
 // Program: DiggerWorld   ctor Create()
-//   service World@0x44d3a89e1760075a  — the spatial game
-//   service Admin@0xf0292894fb819cec  — session/map lifecycle
+//   service World@0xc947eba8a499d9a7  — the spatial game
+//   service Admin@0x5acb75662050b164  — session/map lifecycle
 //
 // NOTE — this World program is LEAN: the only agent actions are register / move /
-// drill / place_ladder / surface / exit. There is NO upgrade / buy / refuel /
-// pillar / dynamite / teleport here — the economy (RES tokens, redeem, upgrades)
-// lives in separate contracts (spec §2.3–2.6), not in World.
+// drill / place_ladder / surface / exit / mint_resources. There is NO upgrade /
+// buy / refuel / pillar / dynamite / teleport here — redeem lives in separate
+// contracts.
 
 // ── Direction (u32) ──────────────────────────────────────────────────────────
 // CONFIRM the exact u32 encoding with the contract team — this is our assumed
@@ -32,12 +32,13 @@ export { BLOCK as TILE } from '../config.js';
 export function worldActions(program) {
   const f = program.services.World.functions;
   return {
-    register:    () => f.Register.encodePayload(),
+    register:    (owner) => f.Register.encodePayload(owner),
     move:        (dirName) => f.MoveAgent.encodePayload(DIR_FROM_NAME[dirName]),
     drill:       (dirName) => f.Drill.encodePayload(DIR_FROM_NAME[dirName]),
     placeLadder: (dirName) => f.PlaceLadder.encodePayload(DIR_FROM_NAME[dirName]),
     surface:     () => f.Surface.encodePayload(),   // go up to bank
     exit:        () => f.Exit.encodePayload(),       // leave the map
+    mintResources: () => f.MintResources.encodePayload(),
   };
 }
 
@@ -48,6 +49,7 @@ export function worldQueries(program) {
     mapSnapshot: () => q.MapSnapshot.encodePayload(),        // -> [u32] full grid (decode → world.grid bytes)
     tileAt:      (x, y) => q.TileAt.encodePayload(x, y),     // -> u32 single tile
     agentOf:     (owner) => q.AgentOf.encodePayload(owner),  // -> [u128] one agent's packed state
+    ownerOf:     (proxy) => q.OwnerOf.encodePayload(proxy),   // -> ActorId wallet owner for proxy
     agents:      () => q.Agents.encodePayload(),             // -> [ActorId] all agent ids
     inventoryOf: (owner) => q.InventoryOf.encodePayload(owner), // -> [u32] inventory counts
     isDug:       (x, y) => q.IsDug.encodePayload(x, y),       // -> bool
@@ -65,40 +67,48 @@ export function adminActions(program) {
     startSession:  () => f.StartSession.encodePayload(),
     finishSession: () => f.FinishSession.encodePayload(),
     resetMap:      (seed) => f.ResetMap.encodePayload(seed),
+    setResourceVmt: (resourceVmt) => f.SetResourceVmt.encodePayload(resourceVmt),
+    kill:          (inheritor) => f.Kill.encodePayload(inheritor),
   };
 }
 
 // ── Events → our internal renderer/console event shape ───────────────────────
 // Field order is taken verbatim from world.idl. The leading (u64, [u8;32]) is
-// (agentId, ownerKey). CONFIRM the trailing u32s' meanings with the contract
-// team — annotated below as best-read; the renderer/TX-console already consume
-// {type,id,x,y,block,...}.
+// (sessionId, proxy ActorId). AgentSurfaced reports cumulative banked resource
+// counts, not coordinates.
 //
-//   AgentDied(u64,[u8;32],u32,u32,u32)            → id,owner, x,y, cause
-//   AgentExited(u64,[u8;32])                      → id,owner
-//   AgentMoved(u64,[u8;32],u32,u32,u32,u32)       → id,owner, fromX,fromY, x,y
-//   AgentRegistered(u64,[u8;32])                  → id,owner
-//   AgentSpawned(u64,[u8;32],u32,u32)             → id,owner, x,y
-//   AgentSurfaced(u64,[u8;32],u32,u32,u32)        → id,owner, x,y, banked?
-//   LadderPlaced(u64,[u8;32],u32,u32,u32)         → id,owner, x,y, laddersRemaining
-//   ResourceExtracted(u64,[u8;32],u32,u32,u32,u32)→ id,owner, x,y, kind, amount
-//   TileDrilled(u64,[u8;32],u32,u32,u32,u32)      → id,owner, x,y, oldTile, newTile
+//   AgentDied(u64,[u8;32],u32,u32,u32)            → session,owner, x,y, cause
+//   AgentExited(u64,[u8;32])                      → session,owner
+//   AgentMoved(u64,[u8;32],u32,u32,u32,u32)       → session,owner, fromX,fromY, x,y
+//   AgentRegistered(u64,[u8;32])                  → session,owner
+//   AgentSpawned(u64,[u8;32],u32,u32)             → session,owner, x,y
+//   AgentSurfaced(u64,[u8;32],u32,u32,u32)        → session,owner, banked SCRST/BCRST/HCRST
+//   LadderPlaced(u64,[u8;32],u32,u32,u32)         → session,owner, x,y, laddersRemaining
+//   ResourceExtracted(u64,[u8;32],u32,u32,u32,u32)→ session,owner, x,y, kind, carriedTotal
+//   ResourcesMinted(u64,[u8;32],u32,u32,u32)      → session,owner, minted SCRST/BCRST/HCRST
+//   StoneMoved(u64,[u8;32],u32,u32,u32,u32)       → session,owner, fromX,fromY, x,y
+//   TileDrilled(u64,[u8;32],u32,u32,u32,u32)      → session,owner, x,y, oldTile, newTile
 export const WORLD_EVENTS = {
-  AgentRegistered:   (a) => ({ type: 'registered', id: Number(a[0]), owner: a[1] }),
-  AgentSpawned:      (a) => ({ type: 'spawned',     id: Number(a[0]), owner: a[1], x: a[2], y: a[3] }),
-  AgentMoved:        (a) => ({ type: 'moved',       id: Number(a[0]), owner: a[1], fromX: a[2], fromY: a[3], x: a[4], y: a[5] }),
-  TileDrilled:       (a) => ({ type: 'dug',         id: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], newBlock: a[5] }),
-  ResourceExtracted: (a) => ({ type: 'resource_extracted', id: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], amount: a[5] }),
-  LadderPlaced:      (a) => ({ type: 'ladder_placed', id: Number(a[0]), owner: a[1], x: a[2], y: a[3], laddersRemaining: a[4] }),
-  AgentSurfaced:     (a) => ({ type: 'surfaced',    id: Number(a[0]), owner: a[1], x: a[2], y: a[3], amount: a[4] }),
-  AgentDied:         (a) => ({ type: 'death',       id: Number(a[0]), owner: a[1], x: a[2], y: a[3], cause: a[4] }),
-  AgentExited:       (a) => ({ type: 'exited',      id: Number(a[0]), owner: a[1] }),
+  AgentRegistered:   (a) => ({ type: 'registered', sessionId: Number(a[0]), owner: a[1] }),
+  AgentSpawned:      (a) => ({ type: 'spawned',     sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3] }),
+  SessionStarted:    (a) => ({ type: 'session_started', session: Number(a[0]) }),
+  AgentMoved:        (a) => ({ type: 'moved',       sessionId: Number(a[0]), owner: a[1], fromX: a[2], fromY: a[3], x: a[4], y: a[5] }),
+  TileDrilled:       (a) => ({ type: 'dug',         sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], newBlock: a[5] }),
+  ResourceExtracted: (a) => ({ type: 'resource_extracted', sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3], block: a[4], amount: a[5] }),
+  LadderPlaced:      (a) => ({ type: 'ladder_placed', sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3], laddersRemaining: a[4] }),
+  AgentSurfaced:     (a) => ({ type: 'surfaced',    sessionId: Number(a[0]), owner: a[1], banked: { scrst: a[2], bcrst: a[3], hcrst: a[4] } }),
+  AgentDied:         (a) => ({ type: 'death',       sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3], cause: a[4] }),
+  AgentExited:       (a) => ({ type: 'exited',      sessionId: Number(a[0]), owner: a[1] }),
+  ResourcesMinted:   (a) => ({ type: 'resources_minted', sessionId: Number(a[0]), owner: a[1], minted: { scrst: a[2], bcrst: a[3], hcrst: a[4] } }),
+  StoneMoved:        (a) => ({ type: 'stone_moved', sessionId: Number(a[0]), owner: a[1], fromX: a[2], fromY: a[3], x: a[4], y: a[5] }),
 };
 
 export const ADMIN_EVENTS = {
+  Killed:          (a) => ({ type: 'killed', inheritor: a[0] }),
   MapGenerated:    (a) => ({ type: 'map_generated', day: Number(a[0]), seed: a[1] }),
   SessionStarted:  (a) => ({ type: 'session_started', session: Number(a[0]) }),
   SessionFinished: (a) => ({ type: 'session_finished', session: Number(a[0]) }),
+  ResourceVmtUpdated: (a) => ({ type: 'resource_vmt_updated', previous: a[0], next: a[1] }),
 };
 
 // Decode any program event (World or Admin) into our internal shape; null if

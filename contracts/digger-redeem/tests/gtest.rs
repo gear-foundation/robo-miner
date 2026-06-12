@@ -303,6 +303,158 @@ async fn standalone_redeem_admin_reserve_lifecycle_is_guarded() {
 }
 
 #[tokio::test]
+async fn admin_can_force_cancel_stuck_pending_redeem_back_to_reserve() {
+    let (env, redeem_code_id, _) = create_env();
+    let redeem =
+        deploy_redeem_program(&env, redeem_code_id, OTHER_ID.into(), "redeem-force-cancel").await;
+    let mut redeem_service = redeem.redeem();
+    let mut admin = redeem.admin();
+    let mut admin_events = admin.listen().await.unwrap();
+
+    let deposit: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .deposit_reserve()
+        .with_value(RESERVE_VALUE)
+        .await
+        .unwrap();
+    assert_eq!(deposit, Ok(RESERVE_VALUE));
+
+    let payout: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem(SCRST, 0, 0)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(payout, Ok(SCRST * SCRST_RATE * VARA_UNIT));
+
+    let pending_before: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.pending_redeem_count().await.unwrap();
+    let locked_before: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.locked_balance().await.unwrap();
+    let reserve_before: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.reserve_balance().await.unwrap();
+
+    assert_eq!(pending_before, Ok(1));
+    assert_eq!(locked_before, Ok(SCRST * SCRST_RATE * VARA_UNIT));
+    assert_eq!(
+        reserve_before,
+        Ok(RESERVE_VALUE - SCRST * SCRST_RATE * VARA_UNIT)
+    );
+
+    let non_admin_cancel: sails_rs::Result<(), sails_rs::String> = admin
+        .force_cancel_redeem(1)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(non_admin_cancel, Err("caller is not admin".into()));
+
+    let force_cancel: sails_rs::Result<(), sails_rs::String> =
+        admin.force_cancel_redeem(1).await.unwrap();
+    assert_eq!(force_cancel, Ok(()));
+    assert_eq!(
+        admin_events.next().await.unwrap(),
+        (
+            redeem.id(),
+            ::digger_redeem_client::admin::events::AdminEvents::PendingRedeemForceCanceled(
+                1,
+                actor_bytes(PLAYER_ID),
+                SCRST,
+                0,
+                0,
+                SCRST * SCRST_RATE * VARA_UNIT
+            )
+        )
+    );
+
+    let pending_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.pending_redeem_count().await.unwrap();
+    let locked_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.locked_balance().await.unwrap();
+    let reserve_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.reserve_balance().await.unwrap();
+    let total_paid: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_paid().await.unwrap();
+    let missing_cancel: sails_rs::Result<(), sails_rs::String> =
+        admin.force_cancel_redeem(1).await.unwrap();
+
+    assert_eq!(pending_after, Ok(0));
+    assert_eq!(locked_after, Ok(0));
+    assert_eq!(reserve_after, Ok(RESERVE_VALUE));
+    assert_eq!(total_paid, Ok(0));
+    assert_eq!(missing_cancel, Err("redeem request not found".into()));
+}
+
+#[tokio::test]
+async fn admin_can_force_pay_stuck_pending_redeem_to_admin() {
+    let (env, redeem_code_id, _) = create_env();
+    let redeem =
+        deploy_redeem_program(&env, redeem_code_id, OTHER_ID.into(), "redeem-force-pay").await;
+    let mut redeem_service = redeem.redeem();
+    let mut admin = redeem.admin();
+    let mut admin_events = admin.listen().await.unwrap();
+
+    let deposit: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .deposit_reserve()
+        .with_value(RESERVE_VALUE)
+        .await
+        .unwrap();
+    assert_eq!(deposit, Ok(RESERVE_VALUE));
+
+    let payout: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem(0, BCRST, 0)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(payout, Ok(BCRST * BCRST_RATE * VARA_UNIT));
+
+    let non_admin_pay: sails_rs::Result<(), sails_rs::String> = admin
+        .force_pay_redeem(1)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(non_admin_pay, Err("caller is not admin".into()));
+
+    let force_pay: sails_rs::Result<(), sails_rs::String> =
+        admin.force_pay_redeem(1).await.unwrap();
+    assert_eq!(force_pay, Ok(()));
+    assert_eq!(
+        admin_events.next().await.unwrap(),
+        (
+            redeem.id(),
+            ::digger_redeem_client::admin::events::AdminEvents::PendingRedeemForcePaid(
+                1,
+                actor_bytes(PLAYER_ID),
+                0,
+                BCRST,
+                0,
+                BCRST * BCRST_RATE * VARA_UNIT
+            )
+        )
+    );
+
+    let pending_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.pending_redeem_count().await.unwrap();
+    let locked_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.locked_balance().await.unwrap();
+    let reserve_after: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.reserve_balance().await.unwrap();
+    let total_paid: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_paid().await.unwrap();
+    let total_redeemed_bcrst: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_redeemed_bcrst().await.unwrap();
+    let missing_pay: sails_rs::Result<(), sails_rs::String> =
+        admin.force_pay_redeem(1).await.unwrap();
+
+    assert_eq!(pending_after, Ok(0));
+    assert_eq!(locked_after, Ok(0));
+    assert_eq!(
+        reserve_after,
+        Ok(RESERVE_VALUE - BCRST * BCRST_RATE * VARA_UNIT)
+    );
+    assert_eq!(total_paid, Ok(BCRST * BCRST_RATE * VARA_UNIT));
+    assert_eq!(total_redeemed_bcrst, Ok(BCRST));
+    assert_eq!(missing_pay, Err("redeem request not found".into()));
+}
+
+#[tokio::test]
 async fn redeem_rejects_when_vmt_burn_fails_and_restores_reserve() {
     let (_env, redeem, res) = deploy_pair("burn-fail").await;
     fund_reserve_and_mint_player_res(&redeem, &res, 1, 0, 0).await;
@@ -590,7 +742,13 @@ async fn deploy_pair(
             redeem_code_id,
             format!("{salt_prefix}-redeem").into_bytes(),
         )
-        .create(ActorId::zero(), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE)
+        .create(
+            ActorId::zero(),
+            VARA_UNIT,
+            SCRST_RATE,
+            BCRST_RATE,
+            HCRST_RATE,
+        )
         .await
         .unwrap();
 

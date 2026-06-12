@@ -80,6 +80,19 @@ function normalizeEventNumber(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function normalizeResourceTotals(value = {}) {
+  return {
+    scrst: normalizeEventNumber(value.scrst),
+    bcrst: normalizeEventNumber(value.bcrst),
+    hcrst: normalizeEventNumber(value.hcrst),
+  };
+}
+
+function resourceTotal(value = {}) {
+  const totals = normalizeResourceTotals(value);
+  return totals.scrst + totals.bcrst + totals.hcrst;
+}
+
 function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
   const yOffset = Math.max(0, surface - rawSurface);
   const H = rawH + yOffset;
@@ -417,12 +430,18 @@ export class ChainSource {
         break;
       case 'surfaced':
         if (miner) {
-          this._placeMiner(miner, event.x, event.y, { alive: true });
-          const amount = normalizeEventNumber(event.amount, 0);
-          miner.banked += amount;
+          const banked = normalizeResourceTotals(event.banked);
+          const amount = banked.scrst + banked.bcrst + banked.hcrst;
+          miner.banked = amount;
+          miner.bankedResources = banked;
           miner.cargo = 0;
-          miner.stats.sold += amount;
+          miner.stats.sold = amount;
           this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
+        }
+        break;
+      case 'resources_minted':
+        if (miner) {
+          miner.mintedResources = normalizeResourceTotals(event.minted);
         }
         break;
       case 'death':
@@ -480,6 +499,8 @@ export class ChainSource {
     }
     if ('amount' in event) event.amount = normalizeEventNumber(event.amount);
     if ('laddersRemaining' in event) event.laddersRemaining = normalizeEventNumber(event.laddersRemaining);
+    if (event.banked) event.banked = normalizeResourceTotals(event.banked);
+    if (event.minted) event.minted = normalizeResourceTotals(event.minted);
     return event;
   }
 
@@ -709,7 +730,16 @@ export class ChainSource {
     const rawY = Number(row.state[2] ?? rawSurface);
     const facing = Number(row.state[3] ?? 0);
     const y = rawToVisualY(rawY, surface, rawSurface, yOffset);
-    const cargo = row.inventory.reduce((sum, v) => sum + Number(v || 0), 0);
+    const cargo = resourceTotal({
+      scrst: row.inventory[0] ?? row.state[5],
+      bcrst: row.inventory[1] ?? row.state[6],
+      hcrst: row.inventory[2] ?? row.state[7],
+    });
+    const bankedResources = normalizeResourceTotals({
+      scrst: row.inventory[3] ?? row.state[8],
+      bcrst: row.inventory[4] ?? row.state[9],
+      hcrst: row.inventory[5] ?? row.state[10],
+    });
     const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][row.index % 5];
     const spawnX = Number(row.state[11] ?? x);
     return {
@@ -725,7 +755,8 @@ export class ChainSource {
       act: null,
       cargo,
       inventory: row.inventory,
-      banked: Number(row.state[10] || 0),
+      banked: resourceTotal(bankedResources),
+      bankedResources,
       items: {},
       stats: makeEmptyStats(),
       respawnAtMs: null,

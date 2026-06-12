@@ -22,12 +22,8 @@ export async function createVaraEthChain(config) {
     account: account.address,
     async readExecutableBalance(programId) {
       const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
-      for (const method of ['executableBalance', 'getExecutableBalance']) {
-        if (typeof mirror[method] !== 'function') continue;
-        const value = await mirror[method]();
-        return BigInt(value);
-      }
-      throw new Error('Current @vara-eth/api mirror client does not expose executable balance read method');
+      const state = await readProgramState(api, mirror);
+      return BigInt(state.executableBalance);
     },
     async topUpExecutableBalance(programId, amount) {
       const topUp = BigInt(amount);
@@ -107,9 +103,24 @@ export async function createVaraEthChain(config) {
       return sendAndWait(tx, 'Redeem.DepositReserve');
     },
     async disconnect() {
-      await api.provider?.disconnect?.();
+      await disconnectProvider(api.provider);
+      closeViemWebSocket(publicClient);
+      closeViemWebSocket(walletClient);
     },
   };
+}
+
+async function disconnectProvider(provider) {
+  if (!provider?.disconnect) return;
+  await Promise.race([
+    provider.disconnect(),
+    new Promise((resolve) => setTimeout(resolve, 2_000)),
+  ]).catch(() => undefined);
+}
+
+function closeViemWebSocket(client) {
+  const socket = client?.transport?.getSocket?.();
+  socket?.close?.();
 }
 
 function mirrorClient(getMirrorClient, programId, publicClient, signer) {
@@ -162,17 +173,23 @@ async function waitForMirrorState(api, getMirrorClient, publicClient, signer, pr
 }
 
 async function readMirrorSummary(mirror) {
-  const [stateHash, executableBalance, initializer] = await Promise.all([
+  const [stateHash, initializer] = await Promise.all([
     callFirst(mirror, ['stateHash', 'getStateHash']),
-    callFirst(mirror, ['executableBalance', 'getExecutableBalance']).catch(() => null),
     callFirst(mirror, ['initializer', 'getInitializer']).catch(() => null),
   ]);
   return {
     stateHash,
-    executableBalance: executableBalance === null ? null : BigInt(executableBalance).toString(),
     initialized: Boolean(stateHash && !/^0x0{64}$/i.test(String(stateHash))),
     initializer,
   };
+}
+
+async function readProgramState(api, mirror) {
+  const stateHash = await callFirst(mirror, ['stateHash', 'getStateHash']);
+  if (!stateHash || /^0x0{64}$/i.test(String(stateHash))) {
+    throw new Error('Program mirror does not have an initialized state hash yet');
+  }
+  return api.query.program.readState(stateHash);
 }
 
 async function callFirst(target, methods) {

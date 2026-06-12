@@ -111,6 +111,24 @@ Expected Vara.eth artifacts:
 - `target/wasm32-gear/release/digger_res_vmt.opt.wasm`
 - `target/wasm32-gear/release/digger_res_vmt.idl`
 
+### IDL Consumers
+
+After changing any public service, event, constructor, or return type, rebuild
+the release artifacts and refresh downstream consumers:
+
+- `frontend/src/chain/digger_res_vmt.idl` must match
+  `contracts/target/wasm32-gear/release/digger_res_vmt.idl`;
+- `backend/src/modules/indexer/idlRegistry.js` reads the release IDL directly;
+- `contracts/l1-adapter/src/generated` should be regenerated if the L1 adapter
+  is being compiled against the new interface.
+
+Frontend guard:
+
+```bash
+cd frontend
+npm run check:idl
+```
+
 ### Testing
 
 ```bash

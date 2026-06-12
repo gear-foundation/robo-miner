@@ -12,10 +12,8 @@ export class InjectedIngestService {
     const receivedAt = this.now().toISOString();
     const events = normalizeEvents(payload, receivedAt);
     const snapshots = normalizeSnapshots(payload, receivedAt);
-    const [eventResults, snapshotResult] = await Promise.all([
-      events.length ? this.projector.applyEvents(events) : [],
-      snapshots.length ? this.projector.applySnapshots(snapshots) : { applied: 0 },
-    ]);
+    const eventResults = events.length ? await this.projector.applyEvents(events) : [];
+    const snapshotResult = snapshots.length ? await this.projector.applySnapshots(snapshots) : { applied: 0 };
 
     await this.store.update((db) => {
       db.jobRuns.push({

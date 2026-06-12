@@ -79,7 +79,7 @@ service Admin@0x93ef6a6a3d7e1391 {
     }
 }
 
-program DiggerRedeemClient {
+program DiggerRedeem {
     constructors {
         Create(res_contract: ActorId, vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
     }

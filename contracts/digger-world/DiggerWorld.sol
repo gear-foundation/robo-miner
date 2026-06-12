@@ -20,6 +20,8 @@ interface IDiggerWorld {
 
     event ResourcesMinted(uint64, uint8[32], uint32, uint32, uint32);
 
+    event SessionStarted(uint64);
+
     event StoneMoved(uint64, uint8[32], uint32, uint32, uint32, uint32);
 
     event TileDrilled(uint64, uint8[32], uint32, uint32, uint32, uint32);
@@ -56,9 +58,11 @@ interface IDiggerWorld {
 
     function worldMoveAgent(bool _callReply, uint32 direction) external returns (bytes32 messageId);
 
+    function worldOwnerOf(bool _callReply, address proxy) external returns (bytes32 messageId);
+
     function worldPlaceLadder(bool _callReply, uint32 direction) external returns (bytes32 messageId);
 
-    function worldRegister(bool _callReply) external returns (bytes32 messageId);
+    function worldRegister(bool _callReply, address owner) external returns (bytes32 messageId);
 
     function worldSession(bool _callReply) external returns (bytes32 messageId);
 
@@ -106,9 +110,11 @@ contract DiggerWorldAbi is IDiggerWorld {
 
     function worldMoveAgent(bool _callReply, uint32 direction) external returns (bytes32 messageId) {}
 
+    function worldOwnerOf(bool _callReply, address proxy) external returns (bytes32 messageId) {}
+
     function worldPlaceLadder(bool _callReply, uint32 direction) external returns (bytes32 messageId) {}
 
-    function worldRegister(bool _callReply) external returns (bytes32 messageId) {}
+    function worldRegister(bool _callReply, address owner) external returns (bytes32 messageId) {}
 
     function worldSession(bool _callReply) external returns (bytes32 messageId) {}
 
@@ -155,6 +161,8 @@ interface IDiggerWorldCallbacks {
     function replyOn_worldMintResources(bytes32 messageId, uint128[] calldata reply) external;
 
     function replyOn_worldMoveAgent(bytes32 messageId, uint128[] calldata reply) external;
+
+    function replyOn_worldOwnerOf(bytes32 messageId, address reply) external;
 
     function replyOn_worldPlaceLadder(bytes32 messageId, uint128[] calldata reply) external;
 
@@ -246,6 +254,10 @@ contract DiggerWorldCaller is IDiggerWorldCallbacks {
     }
 
     function replyOn_worldMoveAgent(bytes32 messageId, uint128[] calldata reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
+    function replyOn_worldOwnerOf(bytes32 messageId, address reply) external onlyVaraEthProgram {
         // TODO: implement this
     }
 

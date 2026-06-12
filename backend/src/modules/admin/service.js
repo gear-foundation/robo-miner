@@ -17,6 +17,8 @@ export class AdminService {
       rentalRequests: db.rentalRequests.length,
       failedRentalRequests: db.rentalRequests.filter((request) => request.status === 'failed').length,
       fuelGrants: db.fuelGrants.length,
+      socialRewardSubmissions: db.socialRewardSubmissions.length,
+      paidSocialRewardSubmissions: db.socialRewardSubmissions.filter((item) => ['confirmed', 'dry-run'].includes(item.status)).length,
       jobRuns: db.jobRuns.slice(-20),
     };
   }

@@ -9,6 +9,7 @@ import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { InjectedIngestService } from '../modules/indexer/injectedIngest.js';
 import { LeaderboardService } from '../modules/leaderboard/service.js';
+import { SocialVerifierService } from '../modules/socialVerifier/service.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
@@ -41,6 +42,12 @@ const adminService = new AdminService({
   config,
   chainFactory: () => createVaraEthChain(config),
   logger: createLogger('admin'),
+});
+const socialVerifier = new SocialVerifierService({
+  store,
+  config,
+  chainFactory: () => createVaraEthChain(config),
+  logger: createLogger('social'),
 });
 
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 8787);
@@ -78,13 +85,15 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, await registry.getManifest());
     }
     if (req.method === 'GET' && url.pathname === '/api/diggers') {
+      const diggers = await diggerRegistry.list({
+        seasonId: url.searchParams.get('season') || null,
+        worldId: url.searchParams.get('world') || null,
+        owner: url.searchParams.get('owner') || null,
+        status: url.searchParams.get('status') || null,
+      });
       return json(res, 200, {
-        diggers: await diggerRegistry.list({
-          seasonId: url.searchParams.get('season') || null,
-          worldId: url.searchParams.get('world') || null,
-          owner: url.searchParams.get('owner') || null,
-          status: url.searchParams.get('status') || null,
-        }),
+        digger: diggers[0] || null,
+        diggers,
       });
     }
     if (req.method === 'POST' && url.pathname === '/api/diggers/request') {
@@ -138,6 +147,33 @@ const server = http.createServer(async (req, res) => {
       const db = await store.read();
       return json(res, 200, { events: db.chainEvents.slice(-limit) });
     }
+    if (req.method === 'POST' && url.pathname === '/api/social/x/submit') {
+      const body = await readJsonBody(req);
+      logger.info('social.x.submit', {
+        owner: body.owner,
+        taskType: body.taskType,
+        seasonId: body.seasonId || null,
+        dryRun: body.dryRun ?? config.diggerRentalMode !== 'live',
+      });
+      return json(res, 202, await socialVerifier.submitXTask({
+        owner: body.owner,
+        taskType: body.taskType,
+        tweetUrl: body.tweetUrl,
+        xUsername: body.xUsername || '',
+        seasonId: body.seasonId || null,
+        diggerProgramId: body.diggerProgramId || null,
+        dryRun: body.dryRun ?? null,
+      }));
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/social/x/')) {
+      const owner = decodeURIComponent(url.pathname.slice('/api/social/x/'.length));
+      return json(res, 200, {
+        submissions: await socialVerifier.listSubmissions({
+          owner,
+          limit: limitParam(url, 200, 100),
+        }),
+      });
+    }
     if (req.method === 'GET' && url.pathname === '/api/admin/overview') {
       return json(res, 200, await adminService.overview());
     }
@@ -154,6 +190,14 @@ const server = http.createServer(async (req, res) => {
         grants: await adminService.fuelGrants({
           programId: url.searchParams.get('program') || null,
           limit: limitParam(url, 200, 100),
+        }),
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/admin/social/x') {
+      return json(res, 200, {
+        submissions: await socialVerifier.listSubmissions({
+          owner: url.searchParams.get('owner') || null,
+          limit: limitParam(url, 500, 100),
         }),
       });
     }
@@ -191,6 +235,9 @@ const server = http.createServer(async (req, res) => {
       durationMs: Date.now() - startedAt,
       ...errorFields(error),
     });
+    if (error.statusCode) {
+      return json(res, error.statusCode, { error: error.message });
+    }
     return json(res, 500, { error: 'internal_error', message: error.message });
   }
 });

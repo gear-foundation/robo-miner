@@ -46,7 +46,7 @@ const DEFAULTS = {
   DIGGER_VALIDATOR_MODE: "default",
 } as const;
 
-const VMT_PROGRAM_ID = "0x3cdbb99b69a90d7d74f4936f4c69744127488491" as Address;
+const VMT_PROGRAM_ID = "0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240" as Address;
 const WORLD_IDL_PATH = process.env.DIGGER_WORLD_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_world.idl");
 const PROXY_IDL_PATH = process.env.DIGGER_PROXY_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_proxy.idl");
 

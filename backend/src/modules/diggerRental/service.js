@@ -1,4 +1,4 @@
-const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/i;
 const LIVE_WORLD_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
 
 export class DiggerRentalService {

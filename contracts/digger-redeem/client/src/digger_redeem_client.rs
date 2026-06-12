@@ -268,6 +268,14 @@ pub mod admin {
             admin: ActorId,
         ) -> sails_rs::client::PendingCall<io::AddAdmin, Self::Env>;
         fn admins(&self) -> sails_rs::client::PendingCall<io::Admins, Self::Env>;
+        fn force_cancel_redeem(
+            &mut self,
+            redeem_id: u128,
+        ) -> sails_rs::client::PendingCall<io::ForceCancelRedeem, Self::Env>;
+        fn force_pay_redeem(
+            &mut self,
+            redeem_id: u128,
+        ) -> sails_rs::client::PendingCall<io::ForcePayRedeem, Self::Env>;
         fn is_admin(
             &self,
             account: ActorId,
@@ -307,7 +315,7 @@ pub mod admin {
 
     impl sails_rs::client::Identifiable for AdminImpl {
         const INTERFACE_ID: sails_rs::InterfaceId =
-            sails_rs::InterfaceId::from_bytes_8([48, 166, 228, 163, 224, 67, 46, 69]);
+            sails_rs::InterfaceId::from_bytes_8([147, 239, 106, 106, 61, 126, 19, 145]);
     }
 
     impl<E: sails_rs::client::GearEnv> Admin for sails_rs::client::Service<AdminImpl, E> {
@@ -320,6 +328,18 @@ pub mod admin {
         }
         fn admins(&self) -> sails_rs::client::PendingCall<io::Admins, Self::Env> {
             self.pending_call(())
+        }
+        fn force_cancel_redeem(
+            &mut self,
+            redeem_id: u128,
+        ) -> sails_rs::client::PendingCall<io::ForceCancelRedeem, Self::Env> {
+            self.pending_call((redeem_id,))
+        }
+        fn force_pay_redeem(
+            &mut self,
+            redeem_id: u128,
+        ) -> sails_rs::client::PendingCall<io::ForcePayRedeem, Self::Env> {
+            self.pending_call((redeem_id,))
         }
         fn is_admin(
             &self,
@@ -380,16 +400,18 @@ pub mod admin {
         use super::*;
         sails_rs::io_struct_impl!(AddAdmin (admin: ActorId) -> bool | String, 0, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
         sails_rs::io_struct_impl!(Admins () -> Vec<ActorId> | String, 1, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(IsAdmin (account: ActorId) -> bool | String, 2, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(IsPaused () -> bool | String, 3, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(Pause () -> () | String, 4, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(RemoveAdmin (admin: ActorId) -> bool | String, 5, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(ResContract () -> ActorId | String, 6, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetRateConfig (vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetRates (scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 8, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetResContract (res_contract: ActorId) -> () | String, 9, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(Unpause () -> () | String, 10, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(WithdrawFunds (amount: u128) -> () | String, 11, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ForceCancelRedeem (redeem_id: u128) -> () | String, 2, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ForcePayRedeem (redeem_id: u128) -> () | String, 3, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(IsAdmin (account: ActorId) -> bool | String, 4, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(IsPaused () -> bool | String, 5, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(Pause () -> () | String, 6, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(RemoveAdmin (admin: ActorId) -> bool | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ResContract () -> ActorId | String, 8, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetRateConfig (vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 9, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetRates (scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) -> () | String, 10, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetResContract (res_contract: ActorId) -> () | String, 11, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(Unpause () -> () | String, 12, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(WithdrawFunds (amount: u128) -> () | String, 13, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -407,12 +429,16 @@ pub mod admin {
             #[codec(index = 3)]
             Paused([u8; 32]),
             #[codec(index = 4)]
-            RateConfigUpdated(u128, u128, u128, u128),
+            PendingRedeemForceCanceled(u128, [u8; 32], u128, u128, u128, u128),
             #[codec(index = 5)]
-            RatesUpdated(u128, u128, u128),
+            PendingRedeemForcePaid(u128, [u8; 32], u128, u128, u128, u128),
             #[codec(index = 6)]
-            ResContractUpdated([u8; 32], [u8; 32]),
+            RateConfigUpdated(u128, u128, u128, u128),
             #[codec(index = 7)]
+            RatesUpdated(u128, u128, u128),
+            #[codec(index = 8)]
+            ResContractUpdated([u8; 32], [u8; 32]),
+            #[codec(index = 9)]
             Unpaused([u8; 32]),
         }
 
@@ -423,10 +449,12 @@ pub mod admin {
                     Self::AdminRemoved { .. } => 1,
                     Self::FundsWithdrawn { .. } => 2,
                     Self::Paused { .. } => 3,
-                    Self::RateConfigUpdated { .. } => 4,
-                    Self::RatesUpdated { .. } => 5,
-                    Self::ResContractUpdated { .. } => 6,
-                    Self::Unpaused { .. } => 7,
+                    Self::PendingRedeemForceCanceled { .. } => 4,
+                    Self::PendingRedeemForcePaid { .. } => 5,
+                    Self::RateConfigUpdated { .. } => 6,
+                    Self::RatesUpdated { .. } => 7,
+                    Self::ResContractUpdated { .. } => 8,
+                    Self::Unpaused { .. } => 9,
                 }
             }
         }

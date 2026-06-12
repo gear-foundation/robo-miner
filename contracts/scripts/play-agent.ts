@@ -133,6 +133,8 @@ Flow:
 Environment:
   PRIVATE_KEY       Player/admin private key.
   DIGGER_PROGRAM_ID Digger Mirror address.
+  DIGGER_BACKEND_URL Optional backend URL for resolving/requesting a digger.
+  DIGGER_WORLD_ID   World program id used with backend digger rental.
   ETHEREUM_RPC      Ethereum Hoodi RPC.
   VARA_ETH_RPC      Vara.eth validator RPC.
 `);
@@ -202,6 +204,10 @@ function requireValue(value: string | undefined, name: string): string {
   return value;
 }
 
+function optionalNormalizeAddress(value: string | undefined, name: string): Address | null {
+  return value ? normalizeAddress(value, name) : null;
+}
+
 function normalizeHex(value: string, name: string): Hex {
   const hex = value.startsWith("0x") ? value : `0x${value}`;
   if (!/^0x[0-9a-fA-F]+$/.test(hex)) throw new Error(`${name} must be a hex string`);
@@ -223,6 +229,59 @@ function normalizePrivateKey(value: string): Hex {
 
 function actorIdFromAddress(address: Address): Hex {
   return `0x${"00".repeat(12)}${address.slice(2)}` as Hex;
+}
+
+function normalizeBackendUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.replace(/\/+$/, "") : null;
+}
+
+async function resolveDiggerProgramId(args: CliArgs, owner: Address): Promise<Address> {
+  const configured = args.program || envValue("DIGGER_PROGRAM_ID");
+  if (configured) return normalizeAddress(configured, "DIGGER_PROGRAM_ID");
+
+  const backendUrl = normalizeBackendUrl(envValue("DIGGER_BACKEND_URL") || envValue("BACKEND_URL"));
+  const worldId = optionalNormalizeAddress(
+    envValue("DIGGER_WORLD_ID") || envValue("WORLD_PROGRAM_ID"),
+    "DIGGER_WORLD_ID",
+  );
+  if (!backendUrl || !worldId) {
+    throw new Error("Missing DIGGER_PROGRAM_ID. Or set DIGGER_BACKEND_URL and DIGGER_WORLD_ID to resolve/request a rented digger.");
+  }
+
+  const seasonId = envValue("DIGGER_RENTAL_SEASON") || envValue("SEASON_ID");
+  const search = new URLSearchParams({ owner, world: worldId, status: "active" });
+  if (seasonId) search.set("season", seasonId);
+  const existing = await fetchJson(`${backendUrl}/api/diggers?${search.toString()}`);
+  const existingProgramId = existing?.digger?.programId || existing?.diggers?.[0]?.programId;
+  if (existingProgramId) {
+    return normalizeAddress(existingProgramId, "backend digger programId");
+  }
+
+  if (envValue("DIGGER_REQUEST_DIGGER") !== "true") {
+    throw new Error("No active digger found for owner/world. Set DIGGER_REQUEST_DIGGER=true to request one from backend.");
+  }
+
+  const request = await fetchJson(`${backendUrl}/api/diggers/request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      owner,
+      worldId,
+      seasonId,
+      dryRun: envValue("DIGGER_RENTAL_DRY_RUN") === "true" ? true : undefined,
+    }),
+  });
+  return normalizeAddress(requireValue(request?.programId, "backend request programId"), "backend request programId");
+}
+
+async function fetchJson(url: string, init?: RequestInit): Promise<any> {
+  const response = await fetch(url, init);
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(`Backend request failed: ${response.status} ${JSON.stringify(data)}`);
+  }
+  return data;
 }
 
 function parsePositiveInt(value: string, name: string): number {
@@ -676,10 +735,6 @@ async function main() {
     return;
   }
 
-  const programId = normalizeAddress(
-    requireValue(args.program || envValue("DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID"),
-    "DIGGER_PROGRAM_ID",
-  );
   const steps = parseNonNegativeInt(args.steps || envValue("DIGGER_PLAY_STEPS") || DEFAULTS.DIGGER_PLAY_STEPS, "steps");
   const timeoutMs = parsePositiveInt(valueOrDefault("DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), "timeout");
   const promiseTimeoutMs = parsePositiveInt(valueOrDefault("DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), "promise timeout");
@@ -692,6 +747,7 @@ async function main() {
 
   const sails = await loadSails();
   const connection = await connect(args);
+  const programId = await resolveDiggerProgramId(args, connection.accountAddress);
   console.log("[connect]", { account: connection.accountAddress, programId, steps, validatorMode, transport });
 
   try {

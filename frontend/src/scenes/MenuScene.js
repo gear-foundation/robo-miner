@@ -6,7 +6,8 @@ import {
   BODY_COLOR_IDS, BODY_COLOR_LABELS, BODY_COLOR_SWATCH, pickRandomBodyColor,
   makeCanvasGraphicsAdapter,
 } from '../render/robot.js';
-import { setRoute } from '../routing.js';
+import { connectWallet as connectBrowserWallet, getWalletState, shortAddress, startWalletDiscovery, subscribeWallet } from '../chain/wallet.js';
+import { navigateTo } from '../router.js';
 // Title / splash scene. Shows the game logo, the robot, and the
 // "Start Digging" button. On start, the robot plays a little fall-
 // through-the-ground animation before we hand off to the Game scene.
@@ -32,8 +33,8 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    setRoute('Menu', {}, { replace: true });
     this.cleanupMenuDOM();
+    startWalletDiscovery();
     const W = this.scale.width, H = this.scale.height;
 
     // Horizon y: where grass meets sky. Robot feet land exactly on this line.
@@ -130,6 +131,11 @@ export default class MenuScene extends Phaser.Scene {
     // hand-drawn graphics artifacts.
     this.createStartDOM();
     this.createArenaDOM();
+    this.createLeaderboardButtonDOM();
+    this.createRedeemButtonDOM();
+    this.createSocialFuelButtonDOM();
+    this.createLandingButtonDOM();
+    this.createWalletButtonDOM();
     this.createCustomizerDOM();
     this.createSoundButtonDOM();
     this.downKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.DOWN);
@@ -237,27 +243,11 @@ export default class MenuScene extends Phaser.Scene {
 
   createStartDOM() {
     if (this.startEl) return;
-    const btnY = this.groundY + 80;
     const el = document.createElement('button');
     el.id = 'menu-start';
-    el.style.cssText = `
-      position: fixed; left: 50%; top: ${btnY}px; transform: translateX(-50%);
-      z-index: 12; padding: 16px 42px;
-      font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold;
-      color: #222; background: #ffdd55; border: 3px solid #000; border-radius: 12px;
-      cursor: pointer; letter-spacing: 1px;
-      transition: transform 0.08s ease;
-      min-width: 320px; text-align: center;
-    `;
-    el.addEventListener('mouseenter', () => {
-      el.style.transform = 'translateX(-50%) scale(1.04)';
-    });
-    el.addEventListener('mouseleave', () => {
-      el.style.transform = 'translateX(-50%) scale(1)';
-    });
-    el.addEventListener('mousedown', () => {
-      el.style.transform = 'translateX(-50%) scale(0.97)';
-    });
+    el.style.cssText = this.menuActionCss({ background: '#ffdd55', color: '#222', fontSize: 22, primary: true });
+    this.placeMenuActionButton(el, 'start');
+    this.bindMenuActionMotion(el);
     el.addEventListener('click', () => this.handleStartClick());
     document.body.appendChild(el);
     this.startEl = el;
@@ -271,8 +261,15 @@ export default class MenuScene extends Phaser.Scene {
 
   destroyDOM() {
     this.stopMenuDrillSound();
+    this.unsubscribeWallet?.();
+    this.unsubscribeWallet = null;
+    this.destroyLandingButtonDOM();
     this.destroyStartDOM();
     this.destroyArenaDOM();
+    this.destroyLeaderboardButtonDOM();
+    this.destroyRedeemButtonDOM();
+    this.destroySocialFuelButtonDOM();
+    this.destroyWalletButtonDOM();
     this.destroyBubbleDOM();
     this.destroyCustomizerDOM();
     this.destroySoundButtonDOM();
@@ -280,7 +277,7 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   cleanupMenuDOM() {
-    for (const id of ['menu-bubble', 'menu-start', 'menu-arena', 'menu-generate', 'menu-customizer', 'menu-customizer-modal', 'menu-sound', 'menu-hatpicker', 'menu-tunnel-overlay', 'arena-lobby', 'spec-hud', 'spec-finish', 'fog-overlay', 'hud', 'inv', 'bubble', 'flash', 'shop']) {
+    for (const id of ['campaign-landing', 'menu-landing-btn', 'menu-wallet-btn', 'menu-bubble', 'menu-start', 'menu-arena', 'menu-leaderboard-btn', 'menu-redeem-btn', 'menu-social-btn', 'menu-generate', 'menu-customizer', 'menu-customizer-modal', 'menu-sound', 'menu-hatpicker', 'leaderboard-page', 'redeem-page', 'social-fuel-page', 'menu-tunnel-overlay', 'arena-lobby', 'spec-hud', 'spec-finish', 'fog-overlay', 'hud', 'inv', 'bubble', 'flash', 'shop']) {
       document.getElementById(id)?.remove();
     }
   }
@@ -295,23 +292,146 @@ export default class MenuScene extends Phaser.Scene {
     if (this.startEl) { this.startEl.remove(); this.startEl = null; }
   }
 
+  getMenuActionLayout() {
+    const W = this.scale.width;
+    const compact = W < 560;
+    const width = compact ? Math.min(320, W - 28) : Math.min(420, W - 32);
+    const gap = compact ? 9 : 10;
+    const startH = compact ? 58 : 64;
+    const secondaryH = compact ? 50 : 56;
+    const top = this.groundY + 8;
+    const colGap = 10;
+    const colW = compact ? width : Math.floor((width - colGap) / 2);
+    const left = (W - width) / 2;
+    return { W, compact, width, gap, startH, secondaryH, top, colW, colGap, left };
+  }
+
+  placeMenuActionButton(el, slot) {
+    const layout = this.getMenuActionLayout();
+    if (slot === 'start') {
+      el.style.left = `${layout.left}px`;
+      el.style.top = `${layout.top}px`;
+      el.style.width = `${layout.width}px`;
+      el.style.height = `${layout.startH}px`;
+      return;
+    }
+    const index = { arena: 0, leaderboard: 1, redeem: 2, social: 3 }[slot] ?? 0;
+    const row = layout.compact ? index : Math.floor(index / 2);
+    const col = layout.compact ? 0 : index % 2;
+    const top = layout.top + layout.startH + layout.gap + row * (layout.secondaryH + layout.gap);
+    const left = layout.left + col * (layout.colW + layout.colGap);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.width = `${layout.compact ? layout.width : layout.colW}px`;
+    el.style.height = `${layout.secondaryH}px`;
+  }
+
+  menuActionCss({ background, color, fontSize = 18, primary = false }) {
+    return `
+      position: fixed; transform: none;
+      z-index: 12; padding: ${primary ? '0 32px' : '0 14px'};
+      font-family: 'Courier New', monospace; font-size: ${fontSize}px; font-weight: bold;
+      color: ${color}; background: ${background}; border: 3px solid #000; border-radius: 12px;
+      cursor: pointer; letter-spacing: 1px; transition: transform 0.08s ease, filter 0.08s ease;
+      text-align: center; box-shadow: 3px 3px 0 rgba(0,0,0,0.3);
+      display: flex; align-items: center; justify-content: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    `;
+  }
+
+  bindMenuActionMotion(el) {
+    el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.04)'; });
+    el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; });
+    el.addEventListener('mousedown', () => { el.style.transform = 'scale(0.97)'; });
+  }
+
+  createLandingButtonDOM() {
+    if (this.landingBtnEl) return;
+    const el = document.createElement('button');
+    el.id = 'menu-landing-btn';
+    el.style.cssText = `
+      position: fixed; left: 16px; top: 76px; z-index: 14;
+      width: 112px; height: 38px; padding: 0 10px;
+      font-family: 'Courier New', monospace; font-size: 14px; font-weight: bold;
+      color: #111; background: #ffdd55; border: 3px solid #000; border-radius: 8px;
+      cursor: pointer; box-shadow: 2px 2px 0 rgba(0,0,0,0.35);
+      display:flex;align-items:center;justify-content:center;
+    `;
+    el.textContent = 'Landing';
+    el.addEventListener('click', () => this.openLanding());
+    document.body.appendChild(el);
+    this.landingBtnEl = el;
+  }
+
+  openLanding() {
+    this.scale.off('resize', this.onResize, this);
+    navigateTo(this, 'Landing');
+  }
+
+  destroyLandingButtonDOM() {
+    if (this.landingBtnEl) { this.landingBtnEl.remove(); this.landingBtnEl = null; }
+  }
+
+  createWalletButtonDOM() {
+    if (this.walletBtnEl) return;
+    const compact = this.scale.width < 420;
+    const el = document.createElement('button');
+    el.id = 'menu-wallet-btn';
+    el.style.cssText = `
+      position: fixed; right: ${compact ? 12 : 18}px; top: ${compact ? 18 : 18}px; z-index: 14;
+      min-width: ${compact ? 150 : 176}px; height: 48px; padding: 0 ${compact ? 12 : 16}px;
+      font-family: 'Courier New', monospace; font-size: ${compact ? 12 : 14}px; font-weight: bold;
+      color: #101821; background: #ffffff; border: 3px solid #000; border-radius: 10px;
+      cursor: pointer; letter-spacing: 1px; box-shadow: 3px 3px 0 rgba(0,0,0,0.35);
+      display:flex;align-items:center;justify-content:center;
+      transition: transform 0.08s ease, filter 0.08s ease;
+      white-space: nowrap;
+    `;
+    this.bindMenuActionMotion(el);
+    el.addEventListener('click', () => this.changeWallet());
+    document.body.appendChild(el);
+    this.walletBtnEl = el;
+    this.unsubscribeWallet = subscribeWallet((state) => {
+      this.walletAccount = state.account;
+      this.walletStatus = state.status;
+      this.refreshWalletButton();
+    });
+    this.refreshWalletButton();
+  }
+
+  async changeWallet() {
+    try {
+      await connectBrowserWallet({ forceSelection: true });
+    } catch (error) {
+      this.walletStatus = explainWalletError(error?.message || String(error));
+      this.refreshWalletButton();
+    }
+  }
+
+  refreshWalletButton() {
+    if (!this.walletBtnEl) return;
+    const state = getWalletState();
+    const account = this.walletAccount || state.account;
+    const status = this.walletStatus || state.status;
+    const label = account
+      ? shortAddress(account)
+      : (status || 'CONNECT WALLET');
+    this.walletBtnEl.textContent = label;
+    this.walletBtnEl.style.background = account ? '#7CFFB0' : '#ffffff';
+  }
+
+  destroyWalletButtonDOM() {
+    if (this.walletBtnEl) { this.walletBtnEl.remove(); this.walletBtnEl = null; }
+  }
+
   // Secondary button: jump to the Agent Arena lobby (watch bots play).
   createArenaDOM() {
     if (this.arenaEl) return;
-    const btnY = this.groundY + 148;
     const el = document.createElement('button');
     el.id = 'menu-arena';
-    el.style.cssText = `
-      position: fixed; left: 50%; top: ${btnY}px; transform: translateX(-50%);
-      z-index: 12; padding: 12px 30px;
-      font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold;
-      color: #10343d; background: #5fd0e6; border: 3px solid #000; border-radius: 12px;
-      cursor: pointer; letter-spacing: 1px; transition: transform 0.08s ease;
-      min-width: 320px; text-align: center; box-shadow: 3px 3px 0 rgba(0,0,0,0.3);
-    `;
-    el.addEventListener('mouseenter', () => { el.style.transform = 'translateX(-50%) scale(1.04)'; });
-    el.addEventListener('mouseleave', () => { el.style.transform = 'translateX(-50%) scale(1)'; });
-    el.addEventListener('mousedown', () => { el.style.transform = 'translateX(-50%) scale(0.97)'; });
+    el.style.cssText = this.menuActionCss({ background: '#5fd0e6', color: '#10343d', fontSize: 16 });
+    this.placeMenuActionButton(el, 'arena');
+    this.bindMenuActionMotion(el);
     el.addEventListener('click', () => this.openArena());
     document.body.appendChild(el);
     this.arenaEl = el;
@@ -320,12 +440,77 @@ export default class MenuScene extends Phaser.Scene {
 
   openArena() {
     this.scale.off('resize', this.onResize, this);
-    setRoute('Lobby');
-    this.scene.start('Lobby');
+    navigateTo(this, 'Lobby', { backTo: 'Menu' });
   }
 
   destroyArenaDOM() {
     if (this.arenaEl) { this.arenaEl.remove(); this.arenaEl = null; }
+  }
+
+  createLeaderboardButtonDOM() {
+    if (this.leaderboardBtnEl) return;
+    const el = document.createElement('button');
+    el.id = 'menu-leaderboard-btn';
+    el.style.cssText = this.menuActionCss({ background: '#7CFFB0', color: '#1d2610', fontSize: 16 });
+    this.placeMenuActionButton(el, 'leaderboard');
+    this.bindMenuActionMotion(el);
+    el.addEventListener('click', () => this.openLeaderboard());
+    document.body.appendChild(el);
+    this.leaderboardBtnEl = el;
+    this.leaderboardBtnEl.textContent = '🏆  LEADERBOARD';
+  }
+
+  openLeaderboard() {
+    this.scale.off('resize', this.onResize, this);
+    navigateTo(this, 'Leaderboard', { backTo: 'Menu' });
+  }
+
+  destroyLeaderboardButtonDOM() {
+    if (this.leaderboardBtnEl) { this.leaderboardBtnEl.remove(); this.leaderboardBtnEl = null; }
+  }
+
+  createRedeemButtonDOM() {
+    if (this.redeemBtnEl) return;
+    const el = document.createElement('button');
+    el.id = 'menu-redeem-btn';
+    el.style.cssText = this.menuActionCss({ background: '#bff3ff', color: '#10252c', fontSize: 16 });
+    this.placeMenuActionButton(el, 'redeem');
+    this.bindMenuActionMotion(el);
+    el.addEventListener('click', () => this.openRedeem());
+    document.body.appendChild(el);
+    this.redeemBtnEl = el;
+    this.redeemBtnEl.textContent = '💎  REDEEM RES';
+  }
+
+  openRedeem() {
+    this.scale.off('resize', this.onResize, this);
+    navigateTo(this, 'Redeem', { backTo: 'Menu' });
+  }
+
+  destroyRedeemButtonDOM() {
+    if (this.redeemBtnEl) { this.redeemBtnEl.remove(); this.redeemBtnEl = null; }
+  }
+
+  createSocialFuelButtonDOM() {
+    if (this.socialFuelBtnEl) return;
+    const el = document.createElement('button');
+    el.id = 'menu-social-btn';
+    el.style.cssText = this.menuActionCss({ background: '#76f6a5', color: '#102116', fontSize: 15 });
+    this.placeMenuActionButton(el, 'social');
+    this.bindMenuActionMotion(el);
+    el.addEventListener('click', () => this.openSocialFuel());
+    document.body.appendChild(el);
+    this.socialFuelBtnEl = el;
+    this.socialFuelBtnEl.textContent = 'FREE wVARA';
+  }
+
+  openSocialFuel() {
+    this.scale.off('resize', this.onResize, this);
+    navigateTo(this, 'SocialFuel', { backTo: 'Menu' });
+  }
+
+  destroySocialFuelButtonDOM() {
+    if (this.socialFuelBtnEl) { this.socialFuelBtnEl.remove(); this.socialFuelBtnEl = null; }
   }
 
   destroyTunnelOverlay() {
@@ -848,7 +1033,7 @@ export default class MenuScene extends Phaser.Scene {
     const wrap = document.createElement('div');
     wrap.id = 'menu-customizer';
     wrap.style.cssText = `
-      position: fixed; top: 16px; left: 16px; z-index: 12;
+      position: fixed; top: 16px; left: 16px; z-index: 16;
       font-family: 'Courier New', monospace;
       display: flex; flex-direction: column; align-items: flex-start; gap: 0;
     `;
@@ -1069,6 +1254,15 @@ export default class MenuScene extends Phaser.Scene {
     this.customizerEl.style.pointerEvents = 'none';
   }
 
+  hideMenuActionButtons() {
+    for (const el of [this.startEl, this.arenaEl, this.leaderboardBtnEl, this.redeemBtnEl, this.socialFuelBtnEl, this.landingBtnEl, this.walletBtnEl, this.soundBtnEl]) {
+      if (!el) continue;
+      el.style.transition = 'opacity 0.24s ease, transform 0.08s ease';
+      el.style.opacity = '0';
+      el.style.pointerEvents = 'none';
+    }
+  }
+
   createTunnelOverlay() {
     if (this.tunnelOverlayEl) return;
     const d = document.createElement('div');
@@ -1105,9 +1299,7 @@ export default class MenuScene extends Phaser.Scene {
 
     // Fade out DOM buttons (CSS transition) and Phaser text. The Generate
     // button hides immediately so the dig animation isn't visually crowded.
-    if (this.startEl)  this.startEl.style.transition  = 'opacity 0.28s';
-    if (this.startEl)  this.startEl.style.opacity  = '0';
-    if (this.startEl)  this.startEl.style.pointerEvents  = 'none';
+    this.hideMenuActionButtons();
     this.hideGenerateButton();
 
     this.hideMenuBubble();
@@ -1163,8 +1355,7 @@ export default class MenuScene extends Phaser.Scene {
   handoff() {
     this.stopMenuDrillSound();
     this.scale.off('resize', this.onResize, this);
-    setRoute('Game');
-    this.scene.start('Game');
+    navigateTo(this, 'Game');
   }
 
   playMenuDrillSound() {
@@ -1184,4 +1375,13 @@ export default class MenuScene extends Phaser.Scene {
     for (const sound of sounds) sound.stop();
     this.pick(sounds).play();
   }
+}
+
+function explainWalletError(message) {
+  const known = {
+    wallet_request_rejected: 'REJECTED',
+    wallet_request_already_pending: 'OPEN WALLET',
+  };
+  if (message === 'Wallet was not selected.') return getWalletState().account ? '' : 'CONNECT WALLET';
+  return known[message] || 'TRY AGAIN';
 }

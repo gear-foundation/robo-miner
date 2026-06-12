@@ -19,6 +19,7 @@ backend/
       worldRegistry/      # active/current/past world discovery
       indexer/            # event ingestion, snapshots, replay
       diggerRental/       # deploy digger/proxy and keep it funded
+      socialVerifier/     # X repost/quote verification -> fuel grants
       leaderboard/        # season scores and agent standings
 ```
 
@@ -105,13 +106,17 @@ GET /api/stats/agents?season=season-1&world=world-id
 GET /api/stats/economy
 GET /api/leaderboard?metric=banked&season=season-1&world=world-id&limit=50
 GET /api/events?limit=100
+POST /api/social/x/submit
+GET /api/social/x/:owner
 POST /api/ingest/injected
 GET /api/manifest
 GET /api/admin/overview
 GET /api/admin/rental/requests
 GET /api/admin/rental/fuel-grants
+GET /api/admin/social/x
 GET /api/admin/redeem
 POST /api/admin/redeem/deposit
+POST /api/admin/rental/clear-failed
 ```
 
 Set `ADMIN_API_TOKEN` to require `Authorization: Bearer <token>` for
@@ -148,6 +153,7 @@ The rental flow is backend-managed:
 agent requests digger
   -> backend deploys DiggerProxy for owner + world
   -> backend funds initial executable balance to 120 VARA
+  -> backend stores owner + season + world -> digger program id
   -> backend returns the digger program id to the agent
 ```
 
@@ -163,6 +169,40 @@ POST /api/diggers/request
 
 Live deploy requires `DIGGER_PROXY_CODE_ID` (or legacy `DIGGER_CODE_ID`) plus
 `DIGGER_ADMIN_KEY`, `ETH_RPC`, `VARA_ETH_WS`, and `ROUTER_ADDRESS`.
+
+The MVP duplicate rule is one active/planned digger per `owner + season + world`.
+If the same owner asks again, the backend returns the existing `programId`
+instead of deploying a second digger.
+
+Agent/frontend lookup:
+
+```txt
+GET /api/diggers?owner=0xagent&world=0xworld&season=season-1&status=active
+```
+
+The response includes both the full `diggers[]` list and `digger`, the first
+matching record for "my digger" flows.
+
+The frontend helper mirrors the same flow:
+
+```js
+await fetchMyDigger({ owner, worldId, seasonId });
+await ensureDiggerRental({ owner, worldId, seasonId, dryRun: false });
+```
+
+The agent script can resolve a rented digger without hardcoding
+`DIGGER_PROGRAM_ID`:
+
+```bash
+cd contracts
+DIGGER_BACKEND_URL=http://localhost:8787 \
+DIGGER_WORLD_ID=0x936b5395876648772d37e22da57ba37c4e586df2 \
+pnpm run play-agent
+```
+
+Set `DIGGER_REQUEST_DIGGER=true` only when the script should request a new
+backend-managed digger if none exists yet. Social gates, referrals, or allowlist
+checks can be added before `/api/diggers/request` later.
 
 After the initial rental, the top-up job follows the spec value of
 `120 VARA/day` and treats it as a daily executable-balance target, not a blind
@@ -195,7 +235,87 @@ npm run rental:top-up -- --live
 ```
 
 The job stores diggers, fuel grants, and job-run audit data in
-`BACKEND_DB_FILE` or `<BACKEND_STATE_DIR>/backend.json`.
+the backend DB.
+
+## Social Verifier Free Fuel
+
+The social verifier follows the PolyBaskets rewards pattern: external social
+content is untrusted until the backend verifies it, creates an idempotent
+`grantId`, checks wallet/X-account weekly caps, and records an auditable grant.
+For Digger, the payout is not a withdrawable token reward. It becomes a
+`social-x` fuel grant to the owner's active digger executable balance.
+
+```txt
+user submits X post
+  -> backend verifies repost/quote through X API
+  -> backend checks wallet + X account duplicate limits
+  -> backend finds owner's active/planned digger
+  -> backend tops up that digger executable balance
+  -> backend stores socialRewardSubmissions + fuelGrants audit rows
+```
+
+Submit a task:
+
+```txt
+POST /api/social/x/submit
+{
+  "owner": "0xagent...",
+  "taskType": "repost",
+  "tweetUrl": "https://x.com/VaraNetwork/status/123",
+  "xUsername": "agent_handle",
+  "seasonId": "season-1",
+  "dryRun": true
+}
+```
+
+Task types:
+
+```txt
+repost -> SOCIAL_REPOST_FUEL_GRANT, default 60 VARA
+quote  -> SOCIAL_QUOTE_FUEL_GRANT, default 120 VARA
+```
+
+Config:
+
+```txt
+SOCIAL_X_BEARER_TOKEN=...
+SOCIAL_X_SOURCE_USERNAME=VaraNetwork
+SOCIAL_REPOST_FUEL_GRANT=60000000000000
+SOCIAL_QUOTE_FUEL_GRANT=120000000000000
+SOCIAL_VERIFIER_MODE=live
+```
+
+Set `SOCIAL_VERIFIER_MODE=mock` only for local development without X API calls.
+
+Lookups:
+
+```txt
+GET /api/social/x/0xagent...
+GET /api/admin/social/x
+```
+
+The social verifier defaults to `SOCIAL_VERIFIER_MODE=live`. Use
+`SOCIAL_VERIFIER_MODE=mock` only in local development when X API calls are not
+available. Production-like verification requires `SOCIAL_X_BEARER_TOKEN`.
+
+## Storage
+
+The backend uses a JSON store for the current MVP runtime. By default it writes
+to:
+
+```txt
+<BACKEND_STATE_DIR>/backend.json
+```
+
+Default:
+
+```txt
+BACKEND_STATE_DIR=state
+BACKEND_DB_FILE=state/backend.json
+```
+
+Set `BACKEND_DB_FILE` when a test, smoke run, or deployment should use a
+separate database file.
 
 The always-on worker runs registry sync, snapshot projection, and rental top-up:
 
@@ -283,6 +403,17 @@ reserve totals) and applies current-state projections. This keeps leaderboard,
 registry, rental selection, and economy totals usable while full event history is
 unavailable.
 
+MVP leaderboard source order:
+
+1. `POST /api/ingest/injected` from the agent/frontend immediately after an
+   injected action. This is the fast path for fresh leaderboard rows.
+2. `snapshot-watch` or `npm run scheduler` periodically reads current contract
+   state and reconciles the read models. If an injected event is missed, the
+   next world snapshot still updates the agent's current `banked` totals.
+3. `live-once` / `watch` stay prepared for an RPC endpoint with `block_outcome`.
+   Once that endpoint is available, decoded block outcome events can become the
+   primary indexed source.
+
 ### Injected Watch Ingest
 
 For fast agent/frontend flows, the client that sends an injected transaction can
@@ -322,6 +453,25 @@ events after each successful injected action when `DIGGER_BACKEND_URL` or
 ```bash
 cd contracts
 DIGGER_BACKEND_URL=http://localhost:8787 pnpm run agent-step-events -- --until-resource
+```
+
+For MVP rewards the leaderboard uses only `banked`: resources brought back to
+the surface. The agent script sends `World.AgentSurfaced` to
+`/api/ingest/injected`; the projector stores surfaced totals in
+`agentStats[].banked`; `/api/leaderboard` defaults to `metric=banked`.
+
+Run the reconciliation worker next to the API:
+
+```bash
+cd backend
+npm run scheduler
+```
+
+For an indexer-only fallback:
+
+```bash
+cd backend
+npm run indexer -- snapshot-watch
 ```
 
 ## Leaderboard

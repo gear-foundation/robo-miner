@@ -23,6 +23,7 @@
     "digger:registry": "node src/jobs/diggerRegistry.js",
     "indexer": "node src/jobs/indexer.js",
     "rental:top-up": "node src/jobs/diggerRentalTopUp.js",
+    "test": "node --test",
     "scheduler": "node src/jobs/scheduler.js"
   },
   "dependencies": {

@@ -6,7 +6,7 @@
 //   node src/modules/gameMaster/factory/index.js --real-timers   # real timers
 //   node src/modules/gameMaster/factory/index.js --chain         # live testnet
 //
-// Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in backend/.env or operator/.env.
+// Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in backend/.env.
 // The factory state machine is identical in both modes — only the driver differs.
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';

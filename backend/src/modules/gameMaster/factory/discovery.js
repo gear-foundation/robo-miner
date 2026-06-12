@@ -41,7 +41,7 @@ export function createDiscoveryServer({ factory, env = {}, cfg, port = 8780, log
     steps: [
       'GET /matches and pick a match where joinable=true (slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
-      'Wait until the session is ACTIVE (auto-starts at maxAgents; or operator starts from minAgents)',
+      'Wait until the session is ACTIVE (auto-starts at maxAgents; or backend starts from minAgents)',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

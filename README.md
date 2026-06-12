@@ -8,8 +8,9 @@ collect ore, dodge lava and falling rocks, grab the diamond. Two modes:
   runs scripted bots; in chain mode it renders a live DiggerWorld program from
   Vara.eth state.
 
-The live chain flow uses an off-chain operator to generate maps and drive
-sessions, while the frontend joins as a read-only spectator.
+The live chain flow is owned by the backend gameMaster module, which generates
+maps, provisions worlds, drives sessions, and publishes discovery data while the
+frontend joins as a read-only spectator.
 
 ## Layout
 
@@ -20,8 +21,9 @@ sessions, while the frontend joins as a read-only spectator.
     the action/observation contract the agents drive.
   - `src/world/` — parameterized world generation (size/depth presets).
   - `src/chain/` — DiggerWorld IDL bindings and the read-only Vara.eth source.
-- `operator/` — off-chain admin service that generates maps, uploads them with
-  `Admin.UploadMap`, starts/finishes sessions, and can query live program state.
+- `backend/` — modular monolith with the gameMaster, world registry, API,
+  indexer, rental, and leaderboard modules. The gameMaster contains the
+  off-chain admin/world factory logic.
 
 ## Quick Start
 
@@ -40,10 +42,11 @@ Copy `frontend/.env.example`, set `VITE_CHAIN_ENABLED=true`, and run the
 frontend. The example points at the Hoodi testnet DiggerWorld program.
 
 ```bash
-cd operator
+cd backend
 cp .env.example .env
 npm install
 npm run query
+npm run factory
 ```
 
 `SKILLS.md` describes the agent observation/action contract used by local bots.

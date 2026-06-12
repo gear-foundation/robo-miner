@@ -26,7 +26,8 @@ LP Bonus is intentionally deferred and is not part of the current MVP runtime.
 
 ## Current module
 
-`modules/gameMaster` contains the current operator implementation:
+`modules/gameMaster` contains the current off-chain admin and world factory
+implementation:
 
 - off-chain map generation;
 - upload-ready map payloads;
@@ -62,10 +63,21 @@ Run dry mode:
 cd backend
 npm run gamemaster -- create --count 3
 npm run gamemaster -- list
+npm run factory
 ```
 
-The old `operator/` package remains as a compatibility wrapper while we migrate
-scripts and docs to `backend/`.
+All gameMaster, factory, chain, and simulation commands are run from `backend/`.
+
+Factory and agent simulation commands:
+
+```bash
+cd backend
+npm run factory            # dry-run factory + discovery server
+npm run factory:forever    # dry-run forever
+npm run factory:chain      # live Hoodi factory; requires backend/.env
+npm run sim:register -- <worldProgramId> 10
+npm run sim:play -- <worldProgramId> --forever
+```
 
 ## World Registry
 
@@ -197,7 +209,7 @@ LP Bonus is not scheduled.
 
 ## Admin Operations
 
-Admin endpoints are meant for the operator backend, not public frontend calls.
+Admin endpoints are meant for the protected backend, not public frontend calls.
 Set `ADMIN_API_TOKEN` in live environments and send:
 
 ```txt
@@ -220,7 +232,7 @@ curl -sS -X POST http://localhost:8787/api/admin/redeem/deposit \
   -d '{"programId":"0xa302b35865311778adc5b17dbe47406e7e6a117c","amount":"1000000000000","dryRun":true}'
 ```
 
-Set `"dryRun": false` only from a protected live operator environment.
+Set `"dryRun": false` only from a protected live backend environment.
 
 ## Indexer Foundation
 

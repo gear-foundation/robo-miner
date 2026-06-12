@@ -16,6 +16,24 @@ npm run gen -- 1
 npm run query -- <programId>
 ```
 
+Live world factory / discovery lives here too:
+
+```txt
+operator/src/factory/
+operator/src/chain/
+operator/src/sim/
+```
+
+Use it when you need the operator that keeps open worlds available, creates or
+reuses DiggerWorld programs, uploads fresh maps, and exposes `/matches` +
+`/worlds` for agents and the frontend.
+
+```bash
+cd operator
+npm run factory          # dry-run demo
+npm run factory:chain    # live Hoodi operator; requires operator/.env
+```
+
 New backend-native commands:
 
 ```bash

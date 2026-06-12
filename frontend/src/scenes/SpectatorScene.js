@@ -53,13 +53,23 @@ export default class SpectatorScene extends GameScene {
   constructor() { super('Spectator'); }
 
   preload() {
-    super.preload();
+    // Spectator/live worlds only need tile textures and the tiny robot-click
+    // sounds. Loading every single-player SFX here creates noisy decode errors
+    // in browsers for assets this scene never plays.
+    this.load.on('loaderror', () => {});
+    const keys = ['dirt', 'coal', 'iron', 'copper', 'silver', 'gold', 'emerald', 'ruby', 'diamond', 'stone', 'grass', 'ladder', 'pillar'];
+    for (const k of keys) this.load.image(k, `assets/tiles/${k}.png`);
+    this.load.audio('robot-chirp', 'assets/sfx/robot-chirp.wav');
+    this.load.audio('robot-question', 'assets/sfx/robot-question.wav');
   }
 
   init(data) {
     this.specMode = data?.mode || 'coop-gem';
     this.specSeed = data?.seed ?? 1234;
     this.specProgramId = data?.programId || '';
+    this.specArchiveId = data?.archiveId || '';
+    this.specArchiveUrl = data?.archiveUrl || '';
+    this.isArchiveReplay = Boolean(this.specArchiveId || this.specMode === 'chain-replay');
     this.backTo = data?.backTo || 'Lobby';
     this.worldMeta = null;
     this.worldMetaPollMs = 0;
@@ -83,7 +93,10 @@ export default class SpectatorScene extends GameScene {
     // contract is live (chain/source.js decides from env). Same surface either way.
     this.rt = createWorldSource({
       seed: this.specSeed,
+      mode: this.specMode,
       programId: this.specProgramId,
+      archiveId: this.specArchiveId,
+      archiveUrl: this.specArchiveUrl,
       spec: this.mode.spec,
       spawn: this.mode.spawn,
       victory: this.mode.victory,
@@ -184,7 +197,15 @@ export default class SpectatorScene extends GameScene {
     }).setOrigin(0.5);
   }
 
-  onSpecResize() { this.scene.restart({ mode: this.specMode, seed: this.specSeed, programId: this.specProgramId }); }
+  onSpecResize() {
+    this.scene.restart({
+      mode: this.specMode,
+      seed: this.specSeed,
+      programId: this.specProgramId,
+      archiveId: this.specArchiveId,
+      archiveUrl: this.specArchiveUrl,
+    });
+  }
 
   setupCameraControls() {
     // Fixed 1:1 zoom. Drag or mouse-wheel to scroll (pan). No zoom.
@@ -267,7 +288,11 @@ export default class SpectatorScene extends GameScene {
     }
 
     this.statsTimer += dt;
-    if (this.statsTimer >= 200) { this.statsTimer = 0; this.updateHUD(); if (this.rt.finished) this.showFinish(); }
+    if (this.statsTimer >= 200) {
+      this.statsTimer = 0;
+      this.updateHUD();
+      if (this.rt.finished && !this.isArchiveReplay) this.showFinish();
+    }
   }
 
   drawSpecRobots(time) {
@@ -622,6 +647,7 @@ export default class SpectatorScene extends GameScene {
     const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;
+    const clockLabel = status === 'archived' ? 'archived' : formatClock(remainingMs);
     const banked = ms.reduce((totals, m) => {
       totals.scrst += Number(m.bankedResources?.scrst || 0);
       totals.bcrst += Number(m.bankedResources?.bcrst || 0);
@@ -632,17 +658,27 @@ export default class SpectatorScene extends GameScene {
     const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     this.statsEl.innerHTML =
       `<span style="color:${fc}">${fps} fps</span>　` +
-      `${formatClock(remainingMs)}　agents <b>${countLabel}</b>　` +
+      `${clockLabel}　agents <b>${countLabel}</b>　` +
       `SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
 
   async refreshWorldMeta() {
+    if (this.specArchiveId && this.rt?.archive) {
+      this.worldMeta = {
+        ...this.rt.archive,
+        status: 'archived',
+        maxAgents: this.rt.archive.capAgents || this.rt.archive.maxAgents || this.mode.miners,
+        endsAt: null,
+      };
+      this.updateHUD();
+      return;
+    }
     if (!CHAIN.matchesUrl || !this.specProgramId) return;
     try {
       const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
-      const data = await (await fetch(`${base}/worlds`)).json();
-      const found = (data?.worlds || []).find((w) =>
+      const data = await this.fetchDiscoverySessions(base);
+      const found = data.sessions.find((w) =>
         String(w.programId || '').toLowerCase() === String(this.specProgramId).toLowerCase(),
       );
       if (found) {
@@ -652,6 +688,14 @@ export default class SpectatorScene extends GameScene {
     } catch {
       // HUD can still render from chain/local source if discovery is unavailable.
     }
+  }
+
+  async fetchDiscoverySessions(base) {
+    const response = await fetch(`${base}/sessions`);
+    if (!response.ok) throw new Error(`discovery failed: ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data?.sessions)) throw new Error('discovery response has no sessions');
+    return data;
   }
 
   showFinish() {

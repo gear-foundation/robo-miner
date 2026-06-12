@@ -50,7 +50,10 @@ export function loadChainEnv(overrides = {}) {
 export function loadConfig(overrides = {}) {
   return {
     // ── pool ────────────────────────────────────────────────────────────────
-    poolSize: num('FACTORY_POOL_SIZE', 3), // max concurrent worlds (provisioning|open|active)
+    // FACTORY_POOL_SIZE is kept as a legacy default for FACTORY_POOL_MAX.
+    // Set FACTORY_POOL_MAX=0 for elastic/unbounded growth; otherwise it is a
+    // safety cap on concurrent provisioning/open/active worlds.
+    poolSize: num('FACTORY_POOL_MAX', num('FACTORY_POOL_SIZE', 3)),
     minOpenWorlds: num('FACTORY_MIN_OPEN', 1), // invariant: always keep >= this many open lobbies
 
     // ── lobby admission rules ────────────────────────────────────────────────

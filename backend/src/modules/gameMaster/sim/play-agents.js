@@ -6,7 +6,8 @@
 // so digging needs Drill first.
 //
 //   node src/modules/gameMaster/sim/play-agents.js <worldProgramId> [rounds] [--forever] [--agents N] [--delay ms]
-// Defaults: first pool program, 8 rounds, 10 agents, 400ms between rounds.
+// Defaults: first program in <GAMEMASTER_STATE_DIR>/factory-programs.json,
+// 8 rounds, 10 agents, 400ms between rounds.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,9 +23,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const argv = process.argv.slice(2);
 const flag = (name, def) => { const i = argv.indexOf(name); return i >= 0 && argv[i + 1] ? argv[i + 1] : def; };
 
+function stateFilePath(name) {
+  const stateDir = process.env.GAMEMASTER_STATE_DIR || 'state';
+  const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
+  return path.join(dir, name);
+}
+
 async function firstPoolProgram() {
   try {
-    const pool = JSON.parse(await readFile(path.resolve(ROOT, 'state/factory-programs.json'), 'utf8'));
+    const pool = JSON.parse(await readFile(stateFilePath('factory-programs.json'), 'utf8'));
     return pool.programs?.[0] || '';
   } catch {
     return '';
@@ -37,7 +44,7 @@ const forever = argv.includes('--forever');
 const rounds = forever ? Infinity : Number(argv.find((a) => /^\d+$/.test(a)) || 8);
 const agentCount = Number(flag('--agents', 10));
 const delay = Number(flag('--delay', 400));
-if (!world) { console.error('no world program id (arg, DIGGER_PROGRAM_ID, or state/factory-programs.json)'); process.exit(1); }
+if (!world) { console.error('no world program id (arg, DIGGER_PROGRAM_ID, or <GAMEMASTER_STATE_DIR>/factory-programs.json)'); process.exit(1); }
 
 const { keccak256, stringToBytes } = await import('viem');
 const { privateKeyToAccount } = await import('viem/accounts');

@@ -12,8 +12,8 @@
 //   pollAgents → World.Agents() length
 //
 // Code is validated ONCE → its code id + the program ids we deploy are persisted
-// to state/factory-programs.json, so restarts reuse the pool instead of paying to
-// redeploy. Set DIGGER_CODE_ID to skip the code-state check entirely.
+// to <GAMEMASTER_STATE_DIR>/factory-programs.json, so restarts reuse the pool
+// for the selected code id. Set DIGGER_CODE_ID to skip the code-state check.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -83,6 +83,32 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
     return Array.isArray(arr) ? arr.map(String) : [];
   }
 
+  async function readSnapshot(programId) {
+    const [configReply, sessionReply, mapReply, agentsReply] = await Promise.all([
+      chain.query(programId, chain.encode.config()),
+      chain.query(programId, chain.encode.session()),
+      chain.query(programId, chain.encode.mapSnapshot()),
+      chain.query(programId, chain.encode.agents()),
+    ]);
+    const config = chain.decode.config(configReply.payload).map((v) => Number(v));
+    const session = chain.decode.session(sessionReply.payload).map((v) => Number(v));
+    const rawGrid = chain.decode.mapSnapshot(mapReply.payload).map((v) => Number(v));
+    const owners = chain.decode.agents(agentsReply.payload).map(String);
+    const agents = await Promise.all(owners.map(async (owner, index) => {
+      const [stateReply, inventoryReply] = await Promise.all([
+        chain.query(programId, chain.encode.agentOf(owner)),
+        chain.query(programId, chain.encode.inventoryOf(owner)),
+      ]);
+      return {
+        index,
+        owner,
+        state: chain.decode.agentOf(stateReply.payload).map((v) => Number(v)),
+        inventory: chain.decode.inventoryOf(inventoryReply.payload).map((v) => Number(v)),
+      };
+    }));
+    return { config, session, rawGrid, agents };
+  }
+
   async function uploadFreshMap(programId) {
     let map = null;
     for (let attempt = 0; attempt < 5 && !map; attempt += 1) {
@@ -140,6 +166,9 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
     async retire() {},
     async pollAgents(world) {
       return readAgents(world.programId); // real on-chain owner ActorIds
+    },
+    async archiveSnapshot(world) {
+      return readSnapshot(world.programId);
     },
     // Proactive top-up so a live world never runs its executable balance dry.
     ensureBalance(world) {

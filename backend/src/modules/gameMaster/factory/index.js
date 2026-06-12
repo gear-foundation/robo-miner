@@ -17,6 +17,7 @@ import { createFactory } from './factory.js';
 import { createDryRunDriver } from './drivers/dryRunDriver.js';
 import { createRegistryPublisher } from './registry.js';
 import { createDiscoveryServer } from './discovery.js';
+import { createArchiveStore } from './archive.js';
 import { WORLD } from './world.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -72,6 +73,9 @@ function compactWorld(world) {
     lastJoinAt: world.lastJoinAt ?? null,
     startedAt: world.startedAt ?? null,
     finishedAt: world.finishedAt ?? null,
+    archivedAt: world.archivedAt ?? null,
+    archiveId: world.archiveId ?? null,
+    archiveUrl: world.archiveUrl ?? null,
     eligibleManualStart: Boolean(world.eligibleManualStart),
     startReason: world.startReason || null,
   };
@@ -170,7 +174,9 @@ if (useChain) {
           lobbyTimeoutMs: Number(process.env.FACTORY_LOBBY_TIMEOUT_MS) || 4000,
           sessionMs: Number(process.env.SESSION_MS) || 8000,
           tickMs: 400,
-          poolSize: Number(process.env.FACTORY_POOL_SIZE) || 3,
+          poolSize: process.env.FACTORY_POOL_MAX != null
+            ? Number(process.env.FACTORY_POOL_MAX)
+            : (Number(process.env.FACTORY_POOL_SIZE) || 3),
           minOpenWorlds: Number(process.env.FACTORY_MIN_OPEN) || 1,
           autoStartOnTimeout: true, // demo progresses without a human clicking start
         },
@@ -182,6 +188,11 @@ const publisher = createRegistryPublisher({
   cfg: config,
   env: chainEnv,
   stateDir: process.env.GAMEMASTER_STATE_DIR || 'state',
+});
+const archives = createArchiveStore({
+  root: ROOT,
+  stateDir: process.env.GAMEMASTER_STATE_DIR || 'state',
+  cfg: config,
 });
 console.log(`[factory] publishing worlds → ${publisher.file} (World Registry reads this)`);
 
@@ -196,6 +207,11 @@ const factory = createFactory({
   initialPast,
   onLive: useChain ? saveLive : null,
   onPast: useChain ? savePast : null,
+  onArchive: async (world) => {
+    if (typeof driver.archiveSnapshot !== 'function') return null;
+    const snapshot = await driver.archiveSnapshot(world);
+    return archives.save(world, snapshot);
+  },
 });
 
 // Agent-facing discovery: the single address agents scan for current matches.
@@ -203,6 +219,7 @@ const discovery = createDiscoveryServer({
   factory,
   env: chainEnv,
   cfg: config,
+  archives,
   port: Number(process.env.DISCOVERY_PORT || 8780),
 });
 try {

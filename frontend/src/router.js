@@ -26,6 +26,9 @@ export function parseRoute(locationLike = window.location) {
   if (parts[0] === 'world' && parts[1]) {
     return { scene: 'Spectator', data: { mode: 'chain-live', seed: 0, programId: parts[1], backTo: 'Lobby' } };
   }
+  if (parts[0] === 'replay' && parts[1]) {
+    return { scene: 'Spectator', data: { mode: 'chain-replay', seed: 0, archiveId: parts[1], backTo: 'Lobby' } };
+  }
   if (parts[0] === 'arena' && parts[1]) {
     return {
       scene: 'Spectator',
@@ -53,6 +56,9 @@ export function initialRoute() {
 export function routeForScene(sceneKey, data = {}) {
   if (sceneKey === 'Spectator' && data.mode === 'chain-live' && data.programId) {
     return `/world/${encodeURIComponent(data.programId)}`;
+  }
+  if (sceneKey === 'Spectator' && data.mode === 'chain-replay' && data.archiveId) {
+    return `/replay/${encodeURIComponent(data.archiveId)}`;
   }
   if (sceneKey === 'Spectator' && data.mode) {
     const seed = data.seed == null ? '' : `?seed=${encodeURIComponent(String(data.seed))}`;

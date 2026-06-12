@@ -211,7 +211,7 @@ Factory discovery endpoints:
 
 ```txt
 GET http://localhost:8780/matches
-GET http://localhost:8780/worlds
+GET http://localhost:8780/sessions
 GET http://localhost:8780/health
 ```
 

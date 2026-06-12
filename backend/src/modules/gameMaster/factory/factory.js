@@ -19,6 +19,7 @@ export function createFactory({
   initialPast = [], // archived worlds restored from disk (survive restarts)
   onLive = null, // persist callback whenever the live pool changes
   onPast = null, // persist callback whenever the past list changes
+  onArchive = null, // persist a frozen chain snapshot before a program is recycled
 }) {
   const cfg = config;
   syncWorldCounter(initialLive);
@@ -31,10 +32,48 @@ export function createFactory({
   const list = () => [...worlds.values(), ...pastStore]; // live + past (for publish/snapshot)
   const countOpen = () => active().filter((w) => w.status === WORLD.OPEN).length;
   const poolBusy = () => active().filter((w) => POOL_STATUSES.includes(w.status)).length;
+  const poolHasCapacity = () => cfg.poolSize === 0 || poolBusy() < cfg.poolSize;
 
   async function persistLive() {
     try { await onLive?.(active()); }
     catch (error) { log(`[factory] live persist error: ${error?.message || error}`); }
+  }
+
+  async function persistPast() {
+    try { await onPast?.(pastStore); }
+    catch (error) { log(`[factory] past persist error: ${error?.message || error}`); }
+  }
+
+  async function archiveFinishedWorld(world) {
+    if (world.archiveId) return true;
+    if (!onArchive) return true;
+    try {
+      const archive = await onArchive(world);
+      if (archive?.archiveId) {
+        world.archiveId = archive.archiveId;
+        world.archiveUrl = archive.archiveUrl || `/archives/${archive.archiveId}`;
+        world.archivedAt = archive.archivedAt || clock();
+        log(`[factory]   ${world.id} snapshot saved ${world.archiveId}`);
+        await persistLive();
+      }
+      return true;
+    } catch (error) {
+      log(`[factory] ! ${world.id} snapshot failed: ${error?.message || error}`);
+      return false;
+    }
+  }
+
+  async function pushPastSnapshot(world) {
+    if (world.archiveId && pastStore.some((past) => past.archiveId === world.archiveId)) return;
+    pastStore.push({
+      ...world,
+      status: WORLD.ARCHIVED,
+      finishedAt: world.finishedAt || clock(),
+      archivedAt: world.archivedAt || clock(),
+    });
+    const limit = cfg.pastLimit || 50;
+    while (pastStore.length > limit) pastStore.shift();
+    await persistPast();
   }
 
   async function provisionOne() {
@@ -122,14 +161,22 @@ export function createFactory({
   }
 
   async function recycleWorld(world) {
-    if (cfg.recycle && poolBusy() < cfg.poolSize) {
+    const archived = await archiveFinishedWorld(world);
+    if (!archived) return;
+    await pushPastSnapshot(world);
+
+    if (cfg.recycle) {
       const map = await driver.recycle(world); // reset_map → fresh map, agents cleared, → CREATED
       world.seed = map.seed;
       world.mapHash = map.mapHash;
       world.sessionId = map.sessionId ?? world.sessionId + 1;
       world.agents = 0;
+      world.owners = [];
       world.startedAt = null;
       world.finishedAt = null;
+      world.archivedAt = null;
+      world.archiveId = null;
+      world.archiveUrl = null;
       world.eligibleManualStart = false;
       world.startReason = null;
       if (!cfg.lobbyMode) await driver.start(world);
@@ -143,18 +190,15 @@ export function createFactory({
       world.status = WORLD.RETIRED;
       world.finishedAt = world.finishedAt || clock();
       worlds.delete(world.id); // move out of the live map into the durable past list
-      pastStore.push(world);
-      const limit = cfg.pastLimit || 50;
-      while (pastStore.length > limit) pastStore.shift();
       await persistLive();
-      try { await onPast?.(pastStore); } catch (error) { log(`[factory] past persist error: ${error?.message || error}`); }
       log(`[factory] x ${world.id} retired → PAST (${pastStore.length} kept) program=${world.programId}`);
     }
   }
 
   async function tick() {
-    // Invariant: keep at least minOpenWorlds open lobbies, bounded by pool capacity.
-    while (countOpen() < cfg.minOpenWorlds && poolBusy() < cfg.poolSize) {
+    // Invariant: keep at least minOpenWorlds open lobbies. FACTORY_POOL_MAX
+    // optionally caps concurrent live worlds; 0 means elastic/unbounded.
+    while (countOpen() < cfg.minOpenWorlds && poolHasCapacity()) {
       await provisionOne();
     }
     for (const world of active()) {
@@ -194,7 +238,7 @@ export function createFactory({
       if (running) return;
       running = true;
       log(
-        `[factory] starting · pool=${cfg.poolSize} minOpen=${cfg.minOpenWorlds} ` +
+        `[factory] starting · pool=${cfg.poolSize === 0 ? 'elastic' : cfg.poolSize} minOpen=${cfg.minOpenWorlds} ` +
           `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} timeout=${cfg.lobbyTimeoutMs}ms ` +
           `session=${cfg.sessionMs}ms mode=${cfg.lobbyMode ? 'lobby' : 'instant-open'}`,
       );

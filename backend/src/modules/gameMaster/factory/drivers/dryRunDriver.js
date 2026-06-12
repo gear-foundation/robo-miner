@@ -30,6 +30,29 @@ function synthOwner(worldId, i) {
   return `0x${(hex + '0'.repeat(64)).slice(0, 64)}`;
 }
 
+function drySnapshot(world) {
+  const W = 60;
+  const H = 40;
+  const rawGrid = Array.from({ length: W * H }, (_, i) => {
+    const y = Math.floor(i / W);
+    if (y === 0) return 20;
+    if (y < 4) return 0;
+    return i % 11 === 0 ? 2 : (i % 17 === 0 ? 10 : 1);
+  });
+  const owners = Array.isArray(world.owners) ? world.owners : [];
+  return {
+    config: [W, H],
+    session: [Number(world.sessionId || 1), Number(world.seed || 0), 2, 0],
+    rawGrid,
+    agents: owners.map((owner, index) => ({
+      index,
+      owner,
+      state: [1, 6 + index * 2, 4, 2, 10, 0, 0, 0, index, 0, 0, 6 + index * 2],
+      inventory: [0, 0, 0, index, 0, 0],
+    })),
+  };
+}
+
 export function createDryRunDriver({ clock = Date.now } = {}) {
   const sim = new Map(); // worldId → { target, nextJoinAt }
 
@@ -68,6 +91,9 @@ export function createDryRunDriver({ clock = Date.now } = {}) {
       // Synthetic owners shaped like real World.Agents() ActorIds (32-byte hex),
       // so registry/discovery output is identical to chain mode for testing.
       return Array.from({ length: count }, (_, i) => synthOwner(world.id, i));
+    },
+    async archiveSnapshot(world) {
+      return drySnapshot(world);
     },
     ensureBalance() {}, // no executable balance off-chain
     balanceSnapshot: () => [],

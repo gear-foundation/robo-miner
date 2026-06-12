@@ -35,6 +35,7 @@ import { skinFromAddress } from '../render/robot.js';
 // Pick the data source. Local engine today; the chain source once a World
 // contract is deployed and .env is filled (CHAIN.enabled + ids).
 export function createWorldSource(opts) {
+  if (opts?.archiveId || opts?.mode === 'chain-replay') return new ArchivedSource(opts);
   if (chainReady(opts?.programId)) return new ChainSource(opts);
   return new RealtimeWorld(opts); // ← current behaviour, unchanged
 }
@@ -43,8 +44,16 @@ const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 const ZERO_ACTOR_RE = /^0x0+$/i;
 const CHAIN_MOVE_MS = 180;
 const CHAIN_DIG_PULSE_MS = 240;
+const CHAIN_STONE_SHAKE_MS = 520;
+const CHAIN_STONE_STEP_MS = 90;
 const MAX_BLOCK_BACKFILL = 24;
 const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
+const AGENT_STATUS = {
+  ACTIVE: 1,
+  SURFACED: 2,
+  DEAD: 3,
+  EXITED: 4,
+};
 
 // Current live DiggerWorld testnet tile ids differ from the older frontend
 // constants. Keep the renderer stable by translating contract cells at the edge.
@@ -119,6 +128,142 @@ function shortId(id) {
 
 function makeEmptyStats() {
   return { tilesDug: 0, ore: 0, sold: 0, spent: 0, deaths: 0 };
+}
+
+function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous = null) {
+  const status = Number(row.state?.[0] ?? AGENT_STATUS.ACTIVE);
+  const x = Number(row.state?.[1] ?? 0);
+  const rawY = Number(row.state?.[2] ?? rawSurface);
+  const hp = Number(row.state?.[3] ?? config[6] ?? 1);
+  const laddersRemaining = Number(row.state?.[4] ?? config[7] ?? 0);
+  const backpackCapacity = Number(row.state?.[11] ?? config[8] ?? 0);
+  const y = rawToVisualY(rawY, surface, rawSurface, yOffset);
+  const inventory = Array.isArray(row.inventory) ? row.inventory : [];
+  const dead = status === AGENT_STATUS.DEAD;
+  const exited = status === AGENT_STATUS.EXITED;
+  const cargo = resourceTotal({
+    scrst: inventory[0] ?? row.state?.[5],
+    bcrst: inventory[1] ?? row.state?.[6],
+    hcrst: inventory[2] ?? row.state?.[7],
+  });
+  const bankedResources = normalizeResourceTotals({
+    scrst: inventory[3] ?? row.state?.[8],
+    bcrst: inventory[4] ?? row.state?.[9],
+    hcrst: inventory[5] ?? row.state?.[10],
+  });
+  const skin = skinFromAddress(row.owner);
+  return {
+    id: row.index,
+    owner: row.owner,
+    name: shortId(row.owner),
+    tx: x,
+    ty: y,
+    drawX: x,
+    drawY: y,
+    facing: previous?.facing || 'down',
+    status,
+    alive: status === AGENT_STATUS.ACTIVE || status === AGENT_STATUS.SURFACED,
+    act: null,
+    hp,
+    cargo,
+    maxCargo: backpackCapacity,
+    backpackCapacity,
+    inventory,
+    banked: resourceTotal(bankedResources),
+    bankedResources,
+    items: { ladder: laddersRemaining },
+    stats: makeEmptyStats(),
+    respawnAtMs: dead ? Number.POSITIVE_INFINITY : null,
+    spawnX: x,
+    spawnY: surface,
+    hat: skin.hat,
+    color: skin.bodyColor,
+    radar: 2,
+    maxLadders: Number(config[7] ?? laddersRemaining),
+    exited,
+  };
+}
+
+export class ArchivedSource {
+  constructor(opts = {}) {
+    this.opts = opts;
+    this.archiveId = opts.archiveId;
+    this.archiveUrl = opts.archiveUrl || '';
+    this.world = null;
+    this.s = { miners: [] };
+    this.stones = [];
+    this.bombs = [];
+    this.events = [];
+    this.timeMs = 0;
+    this.worldDirty = true;
+    this.finished = true;
+    this.teamScore = 0;
+    this.match = { shopX: 0, diamondFound: false, finishedReason: 'archived' };
+    this.ready = this.load();
+  }
+
+  setAgents() {}
+  observe() { return null; }
+  update(dtMs = 0) {
+    this.timeMs += dtMs;
+    this.events = [];
+    this.worldDirty = false;
+  }
+
+  async load() {
+    const archive = await this._fetchArchive();
+    const snap = archive.snapshot || archive;
+    const [W = 60, rawH = 40] = snap.config || [];
+    const rawSurface = DEFAULT_RAW_SURFACE;
+    const surface = 4;
+    const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid || [], W, rawH, rawSurface, surface);
+    this.archive = archive;
+    this.world = {
+      grid,
+      rawGrid: Uint32Array.from(snap.rawGrid || []),
+      W,
+      H,
+      rawH,
+      surface,
+      rawSurface,
+      yOffset,
+      model: 'digger',
+      seed: Number(snap.session?.[1] || archive.seed || 0),
+      crystals: [],
+      pockets: [],
+      diamondPos: null,
+      pois: [],
+      chests: [],
+      chestsAt: new Map(),
+      signals: null,
+      validation: { ok: true, warnings: [] },
+    };
+    this.session = snap.session || [];
+    this.config = snap.config || [W, rawH];
+    this.s.miners = (snap.agents || []).map((row) => snapshotMiner(row, surface, rawSurface, yOffset, snap.config || []));
+    this.match.shopX = this.s.miners[0]?.spawnX ?? Math.floor(W / 2);
+    this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
+    return this;
+  }
+
+  async _fetchArchive() {
+    if (this.archiveUrl) {
+      const url = this.archiveUrl.startsWith('/') && CHAIN.matchesUrl
+        ? `${String(CHAIN.matchesUrl).replace(/\/+$/, '')}${this.archiveUrl}`
+        : this.archiveUrl;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`archive fetch failed: ${response.status}`);
+      return response.json();
+    }
+    if (!this.archiveId) throw new Error('archive id is required');
+    if (!CHAIN.matchesUrl) throw new Error('VITE_MATCHES_URL is required to load archived worlds');
+    const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
+    const response = await fetch(`${base}/archives/${encodeURIComponent(this.archiveId)}`);
+    if (!response.ok) throw new Error(`archive fetch failed: ${response.status}`);
+    return response.json();
+  }
+
+  dispose() {}
 }
 
 // Read-only Vara.eth source (spectator). Built per vara-eth-skills:
@@ -548,6 +693,9 @@ export class ChainSource {
     const skin = skinFromAddress(event.owner);
     const x = normalizeEventNumber(event.x, 0);
     const y = normalizeEventNumber(event.y, this.world?.surface ?? 4);
+    const startingHp = Number(this.config?.[6] ?? 1);
+    const startingLadders = Number(this.config?.[7] ?? 0);
+    const backpackCapacity = Number(this.config?.[8] ?? 0);
     const created = {
       id: Number.isFinite(event.id) ? event.id : index,
       owner: event.owner,
@@ -558,11 +706,15 @@ export class ChainSource {
       drawY: y,
       facing: 'down',
       alive: true,
+      status: AGENT_STATUS.ACTIVE,
       act: null,
+      hp: startingHp,
       cargo: 0,
+      maxCargo: backpackCapacity,
+      backpackCapacity,
       inventory: [],
       banked: 0,
-      items: {},
+      items: { ladder: startingLadders },
       stats: makeEmptyStats(),
       respawnAtMs: null,
       spawnX: x,
@@ -570,7 +722,7 @@ export class ChainSource {
       hat: skin.hat,
       color: skin.bodyColor,
       radar: 2,
-      maxLadders: 10,
+      maxLadders: startingLadders,
     };
     this.s.miners.push(created);
     return created;
@@ -621,15 +773,24 @@ export class ChainSource {
     }
   }
 
-  _setRawTile(x, rawY, rawTile) {
+  _setRawTile(x, rawY, rawTile, opts = {}) {
     if (!this.world || !Number.isFinite(x) || !Number.isFinite(rawY) || rawTile == null) return;
+    const updateRaw = opts.raw !== false;
+    const updateVisual = opts.visual !== false;
     const W = this.world.W;
     const rawH = this.world.rawH ?? this.world.H;
     if (x < 0 || x >= W || rawY < 0 || rawY >= rawH) return;
 
-    if (this.world.rawGrid) this.world.rawGrid[rawY * W + x] = rawTile;
+    if (updateRaw && this.world.rawGrid) this.world.rawGrid[rawY * W + x] = rawTile;
+    if (!updateVisual) return;
 
     const y = this._visualY(rawY);
+    this._setVisualTile(x, y, rawTile);
+  }
+
+  _setVisualTile(x, y, rawTile) {
+    if (!this.world || !Number.isFinite(x) || !Number.isFinite(y) || rawTile == null) return;
+    const W = this.world.W;
     if (y < 0 || y >= this.world.H) return;
     const i = y * W + x;
     let next = renderTile(rawTile);
@@ -647,11 +808,36 @@ export class ChainSource {
     const toX = normalizeEventNumber(event.x, NaN);
     const toY = normalizeEventNumber(event.rawY, NaN);
     if (![fromX, fromY, toX, toY].every(Number.isFinite)) return;
-    this._setRawTile(fromX, fromY, 0);
-    this._setRawTile(toX, toY, 2);
+    if (fromX !== toX) {
+      this._setRawTile(fromX, fromY, 0);
+      this._setRawTile(toX, toY, 2);
+      return;
+    }
+
+    // The contract settles gravity instantly and emits only the confirmed
+    // from/to. Keep raw state final, but animate the visual grid so spectators
+    // still read the classic "wobble, then drop" rock behavior.
+    this._setRawTile(fromX, fromY, 0, { visual: false });
+    this._setRawTile(toX, toY, 2, { visual: false });
+    this._setVisualTile(fromX, this._visualY(fromY), 2);
+    this._setVisualTile(toX, this._visualY(toY), 0);
+
+    this.stones = this.stones.filter((stone) => !(stone.x === fromX && stone.rawFromY === fromY));
+    this.stones.push({
+      x: fromX,
+      rawFromY: fromY,
+      rawToY: toY,
+      y: this._visualY(fromY),
+      toY: this._visualY(toY),
+      phase: 'shake',
+      elapsed: 0,
+      stepElapsed: 0,
+    });
+    this.worldDirty = true;
   }
 
   _advanceAnimations(dtMs) {
+    this._advanceStoneAnimations(dtMs);
     for (const m of this.s.miners) {
       if (!m.act && m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
       const a = m.act;
@@ -669,6 +855,38 @@ export class ChainSource {
         }
         m.act = null;
         if (m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
+      }
+    }
+  }
+
+  _advanceStoneAnimations(dtMs) {
+    if (!this.stones?.length) return;
+    for (let i = this.stones.length - 1; i >= 0; i--) {
+      const stone = this.stones[i];
+      stone.elapsed += dtMs;
+      if (stone.phase === 'shake') {
+        if (stone.elapsed >= CHAIN_STONE_SHAKE_MS) {
+          stone.phase = 'fall';
+          stone.stepElapsed = CHAIN_STONE_STEP_MS;
+        } else {
+          this.worldDirty = true;
+          continue;
+        }
+      }
+
+      stone.stepElapsed += dtMs;
+      while (stone.phase === 'fall' && stone.stepElapsed >= CHAIN_STONE_STEP_MS) {
+        stone.stepElapsed -= CHAIN_STONE_STEP_MS;
+        if (stone.y >= stone.toY) {
+          this._setVisualTile(stone.x, stone.toY, 2);
+          this.stones.splice(i, 1);
+          this.worldDirty = true;
+          break;
+        }
+        this._setVisualTile(stone.x, stone.y, 0);
+        stone.y += 1;
+        this._setVisualTile(stone.x, stone.y, 2);
+        this.worldDirty = true;
       }
     }
   }
@@ -780,52 +998,11 @@ export class ChainSource {
   }
 
   _toMiner(row, surface, rawSurface, yOffset) {
-    // Current AgentOf layout observed on DiggerWorld:
-    //   [status/alive, x, y, facing, ladders, ..., spawnX, ...]
-    // The previous integration read [0],[1] as x/y, which mirrored agents into
-    // the left wall and made them appear inside solid cells.
-    const aliveRaw = Number(row.state[0] ?? 1);
-    const x = Number(row.state[1] ?? 0);
-    const rawY = Number(row.state[2] ?? rawSurface);
-    const facing = Number(row.state[3] ?? 0);
-    const y = rawToVisualY(rawY, surface, rawSurface, yOffset);
-    const cargo = resourceTotal({
-      scrst: row.inventory[0] ?? row.state[5],
-      bcrst: row.inventory[1] ?? row.state[6],
-      hcrst: row.inventory[2] ?? row.state[7],
-    });
-    const bankedResources = normalizeResourceTotals({
-      scrst: row.inventory[3] ?? row.state[8],
-      bcrst: row.inventory[4] ?? row.state[9],
-      hcrst: row.inventory[5] ?? row.state[10],
-    });
-    const skin = skinFromAddress(row.owner);
-    const spawnX = Number(row.state[11] ?? x);
-    return {
-      id: row.index,
-      owner: row.owner,
-      name: shortId(row.owner),
-      tx: x,
-      ty: y,
-      drawX: x,
-      drawY: y,
-      facing: ['up', 'right', 'down', 'left'][facing] || 'down',
-      alive: aliveRaw !== 0,
-      act: null,
-      cargo,
-      inventory: row.inventory,
-      banked: resourceTotal(bankedResources),
-      bankedResources,
-      items: {},
-      stats: makeEmptyStats(),
-      respawnAtMs: null,
-      spawnX: Number.isFinite(spawnX) ? spawnX : x,
-      spawnY: surface,
-      hat: skin.hat,
-      color: skin.bodyColor,
-      radar: 2,
-      maxLadders: 10,
-    };
+    // Contract AgentOf layout:
+    //   [status, x, y, hp, ladders_remaining, inv_scrst, inv_bcrst, inv_hcrst,
+    //    banked_scrst, banked_bcrst, banked_hcrst, backpack_capacity, action_seq]
+    const previous = this._lastAgents?.get(row.owner) || this.s?.miners?.find((m) => sameActor(m.owner, row.owner));
+    return snapshotMiner(row, surface, rawSurface, yOffset, this.config || [], previous);
   }
 
   async _refresh(opts = {}) {

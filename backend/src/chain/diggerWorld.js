@@ -211,13 +211,17 @@ export async function connectDiggerWorldChain(env) {
       surface: () => world.functions.Surface.encodePayload(),
       agents: () => world.queries.Agents.encodePayload(),
       session: () => world.queries.Session.encodePayload(),
+      config: () => world.queries.Config.encodePayload(),
       agentOf: (owner) => world.queries.AgentOf.encodePayload(owner),
+      inventoryOf: (owner) => world.queries.InventoryOf.encodePayload(owner),
       mapSnapshot: () => world.queries.MapSnapshot.encodePayload(),
     },
     decode: {
       agents: (payload) => world.queries.Agents.decodeResult(payload),
       session: (payload) => world.queries.Session.decodeResult(payload),
+      config: (payload) => world.queries.Config.decodeResult(payload),
       agentOf: (payload) => world.queries.AgentOf.decodeResult(payload),
+      inventoryOf: (payload) => world.queries.InventoryOf.decodeResult(payload),
       mapSnapshot: (payload) => world.queries.MapSnapshot.decodeResult(payload),
       // The reply of register/move/drill is the agent_view [status,x,y,…] — the
       // per-action result straight from the injected-tx receipt (no snapshot).

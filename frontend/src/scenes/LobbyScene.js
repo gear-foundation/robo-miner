@@ -130,10 +130,20 @@ export default class LobbyScene extends Phaser.Scene {
     if (CHAIN.matchesUrl) {
       try {
         const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
-        const data = await (await fetch(`${base}/worlds`)).json();
+        const data = await this.fetchDiscoverySessions(base);
         const isPast = (s) => s === 'finished' || s === 'retired' || s === 'archived';
-        const rec = (w) => ({ programId: w.programId, status: w.status, agents: w.agents, maxAgents: w.maxAgents });
-        const ws = (data?.worlds || []).filter((w) => w.programId);
+        const rec = (w) => ({
+          id: w.id,
+          programId: w.programId,
+          status: w.status,
+          agents: w.agents,
+          maxAgents: w.maxAgents,
+          archiveId: w.archiveId,
+          archiveUrl: w.archiveUrl,
+          seed: w.seed,
+          sessionId: w.sessionId,
+        });
+        const ws = data.sessions.filter((w) => w.programId);
         this.worlds.current = ws.filter((w) => !isPast(w.status)).map(rec);
         this.worlds.past = ws.filter((w) => isPast(w.status)).map(rec);
         this.renderGrid();
@@ -145,7 +155,17 @@ export default class LobbyScene extends Phaser.Scene {
     if (!backendEnabled()) return;
     try {
       const manifest = await fetchManifest();
-      const rec = (w) => ({ programId: w.programId, status: w.status, agents: w.agents, maxAgents: w.targetAgents });
+      const rec = (w) => ({
+        id: w.id,
+        programId: w.programId,
+        status: w.status,
+        agents: w.agents,
+        maxAgents: w.targetAgents,
+        archiveId: w.archiveId,
+        archiveUrl: w.archiveUrl,
+        seed: w.seed,
+        sessionId: w.sessionId,
+      });
       const active = (manifest?.active || []).filter((w) => w.programId).map(rec);
       if (active.length) this.worlds.current = active;
       this.worlds.past = (manifest?.past || []).filter((w) => w.programId).map(rec);
@@ -153,6 +173,14 @@ export default class LobbyScene extends Phaser.Scene {
     } catch (error) {
       console.warn('[backend] failed to load worlds', error);
     }
+  }
+
+  async fetchDiscoverySessions(base) {
+    const response = await fetch(`${base}/sessions`);
+    if (!response.ok) throw new Error(`discovery failed: ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data?.sessions)) throw new Error('discovery response has no sessions');
+    return data;
   }
 
   renderGrid() {
@@ -245,7 +273,10 @@ export default class LobbyScene extends Phaser.Scene {
     const watch = wireBtn(document.createElement('button'));
     watch.textContent = '▶  WATCH';
     watch.style.cssText = btnCss('#5fd0e6') + 'margin-top:8px;width:100%;font-size:16px;padding:10px';
-    watch.onclick = () => this.watchChain(programId);
+    watch.onclick = () => {
+      if (info.archiveId) this.watchArchive(info);
+      else this.watchChain(programId);
+    };
     body.appendChild(watch);
 
     card.appendChild(body);
@@ -260,6 +291,18 @@ export default class LobbyScene extends Phaser.Scene {
   watchChain(programId) {
     this.scale.off('resize', this.onResize, this);
     navigateTo(this, 'Spectator', { mode: 'chain-live', seed: 0, programId, backTo: 'Lobby' });
+  }
+
+  watchArchive(info) {
+    this.scale.off('resize', this.onResize, this);
+    navigateTo(this, 'Spectator', {
+      mode: 'chain-replay',
+      seed: Number(info.seed || 0) || 0,
+      programId: info.programId,
+      archiveId: info.archiveId,
+      archiveUrl: info.archiveUrl,
+      backTo: 'Lobby',
+    });
   }
 
   goMenu() {

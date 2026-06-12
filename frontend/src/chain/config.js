@@ -36,7 +36,7 @@ export const CHAIN = {
   resVmtProgramId: env.VITE_RES_VMT_PROGRAM_ID || '',
   redeemProgramId: env.VITE_REDEEM_PROGRAM_ID || '',
 
-  // Operator discovery feed (factory /worlds + /matches). When set, the lobby
+  // Operator discovery feed (factory /sessions + /matches). When set, the lobby
   // lists live worlds straight from the operator (current vs past + agent
   // counts), no colleague backend required. Takes precedence over backendUrl.
   matchesUrl: env.VITE_MATCHES_URL || '',

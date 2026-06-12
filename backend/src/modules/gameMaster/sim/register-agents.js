@@ -5,7 +5,7 @@
 // need no funds — the world program's executable balance pays.
 //
 //   node src/modules/gameMaster/sim/register-agents.js [worldProgramId] [count]
-// Defaults: first program in state/factory-programs.json, count 10.
+// Defaults: first program in <GAMEMASTER_STATE_DIR>/factory-programs.json, count 10.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,9 +16,15 @@ import { actorIdFromAddress, connectDiggerWorldChain } from '../../../chain/digg
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..');
 
+function stateFilePath(name) {
+  const stateDir = process.env.GAMEMASTER_STATE_DIR || 'state';
+  const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
+  return path.join(dir, name);
+}
+
 async function firstPoolProgram() {
   try {
-    const pool = JSON.parse(await readFile(path.resolve(ROOT, 'state/factory-programs.json'), 'utf8'));
+    const pool = JSON.parse(await readFile(stateFilePath('factory-programs.json'), 'utf8'));
     return pool.programs?.[0] || '';
   } catch {
     return '';
@@ -29,7 +35,7 @@ const env = loadChainEnv();
 const worldId = process.argv[2] || process.env.DIGGER_PROGRAM_ID || (await firstPoolProgram());
 const count = Number(process.argv[3] || 10);
 if (!worldId) {
-  console.error('no world program id (pass as arg, set DIGGER_PROGRAM_ID, or have state/factory-programs.json)');
+  console.error('no world program id (pass as arg, set DIGGER_PROGRAM_ID, or have <GAMEMASTER_STATE_DIR>/factory-programs.json)');
   process.exit(1);
 }
 

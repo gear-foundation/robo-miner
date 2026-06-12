@@ -10,6 +10,7 @@ export const WORLD = {
   ACTIVE: 'active', // session running, ~30 min timer
   FINISHED: 'finished', // session ended, awaiting recycle/retire
   RETIRED: 'retired', // program released, not reused
+  ARCHIVED: 'archived', // frozen snapshot of a completed session
 };
 
 let counter = 0;
@@ -30,6 +31,9 @@ export function newWorld(now) {
     lastJoinAt: null,
     startedAt: null,
     finishedAt: null,
+    archivedAt: null,
+    archiveId: null,
+    archiveUrl: null,
     eligibleManualStart: false,
     startReason: null,
   };
@@ -79,5 +83,8 @@ export function worldView(world, cfg) {
     openedAt: world.openedAt,
     startedAt: world.startedAt,
     finishedAt: world.finishedAt,
+    archivedAt: world.archivedAt ?? null,
+    archiveId: world.archiveId ?? null,
+    archiveUrl: world.archiveUrl ?? null,
   };
 }

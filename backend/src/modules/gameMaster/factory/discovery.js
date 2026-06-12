@@ -4,7 +4,7 @@
 // agent integration is the same whether we're testing or live.
 //
 //   GET /matches  → open, joinable matches + how-to-register block (the main feed)
-//   GET /worlds   → every world incl. finished/archived (CURRENT + PAST)
+//   GET /sessions → every live/archive session (CURRENT + PAST)
 //   GET /health   → liveness + counts
 //
 // An agent: poll /matches → pick one with slotsFree > 0 → send an injected
@@ -14,9 +14,10 @@ import http from 'node:http';
 
 const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
 
-export function createDiscoveryServer({ factory, env = {}, cfg, port = 8780, log = console.log }) {
-  const matchRecord = (w) => ({
+export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
+  const sessionRecord = (w) => ({
     id: w.id,
+    sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
     programId: w.programId,
     status: w.status, // open | active | finished | …
     joinable: w.status === 'open' && (w.agents ?? 0) < (w.capAgents ?? 0),
@@ -26,9 +27,14 @@ export function createDiscoveryServer({ factory, env = {}, cfg, port = 8780, log
     slotsFree: Math.max(0, (w.capAgents ?? 0) - (w.agents ?? 0)),
     owners: w.owners || [], // real participants already registered
     seed: w.seed,
+    mapHash: w.mapHash || null,
     sessionId: w.sessionId,
     startsAt: w.startedAt || null,
     endsAt: w.startedAt ? w.startedAt + cfg.sessionMs : null,
+    finishedAt: w.finishedAt || null,
+    archivedAt: w.archivedAt || null,
+    archiveId: w.archiveId || null,
+    archiveUrl: w.archiveUrl || (w.archiveId ? `/archives/${encodeURIComponent(w.archiveId)}` : null),
   });
 
   const registerInfo = () => ({
@@ -53,18 +59,39 @@ export function createDiscoveryServer({ factory, env = {}, cfg, port = 8780, log
     res.end(JSON.stringify(body, null, 2));
   };
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     const url = (req.url || '/').split('?')[0].replace(/\/$/, '') || '/matches';
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      });
+      res.end();
+      return;
+    }
     const all = factory.snapshot();
     if (url === '/matches' || url === '/') {
       const open = all.filter((w) => w.status === 'open');
-      json(res, 200, { updatedAt: new Date().toISOString(), register: registerInfo(), matches: open.map(matchRecord) });
-    } else if (url === '/worlds') {
-      json(res, 200, { updatedAt: new Date().toISOString(), worlds: all.map(matchRecord) });
+      json(res, 200, { updatedAt: new Date().toISOString(), register: registerInfo(), matches: open.map(sessionRecord) });
+    } else if (url === '/sessions') {
+      const sessions = all.map(sessionRecord);
+      json(res, 200, { updatedAt: new Date().toISOString(), sessions });
+    } else if (url.startsWith('/archives/')) {
+      if (!archives) {
+        json(res, 404, { error: 'archive store is not configured' });
+        return;
+      }
+      const archiveId = decodeURIComponent(url.slice('/archives/'.length));
+      try {
+        json(res, 200, await archives.read(archiveId));
+      } catch (error) {
+        json(res, 404, { error: 'archive not found', archiveId, message: error?.message || String(error) });
+      }
     } else if (url === '/health') {
       json(res, 200, { ok: true, worlds: all.length, open: all.filter((w) => w.status === 'open').length });
     } else {
-      json(res, 404, { error: 'not found', endpoints: ['/matches', '/worlds', '/health'] });
+      json(res, 404, { error: 'not found', endpoints: ['/matches', '/sessions', '/archives/:id', '/health'] });
     }
   });
 

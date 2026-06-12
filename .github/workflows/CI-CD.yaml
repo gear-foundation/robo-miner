@@ -1,0 +1,75 @@
+name: Build and Deploy Robo Miner
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '.github/**'
+      - '**.md'
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      env:
+        type: choice
+        description: Target environment
+        required: false
+        options:
+          - dev
+          - stg
+          - prod
+      deploy_frontend:
+        type: boolean
+        description: Deploy frontend
+        default: true
+      deploy_backend:
+        type: boolean
+        description: Deploy backend
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  actions: write
+  id-token: write
+
+jobs:
+  deploy_frontend:
+    uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
+    with:
+      argocd_server: ${{ vars.ARGOCD_SERVER }}
+      vault_server: ${{ vars.VAULT_SERVER }}
+      env: ${{ inputs.env }}
+      app: robo-miner
+      component: frontend
+      dockerfile: frontend/Dockerfile
+      context: frontend
+      paths_filter: |
+        frontend/**
+    secrets:
+      WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
+      ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}
+
+  deploy_backend:
+    uses: gear-ops/actions/.github/workflows/build-deploy.yaml@main
+    with:
+      argocd_server: ${{ vars.ARGOCD_SERVER }}
+      vault_server: ${{ vars.VAULT_SERVER }}
+      env: ${{ inputs.env }}
+      app: robo-miner
+      component: indexer
+      extra_components: |
+        api
+        factory
+        scheduler
+      dockerfile: backend/Dockerfile
+      context: .
+      paths_filter: |
+        backend/**
+        frontend/src/**
+    secrets:
+      WORKLOADS_REPO_TOKEN: ${{ secrets.WORKLOADS_REPO_TOKEN }}
+      ARGOCD_TOKEN:         ${{ secrets.ARGOCD_TOKEN }}

@@ -146,6 +146,22 @@ export function pickRandomHat() {
   return weighted[Math.floor(Math.random() * weighted.length)];
 }
 
+// Deterministic cosmetic skin from an agent address. This keeps live arena
+// robots visually distinct without needing extra on-chain metadata.
+export function skinFromAddress(address) {
+  const s = String(address || '').toLowerCase();
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  const hats = ['hardhat', 'pirate', 'party', 'top', 'cap', 'crown', 'beanie', 'horns'];
+  return {
+    bodyColor: BODY_COLOR_IDS[h % BODY_COLOR_IDS.length],
+    hat: hats[(h >>> 17) % hats.length],
+  };
+}
+
 export function drawRobot(g, cx, cy, size, opts = {}) {
   const {
     facing = 'right',

@@ -30,6 +30,7 @@ import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
 import { CHAIN, chainReady } from './config.js';
 import { decodeWorldEvent, worldQueries, worldActions } from './world.js';
+import { skinFromAddress } from '../render/robot.js';
 
 // Pick the data source. Local engine today; the chain source once a World
 // contract is deployed and .env is filled (CHAIN.enabled + ids).
@@ -106,25 +107,8 @@ function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
     }
   }
 
-  // The contract snapshot is logical game state. The spectator adds the same
-  // visual shell the local worlds have: sky above the playable surface and an
-  // unbreakable-looking stone frame around the mine. The current contract has
-  // rawSurface=1, while the show view uses surface=4, so raw underground rows
-  // are shifted down instead of overwritten by the decorative sky band.
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = y * W + x;
-      if (y < surface) {
-        grid[i] = BLOCK.SKY;
-        continue;
-      }
-      if (x === 0 || x === W - 1 || y === H - 1) {
-        grid[i] = BLOCK.STONE;
-        continue;
-      }
-    }
-  }
-
+  // Render the contract tiles as-is. The spectator draws its decorative stone
+  // frame outside the contract grid, so it never hides live dug cells.
   return { grid, H, yOffset };
 }
 
@@ -175,6 +159,7 @@ export class ChainSource {
     this._seenEventKeys = new Set();
     this._lastGrid = null;
     this._lastAgents = new Map();
+    this._outcomeUnavailableNotified = false;
     this.ready = this._boot();
   }
 
@@ -244,6 +229,20 @@ export class ChainSource {
   // polling remains a slower safety net for rehydrate / missed blocks.
   async subscribe() {
     this._unsub = null;
+    if (CHAIN.streamUrl) {
+      const url = `${CHAIN.streamUrl.replace(/\/$/, '')}/events`;
+      this._stream = new EventSource(url);
+      this._stream.onmessage = (e) => {
+        try {
+          const ev = JSON.parse(e.data);
+          if (ev && ev.type && ev.type !== 'hello') this._applyChainEvent(ev);
+        } catch {
+          // Ignore keep-alives / malformed development stream messages.
+        }
+      };
+      this._stream.onerror = () => { /* EventSource auto-reconnects */ };
+      return;
+    }
     await this._primeEventCursor();
   }
 
@@ -253,20 +252,22 @@ export class ChainSource {
     this.timeMs += dtMs;
     this._advanceAnimations(dtMs);
 
-    this._eventPollInMs -= dtMs;
-    if (this._eventPollInMs <= 0 && !this._draining) {
-      this._eventPollInMs = this._eventPollEveryMs;
-      this._drainNewBlocks().catch((error) => {
-        this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-      });
-    }
+    if (!this._stream) {
+      this._eventPollInMs -= dtMs;
+      if (this._eventPollInMs <= 0 && !this._draining) {
+        this._eventPollInMs = this._eventPollEveryMs;
+        this._drainNewBlocks().catch((error) => {
+          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+        });
+      }
 
-    this._snapshotInMs -= dtMs;
-    if (this._snapshotInMs <= 0 && !this._polling) {
-      this._snapshotInMs = this._snapshotEveryMs;
-      this._refresh({ emitEvents: false }).catch((error) => {
-        this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-      });
+      this._snapshotInMs -= dtMs;
+      if (this._snapshotInMs <= 0 && !this._polling) {
+        this._snapshotInMs = this._snapshotEveryMs;
+        this._refresh({ emitEvents: false }).catch((error) => {
+          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+        });
+      }
     }
     this.events = this._pending.splice(0);
     if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'map_generated'].includes(e.type))) {
@@ -299,6 +300,20 @@ export class ChainSource {
     try {
       const latest = await this._api.query.block.header();
       if (!latest?.hash || latest.hash === this._lastBlockHash) return;
+
+      if (typeof this._api?.query?.block?.outcome !== 'function') {
+        if (!this._outcomeUnavailableNotified) {
+          this._pending.push({
+            type: 'chain_events_unavailable',
+            message: 'block outcome RPC is unavailable; using snapshot diff fallback',
+          });
+          this._outcomeUnavailableNotified = true;
+        }
+        await this._refresh({ emitEvents: true });
+        this._lastBlockHash = latest.hash;
+        this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
+        return;
+      }
 
       const chain = [];
       let cursor = latest;
@@ -350,14 +365,15 @@ export class ChainSource {
 
   _decodeSailsEvent(payload) {
     if (!payload) return null;
-    const bytes = Array.isArray(payload) ? Uint8Array.from(payload) : payload;
-    for (const decoder of this._eventDecoders) {
-      try {
-        const event = decoder.decode(bytes);
-        if (event) return { ...event, chainEvent: decoder.name };
-      } catch {
-        // Payloads are matched by trying each Sails event header.
+    const hex = typeof payload === 'string' ? payload : `0x${Buffer.from(payload).toString('hex')}`;
+    try {
+      const decoded = this._program.decodeEvent(hex);
+      if (decoded?.kind === 'event' && decoded.entry?.kind === 'event') {
+        const mapped = decodeWorldEvent(decoded.entry.event, decoded.data);
+        if (mapped) return { ...mapped, chainEvent: decoded.entry.event };
       }
+    } catch {
+      // payload is not a decodable program event
     }
     return null;
   }
@@ -406,13 +422,19 @@ export class ChainSource {
         miner.spawnY = this.world?.surface ?? event.y;
         break;
       case 'moved':
-        this._moveMiner(miner, event);
+        this._enqueueAct(miner, {
+          kind: 'move',
+          fromX: Number.isFinite(event.fromX) ? event.fromX : undefined,
+          fromY: Number.isFinite(event.fromY) ? event.fromY : undefined,
+          tx: event.x,
+          ty: event.y,
+        });
         break;
       case 'dug':
         this._setRawTile(event.x, event.rawY, event.rawNewBlock ?? 0);
         if (miner) {
           miner.stats.tilesDug += 1;
-          miner.act = { kind: 'dig', tx: event.x, ty: event.y, blockType: event.block, t: 0, dur: CHAIN_DIG_PULSE_MS };
+          this._enqueueAct(miner, { kind: 'dig', tx: event.x, ty: event.y, blockType: event.block });
         }
         break;
       case 'resource_extracted':
@@ -444,6 +466,9 @@ export class ChainSource {
           miner.mintedResources = normalizeResourceTotals(event.minted);
         }
         break;
+      case 'stone_moved':
+        this._moveRawStone(event);
+        break;
       case 'death':
         if (miner) {
           this._placeMiner(miner, event.x, event.y, { alive: false });
@@ -456,6 +481,7 @@ export class ChainSource {
           miner.alive = false;
           miner.exited = true;
           miner.act = null;
+          miner.actQueue = [];
           miner.respawnAtMs = null;
         }
         break;
@@ -519,7 +545,7 @@ export class ChainSource {
     if (miner || !opts.create) return miner || null;
 
     const index = this.s.miners.length;
-    const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][index % 5];
+    const skin = skinFromAddress(event.owner);
     const x = normalizeEventNumber(event.x, 0);
     const y = normalizeEventNumber(event.y, this.world?.surface ?? 4);
     const created = {
@@ -541,8 +567,8 @@ export class ChainSource {
       respawnAtMs: null,
       spawnX: x,
       spawnY: this.world?.surface ?? y,
-      hat: index % 3 === 0 ? 'cap' : index % 3 === 1 ? 'visor' : 'antenna',
-      color,
+      hat: skin.hat,
+      color: skin.bodyColor,
       radar: 2,
       maxLadders: 10,
     };
@@ -557,6 +583,7 @@ export class ChainSource {
     miner.drawX = x;
     miner.drawY = y;
     miner.act = null;
+    miner.actQueue = [];
     if ('alive' in opts) miner.alive = opts.alive;
     if (opts.alive) {
       miner.exited = false;
@@ -564,24 +591,34 @@ export class ChainSource {
     }
   }
 
-  _moveMiner(miner, event) {
+  _enqueueAct(miner, act) {
     if (!miner) return;
-    const fromX = Number.isFinite(event.fromX) ? event.fromX : miner.tx;
-    const fromY = Number.isFinite(event.fromY) ? event.fromY : miner.ty;
-    const toX = Number.isFinite(event.x) ? event.x : fromX;
-    const toY = Number.isFinite(event.y) ? event.y : fromY;
-    if (toX < fromX) miner.facing = 'left';
-    else if (toX > fromX) miner.facing = 'right';
-    else if (toY < fromY) miner.facing = 'up';
-    else if (toY > fromY) miner.facing = 'down';
-    miner.tx = toX;
-    miner.ty = toY;
-    miner.drawX = fromX;
-    miner.drawY = fromY;
-    miner.alive = true;
-    miner.exited = false;
-    miner.respawnAtMs = null;
-    miner.act = { kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_MOVE_MS };
+    if (!miner.actQueue) miner.actQueue = [];
+    miner.actQueue.push(act);
+  }
+
+  _startAct(miner, act) {
+    if (!miner) return;
+    if (act.kind === 'move') {
+      const fromX = Number.isFinite(act.fromX) ? act.fromX : miner.tx;
+      const fromY = Number.isFinite(act.fromY) ? act.fromY : miner.ty;
+      const toX = Number.isFinite(act.tx) ? act.tx : fromX;
+      const toY = Number.isFinite(act.ty) ? act.ty : fromY;
+      if (toX < fromX) miner.facing = 'left';
+      else if (toX > fromX) miner.facing = 'right';
+      else if (toY < fromY) miner.facing = 'up';
+      else if (toY > fromY) miner.facing = 'down';
+      miner.tx = toX;
+      miner.ty = toY;
+      miner.drawX = fromX;
+      miner.drawY = fromY;
+      miner.alive = true;
+      miner.exited = false;
+      miner.respawnAtMs = null;
+      miner.act = { kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_MOVE_MS };
+    } else if (act.kind === 'dig') {
+      miner.act = { kind: 'dig', tx: act.tx, ty: act.ty, blockType: act.blockType, t: 0, dur: CHAIN_DIG_PULSE_MS };
+    }
   }
 
   _setRawTile(x, rawY, rawTile) {
@@ -597,15 +634,26 @@ export class ChainSource {
     const i = y * W + x;
     let next = renderTile(rawTile);
     if (y < this.world.surface) next = BLOCK.SKY;
-    else if (x === 0 || x === W - 1 || y === this.world.H - 1) next = BLOCK.STONE;
     if (this.world.grid[i] !== next) {
       this.world.grid[i] = next;
       this.worldDirty = true;
     }
   }
 
+  _moveRawStone(event) {
+    if (!this.world) return;
+    const fromX = normalizeEventNumber(event.fromX, NaN);
+    const fromY = normalizeEventNumber(event.rawFromY, NaN);
+    const toX = normalizeEventNumber(event.x, NaN);
+    const toY = normalizeEventNumber(event.rawY, NaN);
+    if (![fromX, fromY, toX, toY].every(Number.isFinite)) return;
+    this._setRawTile(fromX, fromY, 0);
+    this._setRawTile(toX, toY, 2);
+  }
+
   _advanceAnimations(dtMs) {
     for (const m of this.s.miners) {
+      if (!m.act && m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
       const a = m.act;
       if (!a) continue;
       a.t += dtMs;
@@ -620,6 +668,7 @@ export class ChainSource {
           m.drawY = a.ty;
         }
         m.act = null;
+        if (m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
       }
     }
   }
@@ -653,8 +702,18 @@ export class ChainSource {
         validation: { ok: true, warnings: [] },
       };
     } else {
+      let gridChanged = this.world.grid.length !== grid.length;
+      if (!gridChanged) {
+        for (let i = 0; i < grid.length; i += 1) {
+          if (this.world.grid[i] !== grid[i]) {
+            gridChanged = true;
+            break;
+          }
+        }
+      }
       this._emitGridDiffs(this.world.grid, grid, W, emitEvents);
       this.world.grid = grid;
+      if (gridChanged) this.worldDirty = true;
       this.world.rawGrid = Uint32Array.from(snap.rawGrid);
       this.world.W = W;
       this.world.H = H;
@@ -740,7 +799,7 @@ export class ChainSource {
       bcrst: row.inventory[4] ?? row.state[9],
       hcrst: row.inventory[5] ?? row.state[10],
     });
-    const color = [0x5fd0e6, 0x7cffb0, 0xffdd55, 0xff8fdc, 0xb08cff][row.index % 5];
+    const skin = skinFromAddress(row.owner);
     const spawnX = Number(row.state[11] ?? x);
     return {
       id: row.index,
@@ -762,8 +821,8 @@ export class ChainSource {
       respawnAtMs: null,
       spawnX: Number.isFinite(spawnX) ? spawnX : x,
       spawnY: surface,
-      hat: row.index % 3 === 0 ? 'cap' : row.index % 3 === 1 ? 'visor' : 'antenna',
-      color,
+      hat: skin.hat,
+      color: skin.bodyColor,
       radar: 2,
       maxLadders: 10,
     };
@@ -781,6 +840,7 @@ export class ChainSource {
 
   dispose() {
     if (this._unsub) this._unsub();
+    this._stream?.close?.();
     this._api?.provider?.disconnect?.();
   }
 }

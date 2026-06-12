@@ -5,7 +5,7 @@
 // from world.idl — NEVER hand-encoded (per vara-eth-skills ts-api playbook).
 //
 // Program: DiggerWorld   ctor Create()
-//   service World@0x3126e7ea14da7d8f  — the spatial game
+//   service World@0xc947eba8a499d9a7  — the spatial game
 //   service Admin@0x5acb75662050b164  — session/map lifecycle
 //
 // NOTE — this World program is LEAN: the only agent actions are register / move /
@@ -86,6 +86,7 @@ export function adminActions(program) {
 //   LadderPlaced(u64,[u8;32],u32,u32,u32)         → session,owner, x,y, laddersRemaining
 //   ResourceExtracted(u64,[u8;32],u32,u32,u32,u32)→ session,owner, x,y, kind, carriedTotal
 //   ResourcesMinted(u64,[u8;32],u32,u32,u32)      → session,owner, minted SCRST/BCRST/HCRST
+//   StoneMoved(u64,[u8;32],u32,u32,u32,u32)       → session,owner, fromX,fromY, x,y
 //   TileDrilled(u64,[u8;32],u32,u32,u32,u32)      → session,owner, x,y, oldTile, newTile
 export const WORLD_EVENTS = {
   AgentRegistered:   (a) => ({ type: 'registered', sessionId: Number(a[0]), owner: a[1] }),
@@ -99,6 +100,7 @@ export const WORLD_EVENTS = {
   AgentDied:         (a) => ({ type: 'death',       sessionId: Number(a[0]), owner: a[1], x: a[2], y: a[3], cause: a[4] }),
   AgentExited:       (a) => ({ type: 'exited',      sessionId: Number(a[0]), owner: a[1] }),
   ResourcesMinted:   (a) => ({ type: 'resources_minted', sessionId: Number(a[0]), owner: a[1], minted: { scrst: a[2], bcrst: a[3], hcrst: a[4] } }),
+  StoneMoved:        (a) => ({ type: 'stone_moved', sessionId: Number(a[0]), owner: a[1], fromX: a[2], fromY: a[3], x: a[4], y: a[5] }),
 };
 
 export const ADMIN_EVENTS = {

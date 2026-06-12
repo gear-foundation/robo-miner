@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadChainEnv } from '../factory/config.js';
-import { connectChain, actorIdFromAddress } from '../chain/client.js';
+import { actorIdFromAddress, connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..');
@@ -36,7 +36,7 @@ if (!worldId) {
 const { keccak256, stringToBytes } = await import('viem');
 const { privateKeyToAccount } = await import('viem/accounts');
 
-const admin = await connectChain(env);
+const admin = await connectDiggerWorldChain(env);
 
 async function agentCount() {
   const reply = await admin.query(worldId, admin.encode.agents());
@@ -57,7 +57,7 @@ for (let i = 0; i < count; i += 1) {
   const owner = actorIdFromAddress(account.address);
   let agent = null;
   try {
-    agent = await connectChain({ ...env, adminKey: key });
+    agent = await connectDiggerWorldChain({ ...env, adminKey: key });
     await agent.sendInjected(worldId, agent.encode.register(owner));
     console.log(`[sim] agent ${i + 1}/${count} ${account.address} → registered`);
   } catch (error) {

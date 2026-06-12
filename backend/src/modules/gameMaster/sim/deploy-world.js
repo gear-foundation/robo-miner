@@ -4,12 +4,12 @@
 //   node src/modules/gameMaster/sim/deploy-world.js
 // After: put the printed id in frontend/.env VITE_WORLD_PROGRAM_IDS + state/factory-programs.json.
 
-import { connectChain } from '../chain/client.js';
+import { connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 import { loadChainEnv } from '../factory/config.js';
 import { generateMap, randomSeed, gridHash } from '../genmap.js';
 
 const env = loadChainEnv();
-const c = await connectChain(env);
+const c = await connectDiggerWorldChain(env);
 
 console.log('[deploy] validating code (rebuilt wasm) — may take a few minutes…');
 const codeId = await c.ensureCodeValidated();

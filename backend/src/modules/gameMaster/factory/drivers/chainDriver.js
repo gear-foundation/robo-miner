@@ -26,8 +26,8 @@ const ROOT = path.resolve(__dirname, '../../../../../..'); // backend/src/module
 const SESSION_ACTIVE = 1;
 
 export async function createChainDriver({ env, log = console.log, reservedProgramIds = [] }) {
-  const { connectChain } = await import('../../chain/client.js');
-  const chain = await connectChain(env);
+  const { connectDiggerWorldChain } = await import('../../../../chain/diggerWorld.js');
+  const chain = await connectDiggerWorldChain(env);
 
   // Keeps each live world's executable balance funded so injected actions never
   // start failing mid-session (the world would otherwise silently stall).

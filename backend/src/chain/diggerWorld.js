@@ -11,10 +11,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_IDL = path.join(__dirname, 'world.idl');
+const DEFAULT_IDL = path.join(__dirname, 'diggerWorld.idl');
 const DEFAULT_WASM = path.resolve(
   __dirname,
-  '../../../../../contracts/target/wasm32-gear/release/digger_world.opt.wasm',
+  '../../../contracts/target/wasm32-gear/release/digger_world.opt.wasm',
 );
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,7 +42,7 @@ async function waitForInjectedReply(injected) {
   throw new Error('injected transaction has no receipt/promise waiter');
 }
 
-export async function connectChain(env) {
+export async function connectDiggerWorldChain(env) {
   const { WsVaraEthProvider, HttpVaraEthProvider, createVaraEthApi, getMirrorClient, CodeState } =
     await import('@vara-eth/api');
   const { walletClientToSigner } = await import('@vara-eth/api/signer');

@@ -12,7 +12,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadChainEnv } from '../factory/config.js';
-import { connectChain } from '../chain/client.js';
+import { connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..');
@@ -49,7 +49,7 @@ const agents = [];
 for (let i = 0; i < agentCount; i += 1) {
   const key = keccak256(stringToBytes(`digger-agent:${world}:${i}`));
   const account = privateKeyToAccount(key);
-  const conn = await connectChain({ ...env, adminKey: key });
+  const conn = await connectDiggerWorldChain({ ...env, adminKey: key });
   agents.push({ i, address: account.address, conn });
 }
 const session = agents[0].conn.decode.session((await agents[0].conn.query(world, agents[0].conn.encode.session())).payload);

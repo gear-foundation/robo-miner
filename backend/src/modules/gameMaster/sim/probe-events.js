@@ -6,7 +6,7 @@
 //   node src/modules/gameMaster/sim/probe-events.js <worldProgramId>
 
 import { loadChainEnv } from '../factory/config.js';
-import { connectChain, actorIdFromAddress } from '../chain/client.js';
+import { actorIdFromAddress, connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const env = loadChainEnv();
@@ -17,7 +17,7 @@ const { keccak256, stringToBytes } = await import('viem');
 const { privateKeyToAccount } = await import('viem/accounts');
 const key = keccak256(stringToBytes(`probe-agent:${world}:${Math.floor(Math.random() * 1e9)}`));
 const owner = actorIdFromAddress(privateKeyToAccount(key).address);
-const c = await connectChain({ ...env, adminKey: key });
+const c = await connectDiggerWorldChain({ ...env, adminKey: key });
 
 async function header(hash) {
   const resp = await c.provider.send('block_header', hash ? [hash] : [], { timeout: 15000 });

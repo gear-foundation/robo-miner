@@ -8,7 +8,7 @@
 
 import http from 'node:http';
 import { loadChainEnv } from '../factory/config.js';
-import { connectChain, actorIdFromAddress } from '../chain/client.js';
+import { actorIdFromAddress, connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 import { decideAction, agentFromView, carried, TILE, MAP_WIDTH } from './agent-brain.js';
 
 const env = loadChainEnv();
@@ -57,7 +57,7 @@ const agents = [];
 for (let i = 0; i < agentCount; i += 1) {
   const key = keccak256(stringToBytes(`digger-agent:${world}:${i}`));
   const account = privateKeyToAccount(key);
-  const conn = await connectChain({ ...env, adminKey: key });
+  const conn = await connectDiggerWorldChain({ ...env, adminKey: key });
   const owner = actorIdFromAddress(account.address);
   const agent = agentFromView(conn.decode.agentOf((await conn.query(world, conn.encode.agentOf(owner))).payload));
   agents.push({ i, owner, conn, agent, state: { mode: 'mine' } });

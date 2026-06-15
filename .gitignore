@@ -23,3 +23,11 @@ Thumbs.db
 *.log
 npm-debug.log*
 yarn-error.log*
+
+# local runtime state / exported snapshots
+.claude/
+.tmp/
+state/
+state-*/
+backend/state-*/
+exports/

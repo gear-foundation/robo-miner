@@ -4,7 +4,7 @@ description: "Use when an autonomous external agent needs to join and play Robo 
 license: MIT
 metadata:
   author: web3-miner
-  version: "0.2.0"
+  version: "0.2.1"
 ---
 
 # Robo Miner Agent
@@ -55,7 +55,7 @@ Use these public URLs:
 
 ```txt
 Game UI:            https://digger-eth.vara.network
-Match discovery API: https://matches-digger-eth.vara.network
+Match discovery API: https://api-digger-eth.vara.network
 Registry API:        https://api-digger-eth.vara.network
 ```
 
@@ -64,6 +64,9 @@ Registry API:        https://api-digger-eth.vara.network
 - Use the Game UI to visually inspect live matches and confirm behavior.
 - Use direct world links from match `programId` when needed: `https://digger-eth.vara.network/world/<programId>`.
 - Do not assume `localhost` endpoints unless explicitly testing a local development setup.
+- Treat `https://matches-digger-eth.vara.network` as a legacy alias only when
+  the operator explicitly provides it and its `/sessions` output matches the
+  registry worlds.
 
 ## Runtime Tools
 
@@ -80,9 +83,57 @@ For blockchain I/O, use your runtime's Vara.eth tooling. Before playing, make su
 If your agent environment supports skills, enable these companion skills for network mechanics:
 
 - `vara-eth-injected-app-builder`: Vara.eth injected transactions, router/RPC/WS wiring, Sails payloads, confirmed replies, and state reads.
-- `vara-wallet`: wallet and on-chain interaction patterns.
+- `vara-wallet`: wallet creation/import, signing, Sails calls, monitoring, and on-chain interaction patterns.
 
 Keep transaction encoding, nonce handling, confirmation waiting, and state reads deterministic. Use this file to decide which game action to take from confirmed state.
+
+## Wallet Skill And CLI
+
+The player agent should use the companion `vara-wallet` skill when it needs
+wallet lifecycle, signing, Sails calls, or direct chain diagnostics. That skill
+comes from the Vara skills pack (`gear-foundation/vara-skills`,
+`skills/vara-wallet/SKILL.md`). If the runtime cannot load companion skills,
+use the CLI directly from `gear-foundation/vara-wallet` / npm package
+`vara-wallet`.
+
+Install or locate the CLI:
+
+```bash
+if command -v vara-wallet >/dev/null 2>&1; then
+  VW=vara-wallet
+else
+  npm install -g vara-wallet
+  VW=vara-wallet
+fi
+$VW --version
+```
+
+Create or load a durable local player wallet:
+
+```bash
+$VW wallet list
+$VW wallet create --name robo-miner-agent
+$VW wallet default robo-miner-agent
+```
+
+Use `wallet import` only for a local secret file or runtime secret store. Never
+ask the user to paste a private key or mnemonic into chat. Keep this wallet as
+the player identity across matches unless the user/test policy asks for fresh
+identities.
+
+Player agents may use `vara-wallet` for:
+
+- wallet create/import/list/default;
+- signing/verifying local data;
+- read-only queries such as `World/Session`, `World/Agents`, `World/AgentOf`,
+  `World/MapSnapshot`;
+- player-facing calls such as `World/Register`, `World/MoveAgent`,
+  `World/Drill`, `World/PlaceLadder`, `World/Surface`;
+- event/message watching for diagnostics.
+
+Player agents must not use it for admin/operator flows: no program deployment,
+world reset/upload/start/finish, executable-balance top-up, treasury, factory, or
+keeper actions.
 
 ## State Machine
 
@@ -116,7 +167,7 @@ The agent may keep a short in-memory plan, but the confirmed chain state is alwa
 Current deployed match discovery API base:
 
 ```txt
-https://matches-digger-eth.vara.network/
+https://api-digger-eth.vara.network/
 ```
 
 Discovery endpoints exposed by the game operator:
@@ -130,7 +181,9 @@ GET <API_BASE>/archives/<archiveId>
 
 `/` is equivalent to `/matches`. `/matches` returns open joinable worlds. Pick a match where `joinable=true` and `slotsFree>0`.
 
-Do not use `https://api-digger-eth.vara.network/matches` for match discovery. That domain is the registry API; match discovery lives at `https://matches-digger-eth.vara.network/matches`.
+Use `https://api-digger-eth.vara.network/matches` unless the operator gives a
+different discovery base. If a `matches-*` host is provided, verify `/sessions`
+contains the same live world program ids as the registry before using it.
 
 Important fields:
 

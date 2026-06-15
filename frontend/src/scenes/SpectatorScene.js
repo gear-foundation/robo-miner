@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TILE, BLOCK, BLOCK_DATA, SURFACE_Y } from '../config.js';
+import { getBlock } from '../world.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
@@ -15,6 +16,8 @@ import { navigateBack } from '../router.js';
 // real durations with smooth interpolation; the agent is polled when its
 // character goes idle. Free-scroll camera; a speed control scales real time.
 const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse animation)
+const CHUNK_TILES = 8;
+const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
 
 function formatClock(ms) {
   if (!Number.isFinite(ms)) return 'waiting';
@@ -164,7 +167,15 @@ export default class SpectatorScene extends GameScene {
     cam.setRoundPixels(true);
     cam.setZoom(1);
     cam.centerOn(this.rt.match.shopX * TILE, (this.world.surface + 7) * TILE);
-    this.fullWorldRender = true;
+    const requestedRenderMode = String(CHAIN.renderMode || 'chunks').toLowerCase();
+    this.worldRenderMode = RENDER_MODES.has(requestedRenderMode) ? requestedRenderMode : 'chunks';
+    this.fullWorldRender = this.worldRenderMode === 'full';
+    this.worldRenderPadPx = this.worldRenderMode === 'viewport' ? TILE * 12 : 0;
+    this.forceProceduralTiles = this.worldRenderMode === 'chunks';
+    this._chunks = null;
+    this._dirtyChunks = null;
+    this._lastChunkGrid = null;
+    this._frameDrawSignature = null;
 
     this.setupCameraControls();
     this.statsTimer = 0;
@@ -182,6 +193,193 @@ export default class SpectatorScene extends GameScene {
       : null;
     this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound].filter(Boolean);
     this.scale.on('resize', this.onSpecResize, this);
+  }
+
+  drawVisualFrame() {
+    const world = this.world;
+    if (!world) return;
+    const signature = `${world.W}:${world.H}:${world.surface}:${world.model}`;
+    if (this._frameDrawSignature === signature) return;
+    this._frameDrawSignature = signature;
+    super.drawVisualFrame();
+  }
+
+  drawWorld() {
+    if (this.worldRenderMode !== 'chunks') {
+      super.drawWorld();
+      return;
+    }
+
+    this.drawVisualFrame();
+    this._ensureChunkRenderer();
+    this._markChangedChunks();
+    this._markAnimatedStoneChunks();
+    this._refreshChunkVisibility();
+  }
+
+  _ensureChunkRenderer() {
+    if (this._chunks && this._chunkWorld === this.world) return;
+    this.worldGfx?.clear();
+    this._chunkWorld = this.world;
+    this._chunks = new Map();
+    this._dirtyChunks = new Set();
+    this._lastChunkGrid = this.world?.grid?.slice?.() || null;
+    this._chunkCols = Math.ceil((this.world?.W || 0) / CHUNK_TILES);
+    this._chunkRows = Math.ceil((this.world?.H || 0) / CHUNK_TILES);
+    for (let cy = 0; cy < this._chunkRows; cy += 1) {
+      for (let cx = 0; cx < this._chunkCols; cx += 1) {
+        this._dirtyChunks.add(this._chunkKey(cx, cy));
+      }
+    }
+  }
+
+  _chunkKey(cx, cy) {
+    return `${cx}:${cy}`;
+  }
+
+  _markChunkForTile(x, y) {
+    if (!this._dirtyChunks || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const cx = Math.floor(x / CHUNK_TILES);
+    const cy = Math.floor(y / CHUNK_TILES);
+    if (cx < 0 || cy < 0 || cx >= this._chunkCols || cy >= this._chunkRows) return;
+    this._dirtyChunks.add(this._chunkKey(cx, cy));
+  }
+
+  _markChangedChunks() {
+    const grid = this.world?.grid;
+    if (!grid) return;
+    if (!this._lastChunkGrid || this._lastChunkGrid.length !== grid.length) {
+      this._lastChunkGrid = grid.slice();
+      for (let cy = 0; cy < this._chunkRows; cy += 1) {
+        for (let cx = 0; cx < this._chunkCols; cx += 1) this._dirtyChunks.add(this._chunkKey(cx, cy));
+      }
+      return;
+    }
+
+    const W = this.world.W;
+    for (let i = 0; i < grid.length; i += 1) {
+      if (grid[i] === this._lastChunkGrid[i]) continue;
+      const x = i % W;
+      const y = Math.floor(i / W);
+      for (let yy = y - 1; yy <= y + 1; yy += 1) {
+        for (let xx = x - 1; xx <= x + 1; xx += 1) this._markChunkForTile(xx, yy);
+      }
+      this._lastChunkGrid[i] = grid[i];
+    }
+  }
+
+  _markAnimatedStoneChunks() {
+    for (const stone of this.fallingStones || []) {
+      this._markChunkForTile(stone.x, stone.y);
+      this._markChunkForTile(stone.x, stone.y - 1);
+      this._markChunkForTile(stone.x, stone.y + 1);
+    }
+  }
+
+  _refreshChunkVisibility() {
+    if (!this._chunks || !this.world) return;
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    const pad = TILE * 2;
+    const leftPx = cam.scrollX - pad;
+    const topPx = cam.scrollY - pad;
+    const rightPx = cam.scrollX + cam.width / zoom + pad;
+    const bottomPx = cam.scrollY + cam.height / zoom + pad;
+    const left = Math.max(0, Math.floor(leftPx / TILE));
+    const right = Math.min(this.world.W - 1, Math.floor(rightPx / TILE));
+    const top = Math.max(0, Math.floor(topPx / TILE));
+    const bottom = Math.min(this.world.H - 1, Math.floor(bottomPx / TILE));
+    const minCx = Math.max(0, Math.floor(left / CHUNK_TILES));
+    const maxCx = Math.min(this._chunkCols - 1, Math.floor(right / CHUNK_TILES));
+    const minCy = Math.max(0, Math.floor(top / CHUNK_TILES));
+    const maxCy = Math.min(this._chunkRows - 1, Math.floor(bottom / CHUNK_TILES));
+    const visibleKeys = new Set();
+
+    for (let cy = minCy; cy <= maxCy; cy += 1) {
+      for (let cx = minCx; cx <= maxCx; cx += 1) {
+        const key = this._chunkKey(cx, cy);
+        visibleKeys.add(key);
+        const chunk = this._getChunk(cx, cy);
+        chunk.g.setVisible(true);
+        if (this._dirtyChunks.has(key) || !chunk.rendered) this._drawChunk(chunk);
+      }
+    }
+
+    for (const [key, chunk] of this._chunks) {
+      if (!visibleKeys.has(key)) chunk.g.setVisible(false);
+    }
+  }
+
+  _getChunk(cx, cy) {
+    const key = this._chunkKey(cx, cy);
+    let chunk = this._chunks.get(key);
+    if (!chunk) {
+      const g = this.add.graphics();
+      g.setDepth(1);
+      chunk = {
+        key,
+        cx,
+        cy,
+        x0: cx * CHUNK_TILES,
+        y0: cy * CHUNK_TILES,
+        x1: Math.min(this.world.W, (cx + 1) * CHUNK_TILES),
+        y1: Math.min(this.world.H, (cy + 1) * CHUNK_TILES),
+        rendered: false,
+        g,
+      };
+      this._chunks.set(key, chunk);
+    }
+    return chunk;
+  }
+
+  _drawChunk(chunk) {
+    const g = chunk.g;
+    g.clear();
+    this._drawChunkBackground(g, chunk);
+    for (let y = chunk.y0; y < chunk.y1; y += 1) {
+      for (let x = chunk.x0; x < chunk.x1; x += 1) {
+        const type = getBlock(this.world, x, y);
+        if (type === BLOCK.SKY) continue;
+        this.drawTile(g, x, y, type, BLOCK_DATA[type]);
+      }
+    }
+    chunk.rendered = true;
+    this._dirtyChunks.delete(chunk.key);
+  }
+
+  _drawChunkBackground(g, chunk) {
+    const surfaceY = this.world?.surface ?? SURFACE_Y;
+    const px = chunk.x0 * TILE;
+    const py = chunk.y0 * TILE;
+    const width = (chunk.x1 - chunk.x0) * TILE;
+    const height = (chunk.y1 - chunk.y0) * TILE;
+    const bottom = py + height;
+    const surfacePx = surfaceY * TILE;
+
+    const skyBottom = Math.min(bottom, surfacePx);
+    if (skyBottom > py) {
+      g.fillStyle(0x4a7bbf, 1);
+      g.fillRect(px, py, width, skyBottom - py);
+    }
+
+    const dugTop = Math.max(py, surfacePx);
+    if (bottom > dugTop) {
+      g.fillStyle(0x3a2412, 1);
+      g.fillRect(px, dugTop, width, bottom - dugTop);
+      g.fillStyle(0x1f130a, 0.55);
+      const step = 24;
+      const startX = Math.floor(px / step) * step;
+      const startY = Math.floor(dugTop / step) * step;
+      for (let yy = startY; yy < bottom; yy += step) {
+        for (let xx = startX; xx < px + width; xx += step) {
+          const s = (xx * 73856093 ^ yy * 19349663) >>> 0;
+          const ox = s % 10;
+          const oy = (s >>> 8) % 10;
+          const sz = 3 + ((s >>> 16) % 3);
+          g.fillRect(xx + ox, yy + oy, sz, sz);
+        }
+      }
+    }
   }
 
   showLoading() {
@@ -406,6 +604,10 @@ export default class SpectatorScene extends GameScene {
   }
 
   cameraViewportChanged() {
+    if (this.worldRenderMode === 'chunks') {
+      this._refreshChunkVisibility();
+      return false;
+    }
     if (this.fullWorldRender) return false;
     const cam = this.cameras.main;
     const coverage = this._worldDrawCoverage;

@@ -58,6 +58,10 @@ export const CHAIN = {
   // base URL (for example http://localhost:8787/api -> /api/events), but a direct
   // operator stream (http://localhost:8799 -> /events) is still supported.
   streamUrl: env.VITE_AGENT_STREAM_URL || '',
+
+  // Spectator map renderer. `chunks` repaints only dirty map sectors, `viewport`
+  // repaints the padded camera area, and `full` is useful for quick comparisons.
+  renderMode: env.VITE_CHAIN_RENDER_MODE || 'chunks',
 };
 
 // Chain spectator playback timings. Visual-only game feel lives in code, not in

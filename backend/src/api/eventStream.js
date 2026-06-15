@@ -1,4 +1,4 @@
-const DEFAULT_POLL_MS = 750;
+const DEFAULT_POLL_MS = 250;
 const DEFAULT_HEARTBEAT_MS = 15000;
 
 export function wantsEventStream(req, url) {
@@ -6,12 +6,14 @@ export function wantsEventStream(req, url) {
     || String(req.headers.accept || '').includes('text/event-stream');
 }
 
-export async function streamEvents(req, res, { store, logger = null, pollMs = DEFAULT_POLL_MS } = {}) {
+export async function streamEvents(req, res, { store, logger = null, pollMs = DEFAULT_POLL_MS, eventBus = null } = {}) {
   let closed = false;
   let polling = false;
   let cursor = 0;
   let pollTimer = null;
   let heartbeatTimer = null;
+  let unsubscribe = null;
+  const sentIds = new Set();
 
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -25,6 +27,7 @@ export async function streamEvents(req, res, { store, logger = null, pollMs = DE
     closed = true;
     if (pollTimer) clearInterval(pollTimer);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    unsubscribe?.();
     logger?.info?.('events.stream.closed');
   };
 
@@ -34,6 +37,9 @@ export async function streamEvents(req, res, { store, logger = null, pollMs = DE
     const db = await store.read();
     cursor = startingCursor(db.chainEvents || [], req, new URL(req.url, `http://${req.headers.host || 'localhost'}`));
     send(res, { type: 'hello', source: 'backend-events', cursor });
+    unsubscribe = eventBus?.subscribe?.((event) => {
+      if (!closed) sendEvent(event);
+    }) || null;
   } catch (error) {
     send(res, { type: 'error', message: error?.message || String(error) });
   }
@@ -56,9 +62,17 @@ export async function streamEvents(req, res, { store, logger = null, pollMs = DE
     if (cursor > events.length) cursor = events.length;
     const next = events.slice(cursor);
     cursor = events.length;
-    for (const event of next) {
-      send(res, event, event.id);
+    for (const event of next) sendEvent(event);
+  }
+
+  function sendEvent(event) {
+    if (!event) return;
+    if (event.id && sentIds.has(event.id)) return;
+    if (event.id) {
+      sentIds.add(event.id);
+      if (sentIds.size > 1000) sentIds.delete(sentIds.values().next().value);
     }
+    send(res, event, event.id);
   }
 }
 

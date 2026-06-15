@@ -12,6 +12,7 @@ import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { InjectedIngestService } from '../modules/indexer/injectedIngest.js';
 import { LeaderboardService } from '../modules/leaderboard/service.js';
 import { SocialVerifierService } from '../modules/socialVerifier/service.js';
+import { discoveryFromManifest } from '../modules/worldRegistry/discovery.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
@@ -74,6 +75,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/matches')) {
+      const discovery = discoveryFromManifest(await registry.getManifest(), config);
+      return json(res, 200, {
+        updatedAt: discovery.updatedAt,
+        register: discovery.register,
+        matches: discovery.matches,
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/sessions') {
+      const discovery = discoveryFromManifest(await registry.getManifest(), config);
+      return json(res, 200, {
+        updatedAt: discovery.updatedAt,
+        sessions: discovery.sessions,
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/season/current') {
       return json(res, 200, await registry.getCurrentSeason());

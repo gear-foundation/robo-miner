@@ -122,17 +122,35 @@ export class VaraEthLiveReader {
 }
 
 export function programsFromConfig(config) {
-  const worldPrograms = splitList(process.env.INDEXER_WORLD_PROGRAM_IDS || process.env.WORLD_PROGRAM_ID || '')
-    .map((programId) => ({ programType: 'world', programId }));
-  const proxyPrograms = splitList(process.env.INDEXER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_ID || '')
-    .map((programId) => ({ programType: 'proxy', programId }));
-  const resPrograms = splitList(process.env.INDEXER_RES_VMT_PROGRAM_IDS || process.env.DIGGER_RES_VMT_PROGRAM_ID || '')
-    .map((programId) => ({ programType: 'resVmt', programId }));
-  const redeemPrograms = splitList(process.env.INDEXER_REDEEM_PROGRAM_IDS || process.env.DIGGER_REDEEM_PROGRAM_ID || '')
-    .map((programId) => ({ programType: 'redeem', programId }));
+  return uniquePrograms([
+    ...programConfigs('world', config.worldProgramIds, process.env.INDEXER_WORLD_PROGRAM_IDS || process.env.WORLD_PROGRAM_ID || ''),
+    ...programConfigs('proxy', config.diggerProgramIds, process.env.INDEXER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_ID || ''),
+    ...programConfigs('resVmt', config.resVmtProgramIds, process.env.INDEXER_RES_VMT_PROGRAM_IDS || process.env.DIGGER_RES_VMT_PROGRAM_ID || ''),
+    ...programConfigs('redeem', config.redeemProgramIds, process.env.INDEXER_REDEEM_PROGRAM_IDS || process.env.DIGGER_REDEEM_PROGRAM_ID || ''),
+  ]);
+}
 
-  const fromDbWorlds = config.worldProgramIds || [];
-  return [...worldPrograms, ...proxyPrograms, ...resPrograms, ...redeemPrograms, ...fromDbWorlds].filter((item) => item.programId);
+function programConfigs(programType, configured, fallback) {
+  const raw = Array.isArray(configured) && configured.length > 0 ? configured : splitList(fallback);
+  return raw
+    .map((item) => {
+      if (typeof item === 'string') return { programType, programId: item };
+      return {
+        programType: item.programType || programType,
+        programId: item.programId,
+      };
+    })
+    .filter((item) => item.programId);
+}
+
+function uniquePrograms(programs) {
+  const seen = new Set();
+  return programs.filter((program) => {
+    const key = `${program.programType}:${String(program.programId).toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function decodeProgramEvent(sails, payload) {

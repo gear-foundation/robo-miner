@@ -1,0 +1,78 @@
+const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
+
+const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
+const OPEN_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'open']);
+
+export function discoveryFromManifest(manifest, config, now = () => new Date()) {
+  const worlds = Array.isArray(manifest?.worlds) ? manifest.worlds : [];
+  const sessions = worlds
+    .filter((world) => world.programId)
+    .map((world) => sessionRecord(world, config));
+  return {
+    updatedAt: now().toISOString(),
+    register: registerInfo(config),
+    matches: sessions.filter((session) => session.joinable),
+    sessions,
+  };
+}
+
+export function sessionRecord(world, config) {
+  const minAgents = numberOr(world.minAgents, 8);
+  const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
+  const agents = numberOr(world.agents, 0);
+  const status = discoveryStatus(world.status);
+  const joinable = status === 'open' && agents < maxAgents;
+  const sessionId = world.sessionId ?? world.session ?? null;
+  return {
+    id: world.id,
+    sessionKey: world.archiveId || `${world.id}-s${sessionId ?? world.seed ?? 0}`,
+    programId: world.programId,
+    status,
+    joinable,
+    agents,
+    minAgents,
+    maxAgents,
+    slotsFree: Math.max(0, maxAgents - agents),
+    owners: Array.isArray(world.owners) ? world.owners : [],
+    seed: world.seed,
+    mapHash: world.mapHash || null,
+    sessionId,
+    startsAt: world.startsAt || null,
+    endsAt: world.endsAt || null,
+    finishedAt: world.finishedAt || world.chain?.finishedAt || null,
+    archivedAt: world.archivedAt || null,
+    archiveId: world.archiveId || null,
+    archiveUrl: world.archiveUrl || (world.archiveId ? `/archives/${encodeURIComponent(world.archiveId)}` : null),
+  };
+}
+
+export function registerInfo(config) {
+  return {
+    network: config.network || 'hoodi',
+    router: config.routerAddress || null,
+    varaWs: config.varaEthWs || null,
+    ethRpc: config.ethRpc || null,
+    gasless: true,
+    owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
+    steps: [
+      'GET /matches and pick a match where joinable=true (slotsFree > 0)',
+      'Send an injected World.Register(owner) to that match.programId',
+      'Wait until the session is ACTIVE (auto-starts at maxAgents; or backend starts from minAgents)',
+      'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
+    ],
+    actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },
+    directions: DIR_HINT,
+  };
+}
+
+function discoveryStatus(status) {
+  const value = String(status || '');
+  if (OPEN_STATUSES.has(value)) return 'open';
+  if (PAST_STATUSES.has(value)) return value;
+  return value || 'unknown';
+}
+
+function numberOr(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}

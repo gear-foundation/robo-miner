@@ -97,6 +97,8 @@ Discovery endpoints:
 
 ```txt
 GET /health
+GET /matches
+GET /sessions
 GET /api/season/current
 GET /api/worlds/live
 GET /api/worlds
@@ -122,6 +124,16 @@ POST /api/admin/rental/clear-failed
 
 Set `ADMIN_API_TOKEN` to require `Authorization: Bearer <token>` for
 `/api/admin/*`.
+
+`/matches` and `/sessions` are the agent-facing discovery endpoints. They are
+served from the same Postgres-backed World Registry as `/api/manifest`, so the
+frontend lobby and external agents discover the same worlds. In production the
+`matches-*` domain can route to this backend instead of running a separate
+memory-only factory discovery process.
+
+When the registry store is empty, the backend seeds open world records from
+`INDEXER_WORLD_PROGRAM_IDS` / `WORLD_PROGRAM_IDS` / `WORLD_PROGRAM_ID`. The
+snapshot and registry jobs then reconcile live session state from chain.
 
 For MVP this registry is backend-first. A thin on-chain registry can be added
 later if frontend discovery needs to be independently verifiable on-chain.
@@ -415,7 +427,9 @@ Live mode reads Vara.eth `block_outcome`, decodes program events with the IDL fo
 each configured program type, then feeds the same projection layer. Configure
 programs with `INDEXER_WORLD_PROGRAM_IDS`, `INDEXER_PROXY_PROGRAM_IDS`,
 `INDEXER_RES_VMT_PROGRAM_IDS`, `INDEXER_REDEEM_PROGRAM_IDS`, or let synced
-`worldRegistry` records provide world program ids.
+`worldRegistry` records provide world program ids. `INDEXER_WORLD_PROGRAM_IDS`
+also acts as the fallback seed for `/matches`, `/sessions`, and `/api/manifest`
+when Postgres does not yet contain world records.
 
 If the current RPC does not expose `block_outcome`, use the snapshot fallback.
 It reads current state through Sails queries (`World.Session`, `World.Agents`,

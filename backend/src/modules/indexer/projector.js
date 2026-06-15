@@ -250,6 +250,10 @@ function applyWorldEvent(db, event, config) {
       incrementResource(stats.extracted, toNumber(c), 1);
       stats.lastResource = { x: toNumber(a), y: toNumber(b), kind: toNumber(c), carriedTotal: toNumber(d) };
       break;
+    case 'StoneMoved':
+      stats.stonesMoved = (stats.stonesMoved || 0) + 1;
+      stats.lastStoneMove = { fromX: toNumber(a), fromY: toNumber(b), x: toNumber(c), y: toNumber(d) };
+      break;
     case 'LadderPlaced':
       stats.laddersPlaced += 1;
       stats.laddersRemaining = toNumber(c);
@@ -261,6 +265,8 @@ function applyWorldEvent(db, event, config) {
     case 'AgentDied':
       digger.status = 'dead';
       stats.status = 'dead';
+      stats.x = toNumber(a);
+      stats.y = toNumber(b);
       stats.death = { x: toNumber(a), y: toNumber(b), cause: toNumber(c), at: event.timestamp };
       break;
     case 'AgentExited':
@@ -409,6 +415,7 @@ function upsertAgentStats(db, worldId, sessionId, ownerActor, seasonId, now) {
       status: 'active',
       moves: 0,
       drills: 0,
+      stonesMoved: 0,
       resourcesExtracted: 0,
       laddersPlaced: 0,
       surfaced: 0,

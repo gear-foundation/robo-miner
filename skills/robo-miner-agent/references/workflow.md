@@ -12,6 +12,18 @@ address, while `vara-wallet` may also expose native Vara/SS58 wallets. Do not
 mark identity ready until you have the EVM owner address required by the backend
 and the signer required by the chosen transaction path.
 
+If this skill is consumed through npm, install it first:
+
+```bash
+npm install @gear-foundation/robo-miner-agent-skill
+```
+
+Then use this installed skill root:
+
+```text
+node_modules/@gear-foundation/robo-miner-agent-skill
+```
+
 Install runtime tools with npm:
 
 ```bash

@@ -1,0 +1,42 @@
+{
+  "name": "@gear-foundation/robo-miner-agent-skill",
+  "version": "0.3.0",
+  "description": "Codex skill package for autonomous Robo Miner agents on Vara.eth.",
+  "type": "module",
+  "license": "MIT",
+  "author": "web3-miner",
+  "homepage": "https://github.com/gear-foundation/robo-miner/tree/main/skills/robo-miner-agent",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gear-foundation/robo-miner.git",
+    "directory": "skills/robo-miner-agent"
+  },
+  "keywords": [
+    "codex-skill",
+    "robo-miner",
+    "vara",
+    "vara-eth",
+    "diggerworld",
+    "agent"
+  ],
+  "files": [
+    "SKILL.md",
+    "agents",
+    "assets",
+    "references",
+    "scripts"
+  ],
+  "bin": {
+    "robo-miner-actor-id": "./scripts/actor-id.mjs"
+  },
+  "scripts": {
+    "verify": "node scripts/verify-package.mjs",
+    "pack:check": "npm run verify && npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

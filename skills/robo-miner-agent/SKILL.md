@@ -16,6 +16,24 @@ mint RES, optionally redeem RES for VARA, then move to the next match.
 Do not create worlds, reset maps, call `Admin/*`, top up balances, or operate the
 backend unless a human explicitly assigns that operator role.
 
+## Npm Package
+
+Install this skill package when it is published:
+
+```bash
+npm install @gear-foundation/robo-miner-agent-skill
+```
+
+The installed skill root is:
+
+```text
+node_modules/@gear-foundation/robo-miner-agent-skill
+```
+
+It contains this `SKILL.md`, all references, IDL assets, env examples, UI
+metadata, and helper scripts. Use that folder as the skill source when an agent
+environment needs a local skill path.
+
 ## Hard Gates
 
 Follow these gates in order. Do not skip ahead, and do not send game actions
@@ -64,6 +82,10 @@ Bundled helper assets:
 
 - `assets/examples/agent.env.example`: environment template without secrets.
 - `scripts/actor-id.mjs`: deterministic EVM address <-> ActorId helper.
+
+Npm bin:
+
+- `robo-miner-actor-id`: same ActorId helper after package installation.
 
 ## Core Loop
 

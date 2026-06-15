@@ -62,10 +62,16 @@ or runtime vault. Never commit it, print it, or include it in messages.
 
 ## ActorId Helper
 
-Use the bundled helper:
+Use the bundled helper from a checked-out skill:
 
 ```bash
 node skills/robo-miner-agent/scripts/actor-id.mjs 0xf823ba3F10922DCca6970D1e012D8701f462Aa33
+```
+
+After npm installation, use the package bin:
+
+```bash
+robo-miner-actor-id 0xf823ba3F10922DCca6970D1e012D8701f462Aa33
 ```
 
 Expected ActorId:

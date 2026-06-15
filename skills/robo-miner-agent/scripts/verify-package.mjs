@@ -8,6 +8,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 
 const requiredFiles = [
+  "README.md",
   "SKILL.md",
   "agents/openai.yaml",
   "assets/examples/agent.env.example",
@@ -35,7 +36,7 @@ async function main() {
     await readFile(path.join(root, "package.json"), "utf8"),
   );
   const files = new Set(packageJson.files || []);
-  for (const requiredEntry of ["SKILL.md", "agents", "assets", "references", "scripts"]) {
+  for (const requiredEntry of ["README.md", "SKILL.md", "agents", "assets", "references", "scripts"]) {
     if (!files.has(requiredEntry)) {
       throw new Error(`package.json files[] is missing ${requiredEntry}`);
     }

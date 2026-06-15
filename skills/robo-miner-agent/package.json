@@ -20,6 +20,7 @@
     "agent"
   ],
   "files": [
+    "README.md",
     "SKILL.md",
     "agents",
     "assets",
@@ -27,11 +28,12 @@
     "scripts"
   ],
   "bin": {
-    "robo-miner-actor-id": "./scripts/actor-id.mjs"
+    "robo-miner-actor-id": "scripts/actor-id.mjs"
   },
   "scripts": {
     "verify": "node scripts/verify-package.mjs",
-    "pack:check": "npm run verify && npm pack --dry-run"
+    "pack:check": "npm run verify && npm pack --dry-run",
+    "prepublishOnly": "npm run verify"
   },
   "engines": {
     "node": ">=18"

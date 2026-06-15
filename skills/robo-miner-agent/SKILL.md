@@ -1,6 +1,10 @@
 ---
 name: robo-miner-agent
 description: "Use when an autonomous external agent needs to join and play Robo Miner / DiggerWorld live matches on Vara.eth: discover public matches, create or use an EVM key, convert it to ActorId, register, read world state, choose mining actions, send injected transactions, bank resources, and optimize competitive resource extraction."
+license: MIT
+metadata:
+  author: web3-miner
+  version: "0.2.0"
 ---
 
 # Robo Miner Agent
@@ -10,6 +14,40 @@ This skill is for an autonomous external player agent. You are playing the deplo
 The agent is an independent competitor, not a team member. It should maximize its own banked resource value before the session ends while staying alive and conserving finite ladders.
 
 The agent is long-running. It should complete the current match, record the result, then return to match discovery and join the next available match. Do not design it as a one-shot script.
+
+## Operating Contract
+
+The agent must behave like a player daemon, not a command snippet:
+
+- Keep running until explicitly stopped by the user or runtime.
+- Keep one durable EVM identity unless the user/test policy asks for fresh identities.
+- Discover matches, join one, play it to a terminal state, record the result, then discover the next match.
+- Submit at most one in-flight action per agent key. Never overlap two txs from the same key.
+- Treat every decision as provisional until the confirmed reply or a fresh `AgentOf` read proves it.
+- Never operate admin/factory/balance keeper/treasury flows. Those are backend operator responsibilities.
+- Never top up executable balance from the player agent. If a match appears underfunded or actions stop confirming, wait, re-read state, or move to another match if discovery offers one.
+- Never ask the user to paste private keys, mnemonics, API keys, or secrets into chat. Use local runtime secret storage.
+
+The agent competes with up to 9 other agents in the same world. It should optimize its own banked resources, but it should reason about the shared map:
+
+- Other agents may dig tiles first, place ladders, open tunnels, fall, or die.
+- Open tunnels and ladders created by other agents are usable public infrastructure.
+- Do not coordinate with other agents or assume any reserved path/target.
+- Re-read or reconcile the map frequently; stale plans are normal in a shared world.
+- Prefer opportunistic route changes when another agent opens a better tunnel.
+
+## Preflight
+
+Before joining a live match, verify the runtime has:
+
+- a persistent local EVM private key for this agent;
+- a Sails IDL/generated client for DiggerWorld;
+- `ethRpc`, `varaWs`, and `router` from the selected match response;
+- a way to send injected Vara.eth transactions and wait for confirmed replies;
+- a way to query `Config`, `Session`, `MapSnapshot`, `Agents`, and `AgentOf`;
+- optional backend ingest URL for spectator events.
+
+If any of these are missing, set them up locally or wait for match discovery to provide them. Do not invent network constants when the match API supplies them.
 
 ## Public Surfaces
 
@@ -45,6 +83,33 @@ If your agent environment supports skills, enable these companion skills for net
 - `vara-wallet`: wallet and on-chain interaction patterns.
 
 Keep transaction encoding, nonce handling, confirmation waiting, and state reads deterministic. Use this file to decide which game action to take from confirmed state.
+
+## State Machine
+
+Implement the agent as a small persistent state machine:
+
+```txt
+BOOT
+  -> DISCOVER_MATCH
+  -> REGISTER
+  -> WAIT_SESSION
+  -> PLAY
+  -> BANK_OR_EXIT
+  -> RECORD_RESULT
+  -> DISCOVER_MATCH
+```
+
+State meanings:
+
+- `BOOT`: load durable wallet, IDL/client, local config, and result log.
+- `DISCOVER_MATCH`: poll `/matches` until a joinable match appears.
+- `REGISTER`: register the local ActorId if not already registered.
+- `WAIT_SESSION`: wait until `Session()[2] == 1`; keep checking whether the match is still valid.
+- `PLAY`: repeatedly read state, plan, send one action, wait for confirmation, ingest event, and replan.
+- `BANK_OR_EXIT`: if alive with cargo and at the surface, call `Surface`; otherwise record the terminal state.
+- `RECORD_RESULT`: write local summary: world, session, owner, banked resources, death/exit, last action seq.
+
+The agent may keep a short in-memory plan, but the confirmed chain state is always the authority.
 
 ## Public Match API
 
@@ -142,6 +207,62 @@ WORLD_PROGRAM_ID=<match.programId>
 
 Gameplay actions are gasless for the agent EOA: the world program executable balance pays for injected transactions.
 
+## Live UI Event Ingest
+
+After every confirmed injected action, publish the resulting action event to the backend event bus when an ingest endpoint is available:
+
+```txt
+POST <REGISTRY_OR_LOCAL_BACKEND>/api/ingest/injected
+Content-Type: application/json
+```
+
+Do this only after the injected transaction reply is confirmed and `AgentOf(ownerActorId)` or the action reply gives the new state. This keeps the spectator frontend live without polling snapshots. Current Vara.eth `block_events` exposes mirror/router request events, but local injected program actions may not appear there as decoded World events, so the acting agent must submit its confirmed result.
+
+Important: if the confirmed reply changes the agent coordinates, submit an
+`AgentMoved` event even when the original action was `Drill`, `PlaceLadder`, or
+`Surface`. Contract gravity can move the agent after a drill, and the frontend
+needs that coordinate delta to animate the robot.
+
+Minimal payload:
+
+```json
+{
+  "txHash": "0x... optional",
+  "messageId": "0x... optional",
+  "events": [
+    {
+      "programType": "world",
+      "programId": "<world program id>",
+      "service": "World",
+      "event": "AgentMoved",
+      "args": ["<session id>", "<owner actor id>", 3, 0, 4, 0]
+    }
+  ]
+}
+```
+
+Event mapping from confirmed actions:
+
+| Confirmed action | Backend event | Args |
+| --- | --- | --- |
+| `Register(owner)` | `AgentRegistered` and, if state includes spawn position, `AgentSpawned` | `[session, owner]`, `[session, owner, x, y]` |
+| `MoveAgent(dir)` | `AgentMoved` | `[session, owner, fromX, fromY, toX, toY]` |
+| `Drill(dir)` | `TileDrilled`; also `ResourceExtracted` when cargo increases | `[session, owner, x, y, oldTile, newTile]`; `[session, owner, x, y, resourceKind, carriedTotal]` |
+| `PlaceLadder(dir)` | `LadderPlaced` | `[session, owner, x, y, laddersRemaining]` |
+| `Surface()` | `AgentSurfaced` | `[session, owner, bankedScrst, bankedBcrst, bankedHcrst]` |
+| terminal death/exit | `AgentDied` / `AgentExited` | IDL order from the World events |
+
+When a confirmed action produces multiple consequences, send all of them in the
+same ingest request, in this order: tile/resource/ladder/surface event first,
+then `AgentMoved` if the final position changed.
+
+If no `txHash` or `messageId` is available, omit them; the backend will still assign a unique received event id. If a stable message id is available, include it so retries deduplicate cleanly.
+
+Important cumulative fields:
+
+- `ResourceExtracted` carries `carriedTotal`, not just the delta. If the frontend/backend needs a delta, compute it from previous inventory.
+- `AgentSurfaced` carries cumulative banked totals. Visual `+N` popups should use the difference from the previous banked state.
+
 ## Continuous Runtime
 
 The process should keep a durable agent wallet and run an outer loop:
@@ -156,6 +277,8 @@ The process should keep a durable agent wallet and run an outer loop:
 8. Clear match-local planning state and return to `/matches`.
 
 Reuse the same persistent EVM key unless the test policy explicitly asks for fresh identities. If the agent dies in one match, that match is over for this key; the process should still continue by discovering and joining another match when available.
+
+If the selected match disappears from discovery while already playing, continue using the confirmed `programId` until the session is terminal or reads fail repeatedly. Discovery is for finding matches; the contract is the source of truth once joined.
 
 ## Game Objective
 
@@ -295,18 +418,111 @@ If RES VMT or redeem program ids are not provided by the public API or environme
 
 ## Agent Loop
 
-Use confirmed state only inside a match:
+Use confirmed state only inside a match. The agent is a continuous controller,
+not a one-command executor. It should keep running, plan several steps ahead,
+then submit exactly one confirmed on-chain action at a time:
 
 1. Poll `/matches`, pick a joinable world.
 2. Register if not registered.
 3. Wait until session is active.
-4. Query `MapSnapshot()` and `AgentOf(selfActorId)`.
-5. Choose one action.
-6. Send one injected tx and wait for the reply.
-7. Decode returned agent state.
-8. If tx fails or another agent changed the target tile, refetch map and agent state.
-9. Repeat until current-match terminal state. Do not submit overlapping actions from the same key.
-10. On terminal state, return to `Continuous Runtime` and discover the next match.
+4. Query `Config()`, `Session()`, `MapSnapshot()`, and `AgentOf(selfActorId)`.
+5. Build a short plan from the current map:
+   - choose reachable resources by value and distance;
+   - simulate the path before acting;
+   - reject any action that removes the return path to `y=0`;
+   - reserve enough ladders for the climb back;
+   - switch to return mode when cargo is full, cargo is valuable enough, or ladder budget is tight.
+6. Submit the next single action from the plan as an injected tx and wait for the confirmed reply.
+7. Decode the returned agent state, publish the confirmed event to `/api/ingest/injected` when available, then refetch or patch local map state.
+8. If tx fails or another agent changed the target tile, refetch map and agent state, discard the current plan, and replan.
+9. Send the next transaction immediately after the previous confirmed reply unless an explicit demo throttle is configured.
+10. Repeat until current-match terminal state. Do not submit overlapping actions from the same key.
+11. On terminal state, record the result and return to `Continuous Runtime` to discover the next match.
+
+### Shared-World Planning
+
+Every plan should account for the fact that the world is shared:
+
+- Read `Agents()` and optionally `AgentOf` for other owners when deciding whether a route is crowded.
+- Do not block on other agents; treat them as moving obstacles and likely map mutators.
+- Prefer already-open tunnels when they reduce ladder cost or return risk.
+- Prefer ladders already placed by any agent over spending your own ladder.
+- If another agent opens your target first, switch to movement through the opened tile or pick a new nearby resource.
+- If several agents are near the same resource corridor, consider a different resource cluster unless the path is still clearly best.
+- Keep enough ladder budget to return from your own current depth even if other agents stop helping.
+
+The map has no fog of war, so it is acceptable to plan over the full `MapSnapshot`. The uncertainty is not visibility; it is that other agents may change the map between your read and your confirmed action.
+
+### Action Cadence For Spectators
+
+Do not submit overlapping transactions from the same agent. Always wait for the
+previous injected reply, publish its confirmed event(s), then plan the next
+action. The frontend owns smooth playback: it buffers confirmed action events,
+groups consequences from the same message, and plays them through each robot's
+visual queue.
+
+Agents should send the next action immediately after confirmation. For showcase
+runs, a small optional delay may be enabled only when humans need slower logs:
+
+```txt
+default: 0 ms after confirmed reply
+optional showcase throttle: 120-200 ms
+optional jitter: agentIndex * 40-80 ms
+```
+
+Do not use sleeps as the primary smoothing mechanism; they make the robot
+visibly pause between animations. Smoothness belongs in frontend playback,
+while the agent remains a confirmed-state controller.
+
+Recommended controller state:
+
+```js
+{
+  mode: 'mine' | 'surface',
+  target: { x, y, tile } | null,
+  plannedPath: ['down', 'down', 'right'],
+  ladderBuffer: 1,
+  returnLoad: 1.0
+}
+```
+
+The controller may refresh the full map every action. Smooth spectator playback
+still comes from the emitted event stream; snapshots are for planning and
+reconciliation, not animation.
+
+### Confirmation And Recovery
+
+Injected actions can fail or time out even when the node is healthy. The agent must recover without getting stuck:
+
+1. Send one action.
+2. Wait for the confirmed reply with a finite timeout.
+3. If the reply succeeds, decode the returned agent state.
+4. If the reply errors with a contract panic/rejection, immediately refetch `AgentOf` and `MapSnapshot`, discard the current plan, and replan.
+5. If waiting for the reply times out, poll `AgentOf(self)` a few times:
+   - if `last_action_seq` advanced, treat the action as applied and reconstruct the event from `before` and `after`;
+   - if it did not advance, treat the action as not applied, refetch map/session, and replan.
+6. If repeated actions stop confirming and executable balance appears low or reads indicate the match is unhealthy, do not top up. Wait for the operator/balance keeper, then either continue or move to a new joinable match when available.
+
+This recovery rule is important for long-running play: never leave the agent permanently waiting on one unresolved promise.
+
+### Safe Planning Rules
+
+Before every non-surface action, simulate the resulting map and agent state:
+
+- `MoveAgent(dir)` may enter only `EMPTY`, `SURFACE`, or `LADDER`.
+- `Drill(dir)` opens one adjacent drillable tile; if it is a resource, cargo may increase.
+- `PlaceLadder(4)` plants a ladder under the current position and costs one ladder.
+- Upward movement is allowed only when the current or target tile is a ladder.
+- A candidate action is valid only if, after simulating it, a path to any `y=0` tile still exists and required ladders are `<= ladders_remaining`.
+
+Plan scoring should prefer bankable value over wandering:
+
+```txt
+score = travel_cost + ladder_cost + risk_penalty - resource_value
+```
+
+Use approximate values `SCRST=1`, `BCRST=5`, `HCRST=25`. Treat lava as forbidden.
+Treat stone as high-risk; drill it only when the path/value payoff is worth it.
 
 ## Strategy Guidance
 

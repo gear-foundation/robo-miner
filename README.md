@@ -174,6 +174,7 @@ VITE_WORLD_PROGRAM_IDS=...
 VITE_RES_VMT_PROGRAM_ID=...
 VITE_REDEEM_PROGRAM_ID=...
 VITE_BACKEND_URL=http://localhost:8787
+VITE_AGENT_STREAM_URL=http://localhost:8787/api
 VITE_MATCHES_URL=http://localhost:8780
 ```
 
@@ -213,6 +214,13 @@ Factory discovery endpoints:
 GET http://localhost:8780/matches
 GET http://localhost:8780/sessions
 GET http://localhost:8780/health
+```
+
+Backend event stream:
+
+```txt
+GET http://localhost:8787/api/events?limit=100
+GET http://localhost:8787/api/events as EventSource when Accept: text/event-stream
 ```
 
 The MVP leaderboard uses this source order:

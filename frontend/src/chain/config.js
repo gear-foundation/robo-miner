@@ -47,9 +47,9 @@ export const CHAIN = {
   // Logical contract surface. The new Config()[6] is starting_hp, not surface.
   contractSurfaceY: Number(env.VITE_CONTRACT_SURFACE_Y || 1),
 
-  // Operator SSE stream of per-action events (decoded from injected-tx receipts).
-  // When set, the spectator consumes this for smooth event-driven animation
-  // instead of polling chain snapshots (the chain has no event subscription).
+  // SSE event feed for per-action World/Admin events. Prefer the backend API
+  // base URL (for example http://localhost:8787/api -> /api/events), but a direct
+  // operator stream (http://localhost:8799 -> /events) is still supported.
   streamUrl: env.VITE_AGENT_STREAM_URL || '',
 };
 

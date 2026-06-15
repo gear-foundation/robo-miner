@@ -32,10 +32,10 @@
     "@gear-js/api": "^0.45.0",
     "@polkadot/api": "^16.5.6",
     "@polkadot/util": "^14.0.3",
-    "@vara-eth/api": "0.5.0",
+    "@vara-eth/api": "0.5.1",
     "kzg-wasm": "1.0.0",
     "pg": "^8.21.0",
     "sails-js": "https://github.com/gear-tech/sails/releases/download/js/v1.0.0-beta.1/sails-js.tgz",
-    "viem": "^2.39.0"
+    "viem": "npm:@vara-eth/viem@2.48.11"
   }
 }

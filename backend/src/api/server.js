@@ -4,6 +4,7 @@ import http from 'node:http';
 import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
+import { streamEvents, wantsEventStream } from './eventStream.js';
 import { AdminService } from '../modules/admin/service.js';
 import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
@@ -143,6 +144,11 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/events') {
+      if (wantsEventStream(req, url)) {
+        logger.info('events.stream.open');
+        await streamEvents(req, res, { store, logger });
+        return;
+      }
       const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
       const db = await store.read();
       return json(res, 200, { events: db.chainEvents.slice(-limit) });

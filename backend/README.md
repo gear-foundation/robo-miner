@@ -106,6 +106,7 @@ GET /api/stats/agents?season=season-1&world=world-id
 GET /api/stats/economy
 GET /api/leaderboard?metric=banked&season=season-1&world=world-id&limit=50
 GET /api/events?limit=100
+GET /api/events as EventSource when Accept: text/event-stream
 POST /api/social/x/submit
 GET /api/social/x/:owner
 POST /api/ingest/injected
@@ -443,6 +444,7 @@ submit the watched result or decoded action projection to the backend immediatel
 frontend/agent sendAndWaitForReceipt()
   -> update live UI directly from Vara.eth
   -> POST /api/ingest/injected for leaderboard/backend aggregates
+  -> backend streams normalized events through GET /api/events as SSE
 ```
 
 Example payload:

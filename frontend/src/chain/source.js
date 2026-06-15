@@ -379,7 +379,7 @@ export class ChainSource {
       this._stream = new EventSource(url);
       this._stream.onmessage = (e) => {
         try {
-          const ev = JSON.parse(e.data);
+          const ev = this._eventFromStreamMessage(JSON.parse(e.data));
           if (ev && ev.type && ev.type !== 'hello') this._applyChainEvent(ev);
         } catch {
           // Ignore keep-alives / malformed development stream messages.
@@ -398,6 +398,25 @@ export class ChainSource {
       return;
     }
     await this._primeEventCursor();
+  }
+
+  _eventFromStreamMessage(message) {
+    if (!message || message.type === 'hello') return message;
+    if (message.programId && !sameActor(message.programId, this.programId)) return null;
+    if (message.event && Array.isArray(message.args)) {
+      const decoded = decodeWorldEvent(message.event, message.args);
+      if (!decoded) return null;
+      return {
+        ...decoded,
+        id: message.id,
+        source: message.source || 'backend-events',
+        programId: message.programId || null,
+        txHash: message.txHash || null,
+        messageId: message.messageId || null,
+        timestamp: message.timestamp || message.receivedAt || null,
+      };
+    }
+    return message;
   }
 
   // 4) Per frame: drain buffered events, apply them to the grid + miners, and

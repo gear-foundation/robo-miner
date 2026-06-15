@@ -12,6 +12,13 @@
 
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
+function num(name, fallback) {
+  const value = env[name];
+  if (value == null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 export const CHAIN = {
   // Master switch — flip to true (via VITE_CHAIN_ENABLED=true) once the World
   // contract is live and the ids below are filled.
@@ -42,15 +49,28 @@ export const CHAIN = {
   matchesUrl: env.VITE_MATCHES_URL || '',
 
   // Fallback poll interval (ms) if push event subscription isn't used.
-  pollMs: Number(env.VITE_CHAIN_POLL_MS || 1000),
+  pollMs: num('VITE_CHAIN_POLL_MS', 1000),
 
   // Logical contract surface. The new Config()[6] is starting_hp, not surface.
-  contractSurfaceY: Number(env.VITE_CONTRACT_SURFACE_Y || 1),
+  contractSurfaceY: num('VITE_CONTRACT_SURFACE_Y', 1),
 
   // SSE event feed for per-action World/Admin events. Prefer the backend API
   // base URL (for example http://localhost:8787/api -> /api/events), but a direct
   // operator stream (http://localhost:8799 -> /events) is still supported.
   streamUrl: env.VITE_AGENT_STREAM_URL || '',
+};
+
+// Chain spectator playback timings. Visual-only game feel lives in code, not in
+// env: the contract already confirmed the action, so the frontend only decides
+// how the result is shown.
+export const CHAIN_PLAYBACK = {
+  moveMs: 120,
+  digMs: 420,
+  stoneShakeMs: 520,
+  stoneStepMs: 90,
+  eventGroupGraceMs: 35,
+  maxVisualQueue: 4,
+  maxGroupsPerFrame: 4,
 };
 
 // True only when chain mode is on AND the minimum endpoints/ids are present, so

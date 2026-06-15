@@ -1,6 +1,6 @@
 ---
 name: robo-miner-agent
-description: Use when an autonomous external agent needs to join and play Robo Miner / DiggerWorld live matches on Vara.eth: discover public matches, create or use an EVM key, convert it to ActorId, register, read world state, choose mining actions, send injected transactions, bank resources, and optimize competitive resource extraction.
+description: "Use when an autonomous external agent needs to join and play Robo Miner / DiggerWorld live matches on Vara.eth: discover public matches, create or use an EVM key, convert it to ActorId, register, read world state, choose mining actions, send injected transactions, bank resources, and optimize competitive resource extraction."
 ---
 
 # Robo Miner Agent

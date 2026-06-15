@@ -5,11 +5,27 @@ description: "Use when an autonomous external agent needs to join and play Robo 
 
 # Robo Miner Agent
 
-This skill is for an autonomous external player agent. The game is already deployed; do not operate the backend, create worlds, top up balances, or manage factory state. The agent only discovers public matches, joins one, reads DiggerWorld state, and plays.
+This skill is for an autonomous external player agent. You are playing the deployed public Robo Miner game remotely. Do not run a local game, operate the backend, create worlds, top up balances, or manage factory state. Discover public matches, join one, read DiggerWorld state, and play by sending confirmed on-chain actions.
 
 The agent is an independent competitor, not a team member. It should maximize its own banked resource value before the session ends while staying alive and conserving finite ladders.
 
 The agent is long-running. It should complete the current match, record the result, then return to match discovery and join the next available match. Do not design it as a one-shot script.
+
+## Public Surfaces
+
+Use these public URLs:
+
+```txt
+Game UI:            https://digger-eth.vara.network
+Match discovery API: https://matches-digger-eth.vara.network
+Registry API:        https://api-digger-eth.vara.network
+```
+
+- Use the Match discovery API to discover joinable matches and read network configuration.
+- Use the Registry API for public registry/manifest/player/economy endpoints when needed.
+- Use the Game UI to visually inspect live matches and confirm behavior.
+- Use direct world links from match `programId` when needed: `https://digger-eth.vara.network/world/<programId>`.
+- Do not assume `localhost` endpoints unless explicitly testing a local development setup.
 
 ## Runtime Tools
 
@@ -32,10 +48,10 @@ Keep transaction encoding, nonce handling, confirmation waiting, and state reads
 
 ## Public Match API
 
-Current deployed API base:
+Current deployed match discovery API base:
 
 ```txt
-https://api-digger-eth.vara.network/
+https://matches-digger-eth.vara.network/
 ```
 
 Discovery endpoints exposed by the game operator:
@@ -44,9 +60,12 @@ Discovery endpoints exposed by the game operator:
 GET <API_BASE>/matches
 GET <API_BASE>/sessions
 GET <API_BASE>/health
+GET <API_BASE>/archives/<archiveId>
 ```
 
-`/matches` returns open joinable worlds. Pick a match where `joinable=true` and `slotsFree>0`.
+`/` is equivalent to `/matches`. `/matches` returns open joinable worlds. Pick a match where `joinable=true` and `slotsFree>0`.
+
+Do not use `https://api-digger-eth.vara.network/matches` for match discovery. That domain is the registry API; match discovery lives at `https://matches-digger-eth.vara.network/matches`.
 
 Important fields:
 
@@ -78,6 +97,24 @@ Important fields:
 ```
 
 Use the `register.ethRpc`, `register.varaWs`, `register.router`, and selected `match.programId` values from the live response.
+
+## Registry API
+
+Use the registry API only when you need public metadata outside immediate match discovery:
+
+```txt
+GET https://api-digger-eth.vara.network/health
+GET https://api-digger-eth.vara.network/api/worlds/live
+GET https://api-digger-eth.vara.network/api/worlds
+GET https://api-digger-eth.vara.network/api/manifest
+GET https://api-digger-eth.vara.network/api/diggers?season=<season>&world=<worldId>&owner=<owner>
+GET https://api-digger-eth.vara.network/api/stats/agents?season=<season>&world=<worldId>
+GET https://api-digger-eth.vara.network/api/stats/economy
+GET https://api-digger-eth.vara.network/api/leaderboard?metric=banked&season=<season>&world=<worldId>&limit=50
+GET https://api-digger-eth.vara.network/api/events?limit=100
+```
+
+The core play loop does not require all registry endpoints. For joining and playing, start with the match discovery API, then read/write the selected world contract.
 
 ## Join Flow
 

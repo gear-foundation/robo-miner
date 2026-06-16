@@ -51,6 +51,7 @@ export async function createVaraEthChain(config) {
         generateCodeHash,
         CodeState,
         rootDir: config.rootDir,
+        wasmPath: config.diggerProxyWasmPath,
         timeoutMs: config.indexerTimeoutMs || 180000,
       });
       const ownerActor = actorIdFromAddress(normalizeAddress(owner, 'owner'));
@@ -252,10 +253,24 @@ async function ensureProxyCodeValidated({
   generateCodeHash,
   CodeState,
   rootDir,
+  wasmPath,
   timeoutMs,
 }) {
-  const wasmPath = path.resolve(rootDir, '../contracts/target/wasm32-gear/release/digger_proxy.opt.wasm');
-  const wasm = await readFile(wasmPath);
+  const artifactPath = wasmPath
+    ? path.resolve(rootDir, wasmPath)
+    : path.resolve(rootDir, '../contracts/target/wasm32-gear/release/digger_proxy.opt.wasm');
+
+  if (codeId) {
+    const resolvedCodeId = normalizeHex32(codeId, 'DIGGER_PROXY_CODE_ID');
+    const state = await api.eth.router.codeState(resolvedCodeId);
+    if (state === CodeState.Validated) return resolvedCodeId;
+    if (state === CodeState.ValidationRequested) {
+      await waitForCodeState(api, resolvedCodeId, CodeState.Validated, timeoutMs);
+      return resolvedCodeId;
+    }
+  }
+
+  const wasm = await readProxyWasm(readFile, artifactPath, Boolean(codeId));
   const resolvedCodeId = codeId
     ? normalizeHex32(codeId, 'DIGGER_PROXY_CODE_ID')
     : normalizeHex32(generateCodeHash(new Uint8Array(wasm)), 'digger_proxy.opt.wasm code hash');
@@ -282,6 +297,18 @@ async function ensureProxyCodeValidated({
   }
   await waitForCodeState(api, tx.codeId || resolvedCodeId, CodeState.Validated, timeoutMs);
   return normalizeHex32(tx.codeId || resolvedCodeId, 'validated code id');
+}
+
+async function readProxyWasm(readFile, wasmPath, hasConfiguredCodeId) {
+  try {
+    return await readFile(wasmPath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    const configured = hasConfiguredCodeId
+      ? 'Configured DIGGER_PROXY_CODE_ID is not validated yet, so the backend needs the wasm artifact to request validation.'
+      : 'Set DIGGER_PROXY_CODE_ID to an already validated code id, or include the wasm artifact in the backend image.';
+    throw new Error(`${configured} Missing digger proxy wasm at ${wasmPath}.`);
+  }
 }
 
 async function waitForCodeState(api, codeId, expected, timeoutMs) {

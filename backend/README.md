@@ -169,6 +169,10 @@ POST /api/diggers/request
 
 Live deploy requires `DIGGER_PROXY_CODE_ID` (or legacy `DIGGER_CODE_ID`) plus
 `DIGGER_ADMIN_KEY`, `ETH_RPC`, `VARA_ETH_WS`, and `ROUTER_ADDRESS`.
+When `DIGGER_PROXY_CODE_ID` already points to validated Router code, the backend
+does not need the local proxy wasm artifact. If the code is not validated yet,
+ship `digger_proxy.opt.wasm` with the backend image or set `DIGGER_PROXY_WASM_PATH`
+to its deployed path so the backend can request validation.
 
 The MVP duplicate rule is one active/planned digger per `owner + season + world`.
 If the same owner asks again, the backend returns the existing `programId`
@@ -560,11 +564,12 @@ Live rental smoke checklist:
 ```txt
 1. Set DIGGER_RENTAL_MODE=live.
 2. Set DIGGER_ADMIN_KEY, DIGGER_PROXY_CODE_ID, ETH_RPC, VARA_ETH_WS, ROUTER_ADDRESS.
-3. Set ADMIN_API_TOKEN before exposing the API outside localhost.
-4. POST /api/diggers/request with owner + worldId + dryRun=false.
-5. Confirm response has programId, createTxHash, topUpTxHash, initTxHash.
-6. Run npm run scheduler -- --once.
-7. Confirm the same digger is skipped when executable balance is already >= 120 VARA.
+3. If DIGGER_PROXY_CODE_ID is not validated yet, include digger_proxy.opt.wasm and set DIGGER_PROXY_WASM_PATH.
+4. Set ADMIN_API_TOKEN before exposing the API outside localhost.
+5. POST /api/diggers/request with owner + worldId + dryRun=false.
+6. Confirm response has programId, createTxHash, topUpTxHash, initTxHash.
+7. Run npm run scheduler -- --once.
+8. Confirm the same digger is skipped when executable balance is already >= 120 VARA.
 ```
 
 Before merging, keep LP Bonus out of the runtime until its Uniswap accounting and

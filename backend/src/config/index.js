@@ -35,6 +35,7 @@ export function loadConfig(env = process.env) {
     adminKey: env.DIGGER_ADMIN_KEY || '',
     adminApiToken: env.ADMIN_API_TOKEN || '',
     diggerProxyCodeId: env.DIGGER_PROXY_CODE_ID || env.DIGGER_CODE_ID || '',
+    diggerProxyWasmPath: env.DIGGER_PROXY_WASM_PATH || '',
     diggerProgramIds: splitList(env.DIGGER_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_ID || ''),
     redeemProgramIds: splitList(env.INDEXER_REDEEM_PROGRAM_IDS || env.DIGGER_REDEEM_PROGRAM_IDS || env.DIGGER_REDEEM_PROGRAM_ID || env.DIGGER_REDEEM_ID || ''),
     resVmtProgramIds: splitList(env.INDEXER_RES_VMT_PROGRAM_IDS || env.DIGGER_RES_VMT_PROGRAM_IDS || env.DIGGER_RES_VMT_PROGRAM_ID || env.DIGGER_RES_VMT_ID || ''),

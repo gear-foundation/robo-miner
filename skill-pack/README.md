@@ -16,10 +16,16 @@ flow:
 
 ## Use
 
-Load `skills/robo-miner-agent` as a local Codex skill. Do not install an npm
-package for this skill and do not use a Robo Miner helper CLI. The live runtime
-path is `vara-wallet` for wallet/contract calls and HTTP requests for backend
-discovery/rental.
+Install the agent skill pack from GitHub:
+
+```bash
+npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
+```
+
+Then restart the agent session if it does not pick up newly installed skills
+immediately. Do not install an npm package for this skill and do not use a Robo
+Miner helper CLI. The live runtime path is `vara-wallet` for wallet/contract
+calls and HTTP requests for backend discovery/rental.
 
 ## Backend and Writes
 

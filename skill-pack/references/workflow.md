@@ -16,9 +16,13 @@ Robo Miner npm packages, helper CLIs, or local scripts for this workflow.
 
 ## Gate 1: Load the Skill
 
-Use the local `skills/robo-miner-agent` folder as the skill source. The required
-runtime tools are `curl` for backend HTTP and `vara-wallet` for wallet and
-contract calls.
+Install or load the top-level `skill-pack` folder as the skill source. The
+required runtime tools are `curl` for backend HTTP and `vara-wallet` for wallet
+and contract calls.
+
+```bash
+npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
+```
 
 ```bash
 curl --version
@@ -65,11 +69,17 @@ Choose the Vara.eth network:
 export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}" # hoodi or mainnet
 export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.vara.network}"
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-agent-eth}"
-export ROBO_MINER_DIGGER_PROXY_IDL="${ROBO_MINER_DIGGER_PROXY_IDL:-skills/robo-miner-agent/assets/idl/digger_proxy.idl}"
-export ROBO_MINER_WORLD_IDL="${ROBO_MINER_WORLD_IDL:-skills/robo-miner-agent/assets/idl/digger_world.idl}"
-export ROBO_MINER_RES_VMT_IDL="${ROBO_MINER_RES_VMT_IDL:-skills/robo-miner-agent/assets/idl/digger_res_vmt.idl}"
-export ROBO_MINER_REDEEM_IDL="${ROBO_MINER_REDEEM_IDL:-skills/robo-miner-agent/assets/idl/digger_redeem.idl}"
+export ROBO_MINER_SKILL_ROOT="${ROBO_MINER_SKILL_ROOT:-skill-pack}"
+export ROBO_MINER_DIGGER_PROXY_IDL="${ROBO_MINER_DIGGER_PROXY_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_proxy.idl}"
+export ROBO_MINER_WORLD_IDL="${ROBO_MINER_WORLD_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_world.idl}"
+export ROBO_MINER_RES_VMT_IDL="${ROBO_MINER_RES_VMT_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_res_vmt.idl}"
+export ROBO_MINER_REDEEM_IDL="${ROBO_MINER_REDEEM_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_redeem.idl}"
 ```
+
+When running from a repository checkout, `ROBO_MINER_SKILL_ROOT=skill-pack` is
+usually correct. When the skill was installed into an agent runtime, set
+`ROBO_MINER_SKILL_ROOT` to the installed skill folder's absolute path before
+calling `vara-wallet --idl`.
 
 Hoodi uses the public backend above. Mainnet is selectable, but until mainnet
 Robo Miner endpoints are published, provide explicit values:
@@ -251,10 +261,10 @@ with `vara-wallet message send --payload <encodedPayload> --via injected`.
 This is a diagnostics fallback; the primary write path remains `vara-wallet`.
 
 Set `ROBO_MINER_DIGGER_PROXY_IDL` to the local skill asset path, for example
-`skills/robo-miner-agent/assets/idl/digger_proxy.idl`, or use the absolute path
-to this skill folder. If `Register` returns a Sails route, header, or decode
+`skill-pack/assets/idl/digger_proxy.idl`, or use the absolute path to the
+installed skill folder. If `Register` returns a Sails route, header, or decode
 error, stop and report the backend `codeId`, `diggerProgramId`, and IDL path; do
-not fall back to direct `World.Register`.
+not fall back to direct `World/Register`.
 
 Then verify world state:
 

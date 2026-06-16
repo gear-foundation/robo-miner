@@ -17,9 +17,9 @@ settlement through `Surface -> MintResources -> Redeem` is allowed.
 
 Use this folder as a Codex skill source. The skill is the `SKILL.md`,
 references, IDL assets, env example, and UI metadata under
-`skills/robo-miner-agent`. Do not install an npm package or run a skill package
-CLI for Robo Miner. Once the skill is loaded in the agent runtime, the live
-tooling is `vara-wallet` plus ordinary backend HTTP requests.
+`skill-pack`. Install it from GitHub with `npx skills add`, not from npm. Once
+the skill is loaded in the agent runtime, the live tooling is `vara-wallet` plus
+ordinary backend HTTP requests.
 
 ## Hard Gates
 

@@ -13,17 +13,13 @@ Do not create worlds, reset maps, call `Admin/*`, transfer operator funds, or
 operate the backend unless a human explicitly assigns that operator role. Player
 settlement through `Surface -> MintResources -> Redeem` is allowed.
 
-## Install
+## Skill Source
 
-Install this skill through the skill CLI:
-
-```bash
-npx skill add @gear-foundation/robo-miner-agent-skill
-```
-
-The skill contains this `SKILL.md`, all references, IDL assets, env examples,
-UI metadata, and helper scripts. Use the installed `robo-miner-agent` skill as
-the only Robo Miner agent skill surface.
+Use this folder as a Codex skill source. The skill is the `SKILL.md`,
+references, IDL assets, env example, and UI metadata under
+`skills/robo-miner-agent`. Do not install an npm package or run a skill package
+CLI for Robo Miner. Once the skill is loaded in the agent runtime, the live
+tooling is `vara-wallet` plus ordinary backend HTTP requests.
 
 ## Hard Gates
 
@@ -32,7 +28,7 @@ until every prior gate is verified.
 
 | Gate | Required result before continuing |
 | --- | --- |
-| 1. Tooling | Node.js 22+, npm, installed skill package, local skill npm dependencies when using helpers, and `vara-wallet` v0.20.3 or newer from `gear-foundation/vara-wallet` are available. |
+| 1. Tooling | This skill folder is loaded, `curl` is available for backend HTTP, and `vara-wallet` v0.20.3 or newer from `gear-foundation/vara-wallet` is available. |
 | 2. Identity | A persistent Vara.eth wallet exists in `vara-wallet`, its EVM address is known, and its ActorId is derived. |
 | 3. Environment | Network, router, backend API, world id, RES VMT id, and redeem id are discovered. |
 | 4. Digger | A backend-managed DiggerProxy exists for `owner + season + world`. |
@@ -73,8 +69,6 @@ Use those IDLs for Sails calls, payload encoding, event decoding, and examples.
 Bundled helper assets:
 
 - `assets/examples/agent.env.example`: environment template without secrets.
-- `scripts/actor-id.mjs`: optional debug helper for 20-byte EVM address to
-  32-byte ActorId conversion. The live workflow does not require this helper.
 
 ## Core Loop
 
@@ -83,8 +77,7 @@ Bundled helper assets:
    --via injected`. Do not call `World.Register` directly in this live skill.
 3. Poll `World.Session()` until active.
 4. Read `Session()`, `MapSnapshot()`, `Agents()`, `AgentOf(agentActorId)`, and
-   `InventoryOf(agentActorId)` with `vara-wallet call` or the read-only
-   `robo-miner-live query` helper.
+   `InventoryOf(agentActorId)` with `vara-wallet call`.
 5. Choose exactly one supported proxy action: `MoveAgent`, `Drill`,
    `PlaceLadder`, `Surface`, `Exit`, or `MintResources`. Send it with
    `vara-wallet call ... --via injected`.
@@ -96,12 +89,11 @@ Bundled helper assets:
 ## Mandatory Safety Rules
 
 - Treat the contract as source of truth after registration.
-- Use backend discovery only to find matches and rented diggers.
+- Use backend HTTP discovery only to find matches and rented diggers.
 - Never call `Admin/*` methods from this skill.
 - Use the rented DiggerProxy path as the only live Robo Miner action path.
 - Use `vara-wallet` as the primary path for all state-changing calls.
-- Use `robo-miner-live` only for backend discovery/request helpers and optional
-  read aggregation, not for signed game actions.
+- Do not use local scripts or npm CLIs for Robo Miner actions.
 - Do not keep playing while decoded `Session().status !== 1`.
 - Never send multiple unconfirmed game transactions from the same agent at once.
 - If a write fails, re-read `AgentOf`, `MapSnapshot`, and `Session`, then replan.

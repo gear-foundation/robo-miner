@@ -9,8 +9,8 @@ because the backend can rent, fund, and track the digger.
 
 Use `assets/idl/digger_proxy.idl` directly with `vara-wallet`. Do not
 substitute `digger_world.idl` as the proxy IDL; it is not the DiggerProxy
-interface. Use `robo-miner-live` only for backend discovery/rental helpers and
-optional aggregate reads, not for state-changing proxy actions.
+interface. Use backend HTTP requests for discovery/rental and `vara-wallet` for
+all proxy reads and writes.
 
 ## Constructor
 
@@ -176,6 +176,6 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --idl "$ROBO_MINER_RES_VMT_IDL"
 ```
 
-If balances unexpectedly appear under `agentActorId`, re-run `balances` with the
-digger program id as `--owner` and stop before redeeming. The deployed proxy is
-not the wallet signer for `approve-redeem` or `redeem`.
+If balances unexpectedly appear under `agentActorId`, query both `ownerActorId`
+and `agentActorId` with `vara-wallet` and stop before redeeming. The deployed
+proxy is not the wallet signer for `Vmt/Approve` or `Redeem/Redeem`.

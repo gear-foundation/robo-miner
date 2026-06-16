@@ -11,28 +11,21 @@ sessionId, last confirmed action sequence
 
 Use `vara-wallet` as the primary path for every state-changing Robo Miner
 transaction. The live workflow uses a rented DiggerProxy for actions.
-`robo-miner-live` is only a helper for backend discovery/rental endpoints and
-optional aggregate read queries; do not use it for signed game actions while
-`vara-wallet` is available.
+Use ordinary backend HTTP requests for discovery and digger rental. Do not use
+Robo Miner npm packages, helper CLIs, or local scripts for this workflow.
 
-## Gate 1: Install the Skill
+## Gate 1: Load the Skill
 
-Install the skill before wallet or chain work:
-
-```bash
-npx skill add @gear-foundation/robo-miner-agent-skill
-robo-miner-live --help
-```
-
-The installed skill provides IDLs, references, env templates, and the optional
-`robo-miner-live` helper. If the package is used from a local checkout rather
-than an installed npm skill, install its dependencies in the skill package
-directory before using helper commands:
+Use the local `skills/robo-miner-agent` folder as the skill source. The required
+runtime tools are `curl` for backend HTTP and `vara-wallet` for wallet and
+contract calls.
 
 ```bash
-cd skills/robo-miner-agent
-npm install
+curl --version
 ```
+
+The skill folder provides IDLs, references, and env templates. No npm package,
+package CLI, or helper script installation is required.
 
 ## Gate 2: Install and Prepare `vara-wallet`
 
@@ -44,7 +37,6 @@ and secret storage. This workflow only carries the short operational path.
 ```bash
 which node
 node --version
-npm --version
 vara-wallet --version
 ```
 
@@ -64,13 +56,14 @@ vara-wallet --version
 ```
 
 Keep the same working Node/PATH for every subsequent `vara-wallet` command. If
-using the optional `robo-miner-live` helper, keep the same PATH there too
-because it may shell out to `vara-wallet`.
+the Node runtime still cannot run `vara-wallet keys`, stop and report the
+tooling issue before chain writes.
 
 Choose the Vara.eth network:
 
 ```bash
 export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}" # hoodi or mainnet
+export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.vara.network}"
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-agent-eth}"
 export ROBO_MINER_DIGGER_PROXY_IDL="${ROBO_MINER_DIGGER_PROXY_IDL:-skills/robo-miner-agent/assets/idl/digger_proxy.idl}"
 export ROBO_MINER_WORLD_IDL="${ROBO_MINER_WORLD_IDL:-skills/robo-miner-agent/assets/idl/digger_world.idl}"
@@ -78,7 +71,7 @@ export ROBO_MINER_RES_VMT_IDL="${ROBO_MINER_RES_VMT_IDL:-skills/robo-miner-agent
 export ROBO_MINER_REDEEM_IDL="${ROBO_MINER_REDEEM_IDL:-skills/robo-miner-agent/assets/idl/digger_redeem.idl}"
 ```
 
-Hoodi has built-in CLI defaults. Mainnet is selectable, but until mainnet
+Hoodi uses the public backend above. Mainnet is selectable, but until mainnet
 Robo Miner endpoints are published, provide explicit values:
 
 ```bash
@@ -123,29 +116,29 @@ rental and `ownerActorId` for VMT/redeem checks.
 
 ## Gate 3: Get Available Worlds
 
-Fetch the backend manifest through the optional helper:
+Fetch backend metadata with HTTP:
 
 ```bash
-robo-miner-live worlds --network "$VARA_ETH_NETWORK"
+curl -fsS "$ROBO_MINER_BACKEND_URL/health"
+curl -fsS "$ROBO_MINER_BACKEND_URL/api/manifest"
+curl -fsS "$ROBO_MINER_BACKEND_URL/api/worlds"
+curl -fsS "$ROBO_MINER_BACKEND_URL/matches"
 ```
 
-Use `--raw` when the compact output does not show every backend field:
-
-```bash
-robo-miner-live worlds --network "$VARA_ETH_NETWORK" --raw
-```
-
-Pick a world from `active[]`, preferably one with manifest status
-`waiting_agents`. The `worldId` is `active[].programId`, not the human label.
+Use `/api/manifest` and `/api/worlds` as the primary discovery responses.
+Use `/matches` when it exposes clearer season/session status. Pick a world from
+`active[]` or the equivalent live/waiting list, preferably one with manifest
+status `waiting_agents`. The `worldId` is the world `programId`, not a human
+label.
 
 Store:
 
 ```text
-seasonId = output.seasonId
-worldId  = selected active[].programId
-router   = output.router or output.seasonConfig.router
-resVmtProgramId = output.economy/resource config value if present
-redeemProgramId = output.economy/resource config value if present
+seasonId = manifest/match season id, for example season-1
+worldId  = selected world programId
+router   = manifest router or seasonConfig.router
+resVmtProgramId = manifest economy/resource config value if present
+redeemProgramId = manifest economy/resource config value if present
 ```
 
 Optional local env state:
@@ -163,14 +156,13 @@ export ROBO_MINER_REDEEM_PROGRAM_ID="$redeemProgramId"
 Request a backend-managed DiggerProxy for the selected owner, season, and world:
 
 ```bash
-robo-miner-live request-digger \
-  --network "$VARA_ETH_NETWORK" \
-  --owner "$ownerAddress" \
-  --world "$worldId" \
-  --season "$seasonId"
+curl -fsS \
+  -X POST "$ROBO_MINER_BACKEND_URL/api/diggers/request" \
+  -H 'content-type: application/json' \
+  --data "{\"owner\":\"$ownerAddress\",\"worldId\":\"$worldId\",\"seasonId\":\"$seasonId\",\"dryRun\":false}"
 ```
 
-The request body sent by the CLI is:
+Equivalent request body:
 
 ```json
 {
@@ -192,11 +184,8 @@ If the backend returns `status: "pending"` and `programId: null`, wait about
 three minutes, then poll the public digger list without a world filter:
 
 ```bash
-robo-miner-live diggers \
-  --network "$VARA_ETH_NETWORK" \
-  --owner "$ownerAddress" \
-  --season "$seasonId" \
-  --status active
+curl -fsS \
+  "$ROBO_MINER_BACKEND_URL/api/diggers?owner=$ownerAddress&season=$seasonId&status=active"
 ```
 
 Do not pass `world` or `worldId` to the public `/api/diggers` lookup. Compare
@@ -261,11 +250,11 @@ If `vara-wallet call` returns a decode error but the transaction was sent, use a
 with `vara-wallet message send --payload <encodedPayload> --via injected`.
 This is a diagnostics fallback; the primary write path remains `vara-wallet`.
 
-Set `ROBO_MINER_DIGGER_PROXY_IDL` to the installed skill asset path, for example
+Set `ROBO_MINER_DIGGER_PROXY_IDL` to the local skill asset path, for example
 `skills/robo-miner-agent/assets/idl/digger_proxy.idl`, or use the absolute path
-from the installed skill package. If `Register` returns a Sails route, header,
-or decode error, stop and report the backend `codeId`, `diggerProgramId`, and
-IDL path; do not fall back to direct `World.Register`.
+to this skill folder. If `Register` returns a Sails route, header, or decode
+error, stop and report the backend `codeId`, `diggerProgramId`, and IDL path; do
+not fall back to direct `World.Register`.
 
 Then verify world state:
 

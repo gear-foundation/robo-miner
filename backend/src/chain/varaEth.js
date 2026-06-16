@@ -72,16 +72,44 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
       });
       const ownerActor = actorIdFromAddress(normalizeAddress(owner, 'owner'));
       const worldActor = actorIdFromAddress(normalizeAddress(worldId, 'worldId'));
-      const builder = api.eth.router.createProgramBuilder(normalizedCodeId);
+      let builder = api.eth.router.createProgramBuilder(normalizedCodeId);
+      let topUpReceipt = null;
+      if (topUp > 0n) {
+        logger?.info?.('deploy.create_program.balance.start', {
+          amount: topUp.toString(),
+          elapsedMs: Date.now() - startedAt,
+        });
+        const balance = await api.eth.wvara.balanceOf(account.address);
+        logger?.info?.('deploy.create_program.balance', {
+          account: account.address,
+          balance: balance.toString(),
+          amount: topUp.toString(),
+          elapsedMs: Date.now() - startedAt,
+        });
+        if (BigInt(balance) < topUp) {
+          throw new Error(`Not enough WVARA for initial executable balance: need ${topUp}, balance ${balance}`);
+        }
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
+        const { signature } = await api.eth.wvara.prepareAndSignPermitData(api.eth.router.address, topUp, deadline);
+        builder = builder.withExecutableBalance(topUp, deadline, signature);
+        logger?.info?.('deploy.create_program.balance.permit_ok', {
+          amount: topUp.toString(),
+          deadline: deadline.toString(),
+          elapsedMs: Date.now() - startedAt,
+        });
+      }
       const createTx = builder.build();
       logger?.info?.('deploy.create_program.start', {
         codeId: normalizedCodeId,
+        initialExecutableBalance: topUp.toString(),
         elapsedMs: Date.now() - startedAt,
       });
       const createReceipt = await createTx.sendAndWaitForReceipt();
+      if (topUp > 0n) topUpReceipt = createReceipt;
       logger?.info?.('deploy.create_program.receipt', {
         txHash: createReceipt.transactionHash || createReceipt.hash || null,
         status: createReceipt.status,
+        initialExecutableBalance: topUp.toString(),
         elapsedMs: Date.now() - startedAt,
       });
       const programId = normalizeAddress(await createTx.getProgramId(), 'ProgramCreated.actorId');
@@ -105,33 +133,6 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         executableBalance: createdMirrorState.executableBalance || null,
         elapsedMs: Date.now() - startedAt,
       });
-
-      let topUpReceipt = null;
-      if (topUp > 0n) {
-        logger?.info?.('deploy.top_up.start', {
-          programId,
-          amount: topUp.toString(),
-          elapsedMs: Date.now() - startedAt,
-        });
-        topUpReceipt = await topUpProgramExecutableBalance({
-          api,
-          getMirrorClient,
-          publicClient,
-          signer,
-          account,
-          programId,
-          amount: topUp,
-          logger,
-          startedAt,
-        });
-        logger?.info?.('deploy.top_up.receipt', {
-          programId,
-          amount: topUp.toString(),
-          txHash: topUpReceipt?.transactionHash || topUpReceipt?.hash || null,
-          status: topUpReceipt?.status,
-          elapsedMs: Date.now() - startedAt,
-        });
-      }
 
       logger?.info?.('deploy.idl.load.start', {
         contract: 'digger_proxy',

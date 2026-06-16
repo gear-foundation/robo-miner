@@ -27,7 +27,7 @@ export function loadConfig(env = process.env) {
     ethRpc: env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
     varaEthWs: env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
     indexerPollMs: Number(env.INDEXER_POLL_MS || 3000),
-    indexerTimeoutMs: Number(env.INDEXER_TIMEOUT_MS || env.DIGGER_QUERY_TIMEOUT_MS || 30000),
+    indexerTimeoutMs: Number(env.INDEXER_TIMEOUT_MS || env.DIGGER_QUERY_TIMEOUT_MS || 180000),
     schedulerRegistryMs: Number(env.SCHEDULER_REGISTRY_MS || 60_000),
     schedulerSnapshotMs: Number(env.SCHEDULER_SNAPSHOT_MS || 30_000),
     schedulerRentalMs: Number(env.SCHEDULER_RENTAL_MS || 3_600_000),

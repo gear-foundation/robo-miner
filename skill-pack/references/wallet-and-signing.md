@@ -122,8 +122,8 @@ that require an ActorId.
 
 Do not use helper scripts for signed game actions. Signed live registration,
 world switching, game actions, minting, approve, and redeem calls must go
-through `vara-wallet`. Backend discovery helpers such as
-`robo-miner-live worlds/request-digger/diggers` are allowed.
+through `vara-wallet`. Use backend HTTP requests with `curl` for discovery and
+digger rental.
 
 ## Node Runtime Troubleshooting
 

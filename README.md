@@ -27,8 +27,20 @@ Current product surfaces:
 frontend/                 Phaser 3 + Vite browser app
 backend/                  modular monolith API, jobs, registry, indexer, rental, factory
 contracts/                Sails/Vara.eth contracts and TypeScript scripts
-SKILLS.md                 local agent observation/action contract
+skill-pack/               Codex skill pack for live Vara.eth Robo Miner agents
 ```
+
+## Agent Skill Pack
+
+Install the Robo Miner agent skill pack from GitHub:
+
+```bash
+npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
+```
+
+Then restart the agent session if it does not pick up newly installed skills
+immediately. The skill uses `vara-wallet` for wallet and contract calls, and
+plain backend HTTP requests for world discovery and digger rental.
 
 Important frontend areas:
 

@@ -1,4 +1,4 @@
-export async function createVaraEthChain(config) {
+export async function createVaraEthChain(config, { logger = null } = {}) {
   if (!config.adminKey) throw new Error('DIGGER_ADMIN_KEY is required for live digger rental top-up');
 
   const { CodeState, WsVaraEthProvider, createVaraEthApi, getMirrorClient } = await import('@vara-eth/api');
@@ -41,7 +41,18 @@ export async function createVaraEthChain(config) {
       return sendAndWait(topUpTx, 'executableBalanceTopUp');
     },
     async deployDigger({ owner, worldId, codeId, initialTopUp = 0n }) {
+      const startedAt = Date.now();
       const topUp = BigInt(initialTopUp);
+      logger?.info?.('deploy.start', {
+        owner,
+        worldId,
+        codeId: codeId || null,
+        initialTopUp: topUp.toString(),
+      });
+      logger?.info?.('deploy.code_validation.start', {
+        codeId: codeId || null,
+        wasmPath: config.diggerProxyWasmPath || null,
+      });
       const normalizedCodeId = await ensureProxyCodeValidated({
         api,
         codeId,
@@ -53,16 +64,39 @@ export async function createVaraEthChain(config) {
         rootDir: config.rootDir,
         wasmPath: config.diggerProxyWasmPath,
         timeoutMs: config.indexerTimeoutMs || 180000,
+        logger,
+      });
+      logger?.info?.('deploy.code_validation.ok', {
+        codeId: normalizedCodeId,
+        elapsedMs: Date.now() - startedAt,
       });
       const ownerActor = actorIdFromAddress(normalizeAddress(owner, 'owner'));
       const worldActor = actorIdFromAddress(normalizeAddress(worldId, 'worldId'));
       const builder = api.eth.router.createProgramBuilder(normalizedCodeId);
       const createTx = builder.build();
+      logger?.info?.('deploy.create_program.start', {
+        codeId: normalizedCodeId,
+        elapsedMs: Date.now() - startedAt,
+      });
       const createReceipt = await createTx.sendAndWaitForReceipt();
+      logger?.info?.('deploy.create_program.receipt', {
+        txHash: createReceipt.transactionHash || createReceipt.hash || null,
+        status: createReceipt.status,
+        elapsedMs: Date.now() - startedAt,
+      });
       const programId = normalizeAddress(await createTx.getProgramId(), 'ProgramCreated.actorId');
+      logger?.info?.('deploy.program_id.resolved', {
+        programId,
+        elapsedMs: Date.now() - startedAt,
+      });
 
       let topUpReceipt = null;
       if (topUp > 0n) {
+        logger?.info?.('deploy.top_up.start', {
+          programId,
+          amount: topUp.toString(),
+          elapsedMs: Date.now() - startedAt,
+        });
         topUpReceipt = await topUpProgramExecutableBalance({
           api,
           getMirrorClient,
@@ -71,17 +105,61 @@ export async function createVaraEthChain(config) {
           account,
           programId,
           amount: topUp,
+          logger,
+          startedAt,
+        });
+        logger?.info?.('deploy.top_up.receipt', {
+          programId,
+          amount: topUp.toString(),
+          txHash: topUpReceipt?.transactionHash || topUpReceipt?.hash || null,
+          status: topUpReceipt?.status,
+          elapsedMs: Date.now() - startedAt,
         });
       }
 
+      logger?.info?.('deploy.idl.load.start', {
+        contract: 'digger_proxy',
+        elapsedMs: Date.now() - startedAt,
+      });
       const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_proxy' });
       const createCtor = sails.ctors?.Create;
       if (!createCtor) throw new Error('Proxy IDL does not contain Create constructor');
+      logger?.info?.('deploy.idl.load.ok', {
+        contract: 'digger_proxy',
+        hasCreateCtor: true,
+        elapsedMs: Date.now() - startedAt,
+      });
 
       const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
+      logger?.info?.('deploy.init.encode.start', {
+        programId,
+        ownerActor,
+        worldActor,
+        elapsedMs: Date.now() - startedAt,
+      });
       const initTx = await mirror.sendMessage(createCtor.encodePayload(ownerActor, worldActor), 0n);
+      logger?.info?.('deploy.init.send.start', {
+        programId,
+        elapsedMs: Date.now() - startedAt,
+      });
       const initReceipt = await sendAndWait(initTx, 'DiggerProxy.Create');
-      await waitForMirrorState(api, getMirrorClient, publicClient, signer, programId, { initialized: true }, config.indexerTimeoutMs || 180000);
+      logger?.info?.('deploy.init.receipt', {
+        programId,
+        txHash: initReceipt.transactionHash || initReceipt.hash || null,
+        status: initReceipt.status,
+        elapsedMs: Date.now() - startedAt,
+      });
+      logger?.info?.('deploy.wait_mirror.start', {
+        programId,
+        timeoutMs: config.indexerTimeoutMs || 180000,
+        elapsedMs: Date.now() - startedAt,
+      });
+      const mirrorState = await waitForMirrorState(api, getMirrorClient, publicClient, signer, programId, { initialized: true }, config.indexerTimeoutMs || 180000);
+      logger?.info?.('deploy.wait_mirror.ok', {
+        programId,
+        stateHash: mirrorState.stateHash || null,
+        elapsedMs: Date.now() - startedAt,
+      });
 
       return {
         programId,
@@ -143,16 +221,40 @@ async function sendAndWait(tx, label) {
   throw new Error(`${label} transaction object does not expose send method`);
 }
 
-async function topUpProgramExecutableBalance({ api, getMirrorClient, publicClient, signer, account, programId, amount }) {
+async function topUpProgramExecutableBalance({ api, getMirrorClient, publicClient, signer, account, programId, amount, logger = null, startedAt = Date.now() }) {
   const topUp = BigInt(amount);
   const balance = await api.eth.wvara.balanceOf(account.address);
+  logger?.info?.('deploy.top_up.balance', {
+    programId,
+    account: account.address,
+    balance: balance.toString(),
+    amount: topUp.toString(),
+    elapsedMs: Date.now() - startedAt,
+  });
   if (BigInt(balance) < topUp) {
     throw new Error(`Not enough WVARA for executable balance top-up: need ${topUp}, balance ${balance}`);
   }
 
   const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
+  logger?.info?.('deploy.top_up.approve.start', {
+    programId,
+    amount: topUp.toString(),
+    elapsedMs: Date.now() - startedAt,
+  });
   const approveTx = await api.eth.wvara.approve(programId, topUp);
-  await sendAndWait(approveTx, 'wVARA approve');
+  const approveReceipt = await sendAndWait(approveTx, 'wVARA approve');
+  logger?.info?.('deploy.top_up.approve.receipt', {
+    programId,
+    amount: topUp.toString(),
+    txHash: approveReceipt.transactionHash || approveReceipt.hash || null,
+    status: approveReceipt.status,
+    elapsedMs: Date.now() - startedAt,
+  });
+  logger?.info?.('deploy.top_up.send.start', {
+    programId,
+    amount: topUp.toString(),
+    elapsedMs: Date.now() - startedAt,
+  });
   const topUpTx = await mirror.executableBalanceTopUp(topUp);
   return sendAndWait(topUpTx, 'executableBalanceTopUp');
 }
@@ -255,6 +357,7 @@ async function ensureProxyCodeValidated({
   rootDir,
   wasmPath,
   timeoutMs,
+  logger,
 }) {
   const artifactPath = wasmPath
     ? path.resolve(rootDir, wasmPath)
@@ -263,8 +366,16 @@ async function ensureProxyCodeValidated({
   if (codeId) {
     const resolvedCodeId = normalizeHex32(codeId, 'DIGGER_PROXY_CODE_ID');
     const state = await api.eth.router.codeState(resolvedCodeId);
+    logger?.info?.('deploy.code_validation.state', {
+      codeId: resolvedCodeId,
+      state: String(state),
+    });
     if (state === CodeState.Validated) return resolvedCodeId;
     if (state === CodeState.ValidationRequested) {
+      logger?.info?.('deploy.code_validation.wait_requested', {
+        codeId: resolvedCodeId,
+        timeoutMs,
+      });
       await waitForCodeState(api, resolvedCodeId, CodeState.Validated, timeoutMs);
       return resolvedCodeId;
     }
@@ -276,8 +387,16 @@ async function ensureProxyCodeValidated({
     : normalizeHex32(generateCodeHash(new Uint8Array(wasm)), 'digger_proxy.opt.wasm code hash');
 
   const state = await api.eth.router.codeState(resolvedCodeId);
+  logger?.info?.('deploy.code_validation.state', {
+    codeId: resolvedCodeId,
+    state: String(state),
+  });
   if (state === CodeState.Validated) return resolvedCodeId;
   if (state === CodeState.ValidationRequested) {
+    logger?.info?.('deploy.code_validation.wait_requested', {
+      codeId: resolvedCodeId,
+      timeoutMs,
+    });
     await waitForCodeState(api, resolvedCodeId, CodeState.Validated, timeoutMs);
     return resolvedCodeId;
   }
@@ -290,8 +409,18 @@ async function ensureProxyCodeValidated({
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
   const { signature } = await api.eth.wvara.prepareAndSignPermitData(api.eth.router.address, baseFee, deadline);
+  logger?.info?.('deploy.code_validation.request.start', {
+    codeId: resolvedCodeId,
+    baseFee: baseFee.toString(),
+    deadline: deadline.toString(),
+  });
   const tx = await api.eth.router.requestCodeValidation(new Uint8Array(wasm), deadline, signature);
   const receipt = await tx.sendAndWaitForReceipt();
+  logger?.info?.('deploy.code_validation.request.receipt', {
+    codeId: tx.codeId || resolvedCodeId,
+    txHash: receipt.transactionHash || receipt.hash || null,
+    status: receipt.status,
+  });
   if (receipt.status === 'reverted' || receipt.status === false) {
     throw new Error(`Code validation request failed: ${receipt.transactionHash || receipt.hash || 'unknown tx'}`);
   }

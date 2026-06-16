@@ -127,8 +127,8 @@ const server = http.createServer(async (req, res) => {
       });
       let chain = null;
       try {
-        chain = dryRun ? null : await createVaraEthChain(config);
-        const rental = dryRun ? dryRunRental : new DiggerRentalService({ store, chain, config });
+        chain = dryRun ? null : await createVaraEthChain(config, { logger: createLogger('chain') });
+        const rental = dryRun ? dryRunRental : new DiggerRentalService({ store, chain, config, logger });
         return json(res, dryRun ? 202 : 201, await rental.requestDigger({
           owner: body.owner,
           worldId: body.worldId,

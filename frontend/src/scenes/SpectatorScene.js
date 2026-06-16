@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { TILE, BLOCK, BLOCK_DATA, SURFACE_Y } from '../config.js';
+import { getBlock } from '../world.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
@@ -15,6 +16,8 @@ import { navigateBack } from '../router.js';
 // real durations with smooth interpolation; the agent is polled when its
 // character goes idle. Free-scroll camera; a speed control scales real time.
 const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse animation)
+const CHUNK_TILES = 8;
+const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
 
 function formatClock(ms) {
   if (!Number.isFinite(ms)) return 'waiting';
@@ -37,10 +40,22 @@ function displayAddress(address) {
     : address;
 }
 
+function sameDisplayAddress(a, b) {
+  const left = displayAddress(a).toLowerCase();
+  const right = displayAddress(b).toLowerCase();
+  return Boolean(left && right && left === right);
+}
+
 function addressScanUrl(address) {
   const addr = displayAddress(address);
   return addr ? `https://hoodi.etherscan.io/address/${addr}` : '#';
 }
+
+const BANK_RESOURCE_LABELS = {
+  scrst: { label: 'SCRST', color: '#8fe9ff' },
+  bcrst: { label: 'BCRST', color: '#9bffbf' },
+  hcrst: { label: 'HCRST', color: '#ff8fdc' },
+};
 
 function squadCounts(n) {
   const kinds = ['shuttle', 'prospector', 'deepdiver', 'shuttle', 'prospector'];
@@ -61,6 +76,7 @@ export default class SpectatorScene extends GameScene {
     for (const k of keys) this.load.image(k, `assets/tiles/${k}.png`);
     this.load.audio('robot-chirp', 'assets/sfx/robot-chirp.wav');
     this.load.audio('robot-question', 'assets/sfx/robot-question.wav');
+    this.load.audio('ore-cash', 'assets/sfx/ore-cash.wav');
   }
 
   init(data) {
@@ -129,8 +145,9 @@ export default class SpectatorScene extends GameScene {
     this.loadingText?.destroy();
     this.loadingText = null;
     this.world = this.rt.world;
-    // Each agent's home column → a surface totem (its personal base/sell spot).
-    this.totemSpots = this.rt.s.miners.map((m) => m.spawnX);
+    // Chain spectator worlds should show only contract-relevant objects.
+    // Surface sell markers from the local arcade mode are intentionally hidden.
+    this.totemSpots = [];
 
     this.frameGfx = this.add.graphics(); this.frameGfx.setDepth(0);
     this.worldGfx = this.add.graphics(); this.worldGfx.setDepth(1);
@@ -150,7 +167,15 @@ export default class SpectatorScene extends GameScene {
     cam.setRoundPixels(true);
     cam.setZoom(1);
     cam.centerOn(this.rt.match.shopX * TILE, (this.world.surface + 7) * TILE);
-    this.fullWorldRender = true;
+    const requestedRenderMode = String(CHAIN.renderMode || 'chunks').toLowerCase();
+    this.worldRenderMode = RENDER_MODES.has(requestedRenderMode) ? requestedRenderMode : 'chunks';
+    this.fullWorldRender = this.worldRenderMode === 'full';
+    this.worldRenderPadPx = this.worldRenderMode === 'viewport' ? TILE * 12 : 0;
+    this.forceProceduralTiles = this.worldRenderMode === 'chunks';
+    this._chunks = null;
+    this._dirtyChunks = null;
+    this._lastChunkGrid = null;
+    this._frameDrawSignature = null;
 
     this.setupCameraControls();
     this.statsTimer = 0;
@@ -163,8 +188,198 @@ export default class SpectatorScene extends GameScene {
     this.robotQuestionSound = this.cache.audio.exists('robot-question')
       ? this.sound.add('robot-question', { volume: 0.42 })
       : null;
+    this.oreCashSound = this.cache.audio.exists('ore-cash')
+      ? this.sound.add('ore-cash', { volume: 0.55 })
+      : null;
     this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound].filter(Boolean);
     this.scale.on('resize', this.onSpecResize, this);
+  }
+
+  drawVisualFrame() {
+    const world = this.world;
+    if (!world) return;
+    const signature = `${world.W}:${world.H}:${world.surface}:${world.model}`;
+    if (this._frameDrawSignature === signature) return;
+    this._frameDrawSignature = signature;
+    super.drawVisualFrame();
+  }
+
+  drawWorld() {
+    if (this.worldRenderMode !== 'chunks') {
+      super.drawWorld();
+      return;
+    }
+
+    this.drawVisualFrame();
+    this._ensureChunkRenderer();
+    this._markChangedChunks();
+    this._markAnimatedStoneChunks();
+    this._refreshChunkVisibility();
+  }
+
+  _ensureChunkRenderer() {
+    if (this._chunks && this._chunkWorld === this.world) return;
+    this.worldGfx?.clear();
+    this._chunkWorld = this.world;
+    this._chunks = new Map();
+    this._dirtyChunks = new Set();
+    this._lastChunkGrid = this.world?.grid?.slice?.() || null;
+    this._chunkCols = Math.ceil((this.world?.W || 0) / CHUNK_TILES);
+    this._chunkRows = Math.ceil((this.world?.H || 0) / CHUNK_TILES);
+    for (let cy = 0; cy < this._chunkRows; cy += 1) {
+      for (let cx = 0; cx < this._chunkCols; cx += 1) {
+        this._dirtyChunks.add(this._chunkKey(cx, cy));
+      }
+    }
+  }
+
+  _chunkKey(cx, cy) {
+    return `${cx}:${cy}`;
+  }
+
+  _markChunkForTile(x, y) {
+    if (!this._dirtyChunks || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const cx = Math.floor(x / CHUNK_TILES);
+    const cy = Math.floor(y / CHUNK_TILES);
+    if (cx < 0 || cy < 0 || cx >= this._chunkCols || cy >= this._chunkRows) return;
+    this._dirtyChunks.add(this._chunkKey(cx, cy));
+  }
+
+  _markChangedChunks() {
+    const grid = this.world?.grid;
+    if (!grid) return;
+    if (!this._lastChunkGrid || this._lastChunkGrid.length !== grid.length) {
+      this._lastChunkGrid = grid.slice();
+      for (let cy = 0; cy < this._chunkRows; cy += 1) {
+        for (let cx = 0; cx < this._chunkCols; cx += 1) this._dirtyChunks.add(this._chunkKey(cx, cy));
+      }
+      return;
+    }
+
+    const W = this.world.W;
+    for (let i = 0; i < grid.length; i += 1) {
+      if (grid[i] === this._lastChunkGrid[i]) continue;
+      const x = i % W;
+      const y = Math.floor(i / W);
+      for (let yy = y - 1; yy <= y + 1; yy += 1) {
+        for (let xx = x - 1; xx <= x + 1; xx += 1) this._markChunkForTile(xx, yy);
+      }
+      this._lastChunkGrid[i] = grid[i];
+    }
+  }
+
+  _markAnimatedStoneChunks() {
+    for (const stone of this.fallingStones || []) {
+      this._markChunkForTile(stone.x, stone.y);
+      this._markChunkForTile(stone.x, stone.y - 1);
+      this._markChunkForTile(stone.x, stone.y + 1);
+    }
+  }
+
+  _refreshChunkVisibility() {
+    if (!this._chunks || !this.world) return;
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    const pad = TILE * 2;
+    const leftPx = cam.scrollX - pad;
+    const topPx = cam.scrollY - pad;
+    const rightPx = cam.scrollX + cam.width / zoom + pad;
+    const bottomPx = cam.scrollY + cam.height / zoom + pad;
+    const left = Math.max(0, Math.floor(leftPx / TILE));
+    const right = Math.min(this.world.W - 1, Math.floor(rightPx / TILE));
+    const top = Math.max(0, Math.floor(topPx / TILE));
+    const bottom = Math.min(this.world.H - 1, Math.floor(bottomPx / TILE));
+    const minCx = Math.max(0, Math.floor(left / CHUNK_TILES));
+    const maxCx = Math.min(this._chunkCols - 1, Math.floor(right / CHUNK_TILES));
+    const minCy = Math.max(0, Math.floor(top / CHUNK_TILES));
+    const maxCy = Math.min(this._chunkRows - 1, Math.floor(bottom / CHUNK_TILES));
+    const visibleKeys = new Set();
+
+    for (let cy = minCy; cy <= maxCy; cy += 1) {
+      for (let cx = minCx; cx <= maxCx; cx += 1) {
+        const key = this._chunkKey(cx, cy);
+        visibleKeys.add(key);
+        const chunk = this._getChunk(cx, cy);
+        chunk.g.setVisible(true);
+        if (this._dirtyChunks.has(key) || !chunk.rendered) this._drawChunk(chunk);
+      }
+    }
+
+    for (const [key, chunk] of this._chunks) {
+      if (!visibleKeys.has(key)) chunk.g.setVisible(false);
+    }
+  }
+
+  _getChunk(cx, cy) {
+    const key = this._chunkKey(cx, cy);
+    let chunk = this._chunks.get(key);
+    if (!chunk) {
+      const g = this.add.graphics();
+      g.setDepth(1);
+      chunk = {
+        key,
+        cx,
+        cy,
+        x0: cx * CHUNK_TILES,
+        y0: cy * CHUNK_TILES,
+        x1: Math.min(this.world.W, (cx + 1) * CHUNK_TILES),
+        y1: Math.min(this.world.H, (cy + 1) * CHUNK_TILES),
+        rendered: false,
+        g,
+      };
+      this._chunks.set(key, chunk);
+    }
+    return chunk;
+  }
+
+  _drawChunk(chunk) {
+    const g = chunk.g;
+    g.clear();
+    this._drawChunkBackground(g, chunk);
+    for (let y = chunk.y0; y < chunk.y1; y += 1) {
+      for (let x = chunk.x0; x < chunk.x1; x += 1) {
+        const type = getBlock(this.world, x, y);
+        if (type === BLOCK.SKY) continue;
+        this.drawTile(g, x, y, type, BLOCK_DATA[type]);
+      }
+    }
+    chunk.rendered = true;
+    this._dirtyChunks.delete(chunk.key);
+  }
+
+  _drawChunkBackground(g, chunk) {
+    const surfaceY = this.world?.surface ?? SURFACE_Y;
+    const px = chunk.x0 * TILE;
+    const py = chunk.y0 * TILE;
+    const width = (chunk.x1 - chunk.x0) * TILE;
+    const height = (chunk.y1 - chunk.y0) * TILE;
+    const bottom = py + height;
+    const surfacePx = surfaceY * TILE;
+
+    const skyBottom = Math.min(bottom, surfacePx);
+    if (skyBottom > py) {
+      g.fillStyle(0x4a7bbf, 1);
+      g.fillRect(px, py, width, skyBottom - py);
+    }
+
+    const dugTop = Math.max(py, surfacePx);
+    if (bottom > dugTop) {
+      g.fillStyle(0x3a2412, 1);
+      g.fillRect(px, dugTop, width, bottom - dugTop);
+      g.fillStyle(0x1f130a, 0.55);
+      const step = 24;
+      const startX = Math.floor(px / step) * step;
+      const startY = Math.floor(dugTop / step) * step;
+      for (let yy = startY; yy < bottom; yy += step) {
+        for (let xx = startX; xx < px + width; xx += step) {
+          const s = (xx * 73856093 ^ yy * 19349663) >>> 0;
+          const ox = s % 10;
+          const oy = (s >>> 8) % 10;
+          const sz = 3 + ((s >>> 16) % 3);
+          g.fillRect(xx + ox, yy + oy, sz, sz);
+        }
+      }
+    }
   }
 
   showLoading() {
@@ -252,7 +467,9 @@ export default class SpectatorScene extends GameScene {
           this.spawnDebris(e.x, e.y, BLOCK.STONE, 16);
           this.cameras.main.shake(160, 0.004 * (e.radius + 1));
         }
-        else if (e.type === 'sold' || e.type === 'surfaced') this.spawnBankPop(e.id, e.amount || 0);
+        else if (e.type === 'sold' || e.type === 'surfaced') {
+          this.spawnBankPop(e.owner || e.id, e.amount || 0, e.deltaBanked);
+        }
         this.pushEvent(e);
       }
       if (this.rt.worldDirty) { this.worldDirty = true; this.rt.worldDirty = false; }
@@ -387,6 +604,10 @@ export default class SpectatorScene extends GameScene {
   }
 
   cameraViewportChanged() {
+    if (this.worldRenderMode === 'chunks') {
+      this._refreshChunkVisibility();
+      return false;
+    }
     if (this.fullWorldRender) return false;
     const cam = this.cameras.main;
     const coverage = this._worldDrawCoverage;
@@ -437,17 +658,35 @@ export default class SpectatorScene extends GameScene {
     }
   }
 
-  // A digger surfaced and banked its crystals → float a "+N VARA" over its
-  // totem. This is the visible per-agent earning = a future on-chain tx.
-  spawnBankPop(id, amount) {
+  // A digger surfaced and banked its crystals → float the brought resources
+  // over that agent. This is visual feedback for AgentSurfaced, not a tx.
+  spawnBankPop(ref, amount, resources = null) {
     if (!amount) return;
-    const m = this.rt.s.miners.find((x) => x.id === id);
+    const m = this.rt.s.miners.find((x) => x.id === ref || sameDisplayAddress(x.owner, ref));
     if (!m) return;
-    const x = (m.spawnX + 0.5) * TILE;
-    const y = (this.world.surface - 0.3) * TILE;
-    const t = this.add.text(x, y, `+${amount} VARA`, {
-      fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#8affc0',
-      stroke: '#05311b', strokeThickness: 4, fontStyle: 'bold',
+    this.oreCashSound?.play({ volume: 0.58, detune: 80 });
+
+    const x = ((Number.isFinite(m.drawX) ? m.drawX : m.tx) + 0.5) * TILE;
+    const y = ((Number.isFinite(m.drawY) ? m.drawY : m.ty) - 0.2) * TILE;
+    const entries = resources
+      ? Object.entries(resources).filter(([, count]) => Number(count) > 0)
+      : [];
+
+    if (entries.length) {
+      entries.forEach(([key, count], index) => {
+        const meta = BANK_RESOURCE_LABELS[key] || { label: key.toUpperCase(), color: '#ffec6e' };
+        const t = this.add.text(x, y - index * 18, `+${count} ${meta.label}`, {
+          fontFamily: 'Courier New, monospace', fontSize: '15px', color: meta.color,
+          stroke: '#06131b', strokeThickness: 4, fontStyle: 'bold',
+        }).setOrigin(0.5, 1).setDepth(8);
+        this.bankPops.push({ t, age: -index * 90, life: 1350 });
+      });
+      return;
+    }
+
+    const t = this.add.text(x, y, `+${amount}`, {
+      fontFamily: 'Courier New, monospace', fontSize: '15px', color: '#ffec6e',
+      stroke: '#3b2600', strokeThickness: 4, fontStyle: 'bold',
     }).setOrigin(0.5, 1).setDepth(8);
     this.bankPops.push({ t, age: 0, life: 1300 });
   }
@@ -457,6 +696,10 @@ export default class SpectatorScene extends GameScene {
     for (let i = this.bankPops.length - 1; i >= 0; i--) {
       const p = this.bankPops[i];
       p.age += dt;
+      if (p.age < 0) {
+        p.t.setAlpha(0);
+        continue;
+      }
       p.t.y -= dt * 0.022;                       // float upward
       p.t.setAlpha(Math.max(0, 1 - p.age / p.life));
       if (p.age >= p.life) { p.t.destroy(); this.bankPops.splice(i, 1); }
@@ -553,7 +796,8 @@ export default class SpectatorScene extends GameScene {
         font-size:12px;font-weight:bold;letter-spacing:.5px;display:flex;justify-content:space-between">
         <span>▮ VARA.ETH · LIVE TX</span><span id="spec-tx-count" style="color:#5a8a6a">0 tx</span>
       </div>
-      <div id="spec-console-body" style="flex:1;overflow:hidden;padding:6px 9px;
+      <div id="spec-console-body" style="flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 9px;
+        scrollbar-width:thin;scrollbar-color:#2f6a3f rgba(0,0,0,.18);
         font-size:11px;line-height:1.55"></div>
       <div style="padding:5px 10px;border-top:1px solid #1f3a28;color:#3a6a4a;font-size:10px">
         pre-confirmed ~200ms · injected tx · reverse-gas
@@ -583,7 +827,9 @@ export default class SpectatorScene extends GameScene {
     const miner = e.owner
       ? this.rt.s.miners.find((m) => m.owner && m.owner.toLowerCase() === e.owner.toLowerCase())
       : e.id != null ? this.rt.s.miners.find((m) => m.id === e.id) : null;
-    const name = (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
+    const name = e.owner || miner?.owner
+      ? shortAddress(e.owner || miner.owner)
+      : (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
     const t = (this.rt.timeMs / 1000).toFixed(1);
     const surface = this.world?.surface ?? SURFACE_Y;
     const depth = e.y != null ? Math.max(0, e.y - (surface - 1)) : null;
@@ -600,6 +846,7 @@ export default class SpectatorScene extends GameScene {
         msg = `⛏ EXTRACT ${nm} −${depth}m +${v}`; break;
       }
       case 'ladder_placed': msg = `place_ladder −${depth}m`; color = '#b9823c'; break;
+      case 'stone_moved': msg = `stone ${e.fromX},${e.fromY} → ${e.x},${e.y}`; color = '#a9a9a9'; break;
       case 'sold': msg = `◆ BANK +${e.amount} VARA`; color = '#ffec6e'; break;
       case 'refueled': msg = `⛽ REFUEL −${e.cost}`; color = '#9bd0ff'; break;
       case 'upgraded': msg = `▲ UPGRADE ${(e.stat || '').toUpperCase()} L${e.level} −${e.cost}`; color = '#ffd14a'; break;
@@ -621,7 +868,8 @@ export default class SpectatorScene extends GameScene {
   renderConsole() {
     const body = document.getElementById('spec-console-body');
     if (!body) return;
-    // Newest at top; older scroll off the bottom (no scrollbar needed).
+    const keepTop = body.scrollTop < 4;
+    const previousScroll = body.scrollTop;
     const rows = this.eventLog.slice(-90).reverse();
     body.innerHTML = rows.map((l) =>
       `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">` +
@@ -630,6 +878,7 @@ export default class SpectatorScene extends GameScene {
       `<span style="color:#9bb0a4">${l.name}</span> ` +
       `<span style="color:${l.color}">${l.msg}</span></div>`,
     ).join('');
+    body.scrollTop = keepTop ? 0 : previousScroll;
     const cnt = document.getElementById('spec-tx-count');
     if (cnt) cnt.textContent = `${this.txCount} tx`;
   }

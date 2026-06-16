@@ -4,18 +4,22 @@ import http from 'node:http';
 import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
+import { EventBus } from './eventBus.js';
+import { streamEvents, wantsEventStream } from './eventStream.js';
 import { AdminService } from '../modules/admin/service.js';
 import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { InjectedIngestService } from '../modules/indexer/injectedIngest.js';
 import { LeaderboardService } from '../modules/leaderboard/service.js';
 import { SocialVerifierService } from '../modules/socialVerifier/service.js';
+import { discoveryFromManifest } from '../modules/worldRegistry/discovery.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 
 const config = loadConfig();
 const store = createStore(config);
 const logger = createLogger('api');
+const eventBus = new EventBus();
 const registry = new WorldRegistryService({
   store,
   config,
@@ -27,6 +31,7 @@ const diggerRegistry = new DiggerRegistryService({
 const injectedIngest = new InjectedIngestService({
   store,
   config,
+  eventBus,
 });
 const leaderboardService = new LeaderboardService({
   store,
@@ -70,6 +75,21 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/health') {
       return json(res, 200, { ok: true });
+    }
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/matches')) {
+      const discovery = discoveryFromManifest(await registry.getManifest(), config);
+      return json(res, 200, {
+        updatedAt: discovery.updatedAt,
+        register: discovery.register,
+        matches: discovery.matches,
+      });
+    }
+    if (req.method === 'GET' && url.pathname === '/sessions') {
+      const discovery = discoveryFromManifest(await registry.getManifest(), config);
+      return json(res, 200, {
+        updatedAt: discovery.updatedAt,
+        sessions: discovery.sessions,
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/season/current') {
       return json(res, 200, await registry.getCurrentSeason());
@@ -143,6 +163,11 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/events') {
+      if (wantsEventStream(req, url)) {
+        logger.info('events.stream.open');
+        await streamEvents(req, res, { store, logger, eventBus });
+        return;
+      }
       const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
       const db = await store.read();
       return json(res, 200, { events: db.chainEvents.slice(-limit) });

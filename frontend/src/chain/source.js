@@ -28,7 +28,7 @@
 
 import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
-import { CHAIN, chainReady } from './config.js';
+import { CHAIN, CHAIN_PLAYBACK, chainReady } from './config.js';
 import { decodeWorldEvent, worldQueries, worldActions } from './world.js';
 import { skinFromAddress } from '../render/robot.js';
 
@@ -42,10 +42,6 @@ export function createWorldSource(opts) {
 
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 const ZERO_ACTOR_RE = /^0x0+$/i;
-const CHAIN_MOVE_MS = 180;
-const CHAIN_DIG_PULSE_MS = 240;
-const CHAIN_STONE_SHAKE_MS = 520;
-const CHAIN_STONE_STEP_MS = 90;
 const MAX_BLOCK_BACKFILL = 24;
 const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
 const AGENT_STATUS = {
@@ -98,6 +94,31 @@ function normalizeResourceTotals(value = {}) {
   };
 }
 
+function nowMs() {
+  return globalThis.performance?.now?.() || Date.now();
+}
+
+function playbackGroupKey(event) {
+  return event.messageId
+    || event.txHash
+    || event.id
+    || `${event.source || 'event'}:${event.timestamp || ''}:${event.type || ''}`;
+}
+
+function playbackEventPriority(event) {
+  switch (event?.type) {
+    case 'dug': return 10;
+    case 'resource_extracted': return 20;
+    case 'ladder_placed': return 10;
+    case 'surfaced': return 20;
+    case 'stone_moved': return 25;
+    case 'moved': return 30;
+    case 'death':
+    case 'exited': return 40;
+    default: return 50;
+  }
+}
+
 function resourceTotal(value = {}) {
   const totals = normalizeResourceTotals(value);
   return totals.scrst + totals.bcrst + totals.hcrst;
@@ -123,7 +144,11 @@ function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
 
 function shortId(id) {
   if (!id) return 'agent';
-  return `${id.slice(0, 6)}...${id.slice(-4)}`;
+  const text = String(id);
+  const display = /^0x0{24}[0-9a-fA-F]{40}$/.test(text)
+    ? `0x${text.slice(-40)}`
+    : text;
+  return `${display.slice(0, 6)}...${display.slice(-4)}`;
 }
 
 function makeEmptyStats() {
@@ -302,6 +327,8 @@ export class ChainSource {
     this._lastBlockHeight = 0;
     this._eventDecoders = [];
     this._seenEventKeys = new Set();
+    this._playbackGroups = [];
+    this._playbackOpenGroups = new Map();
     this._lastGrid = null;
     this._lastAgents = new Map();
     this._outcomeUnavailableNotified = false;
@@ -379,8 +406,8 @@ export class ChainSource {
       this._stream = new EventSource(url);
       this._stream.onmessage = (e) => {
         try {
-          const ev = JSON.parse(e.data);
-          if (ev && ev.type && ev.type !== 'hello') this._applyChainEvent(ev);
+          const ev = this._eventFromStreamMessage(JSON.parse(e.data));
+          if (ev && ev.type && ev.type !== 'hello') this._queuePlaybackEvent(ev);
         } catch {
           // Ignore keep-alives / malformed development stream messages.
         }
@@ -400,10 +427,73 @@ export class ChainSource {
     await this._primeEventCursor();
   }
 
+  _eventFromStreamMessage(message) {
+    if (!message || message.type === 'hello') return message;
+    if (message.programId && !sameActor(message.programId, this.programId)) return null;
+    if (message.event && Array.isArray(message.args)) {
+      const decoded = decodeWorldEvent(message.event, message.args);
+      if (!decoded) return null;
+      return {
+        ...decoded,
+        id: message.id,
+        source: message.source || 'backend-events',
+        programId: message.programId || null,
+        txHash: message.txHash || null,
+        messageId: message.messageId || null,
+        timestamp: message.timestamp || message.receivedAt || null,
+        logIndex: Number.isFinite(Number(message.logIndex)) ? Number(message.logIndex) : null,
+      };
+    }
+    return message;
+  }
+
+  _queuePlaybackEvent(event) {
+    const key = playbackGroupKey(event);
+    const ts = nowMs();
+    let group = this._playbackOpenGroups.get(key);
+    if (!group) {
+      group = { key, events: [], firstAt: ts, lastAt: ts };
+      this._playbackOpenGroups.set(key, group);
+      this._playbackGroups.push(group);
+    }
+    group.events.push(event);
+    group.lastAt = ts;
+  }
+
+  _drainPlaybackQueue() {
+    if (!this._playbackGroups.length) return;
+    const ts = nowMs();
+    let released = 0;
+    while (this._playbackGroups.length && released < CHAIN_PLAYBACK.maxGroupsPerFrame) {
+      const group = this._playbackGroups[0];
+      if (ts - group.lastAt < CHAIN_PLAYBACK.eventGroupGraceMs) break;
+      if (!this._canReleasePlaybackGroup(group)) break;
+      this._playbackGroups.shift();
+      this._playbackOpenGroups.delete(group.key);
+      const events = group.events
+        .slice()
+        .sort((a, b) =>
+          playbackEventPriority(a) - playbackEventPriority(b)
+          || normalizeEventNumber(a.logIndex, 0) - normalizeEventNumber(b.logIndex, 0));
+      for (const event of events) this._applyChainEvent(event);
+      released += 1;
+    }
+  }
+
+  _canReleasePlaybackGroup(group) {
+    const owner = group.events.find((event) => event.owner)?.owner;
+    if (!owner) return true;
+    const miner = this.s.miners.find((m) => sameActor(m.owner, owner));
+    if (!miner) return true;
+    const visualBacklog = (miner.act ? 1 : 0) + (miner.actQueue?.length || 0);
+    return visualBacklog < CHAIN_PLAYBACK.maxVisualQueue;
+  }
+
   // 4) Per frame: drain buffered events, apply them to the grid + miners, and
   //    expose them as .events (the renderer + TX console read this verbatim).
   update(dtMs = 0) {
     this.timeMs += dtMs;
+    this._drainPlaybackQueue();
     this._advanceAnimations(dtMs);
 
     if (!this._stream) {
@@ -416,7 +506,7 @@ export class ChainSource {
       }
     }
     this.events = this._pending.splice(0);
-    if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'map_generated'].includes(e.type))) {
+    if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'stone_moved', 'death', 'map_generated'].includes(e.type))) {
       this.worldDirty = true;
     }
   }
@@ -502,7 +592,7 @@ export class ChainSource {
         if (!event || this._seenEventKeys.has(key)) continue;
         this._seenEventKeys.add(key);
         if (this._seenEventKeys.size > 500) this._seenEventKeys = new Set([...this._seenEventKeys].slice(-250));
-        this._applyChainEvent(event, key);
+        this._queuePlaybackEvent({ ...event, id: key });
       }
     }
   }
@@ -572,37 +662,41 @@ export class ChainSource {
           fromY: Number.isFinite(event.fromY) ? event.fromY : undefined,
           tx: event.x,
           ty: event.y,
+          event,
         });
-        break;
+        return;
       case 'dug':
-        this._setRawTile(event.x, event.rawY, event.rawNewBlock ?? 0);
         if (miner) {
-          miner.stats.tilesDug += 1;
-          this._enqueueAct(miner, { kind: 'dig', tx: event.x, ty: event.y, blockType: event.block });
+          this._enqueueAct(miner, {
+            kind: 'dig',
+            tx: event.x,
+            ty: event.y,
+            rawY: event.rawY,
+            rawNewBlock: event.rawNewBlock ?? 0,
+            blockType: event.block,
+            event,
+          });
+          return;
         }
+        this._setRawTile(event.x, event.rawY, event.rawNewBlock ?? 0);
         break;
       case 'resource_extracted':
         if (miner) {
-          const amount = normalizeEventNumber(event.amount, 1);
-          miner.cargo += amount;
-          miner.stats.ore += amount;
+          this._enqueueAct(miner, { kind: 'resource', event });
+          return;
         }
         break;
       case 'ladder_placed':
-        this._setRawTile(event.x, event.rawY, 4);
-        if (miner && Number.isFinite(event.laddersRemaining)) {
-          miner.items.ladder = event.laddersRemaining;
+        if (miner) {
+          this._enqueueAct(miner, { kind: 'ladder', event });
+          return;
         }
+        this._setRawTile(event.x, event.rawY, 4);
         break;
       case 'surfaced':
         if (miner) {
-          const banked = normalizeResourceTotals(event.banked);
-          const amount = banked.scrst + banked.bcrst + banked.hcrst;
-          miner.banked = amount;
-          miner.bankedResources = banked;
-          miner.cargo = 0;
-          miner.stats.sold = amount;
-          this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
+          this._enqueueAct(miner, { kind: 'surface', event });
+          return;
         }
         break;
       case 'resources_minted':
@@ -748,8 +842,26 @@ export class ChainSource {
     miner.actQueue.push(act);
   }
 
-  _startAct(miner, act) {
+  _emitVisualEvent(event) {
+    if (!event) return;
+    this._pending.push(event);
+    if (this.s?.miners?.length) {
+      this._lastAgents = new Map(this.s.miners.map((m) => [m.owner, { ...m }]));
+    }
+  }
+
+  _startNextAct(miner) {
     if (!miner) return;
+    while (!miner.act && miner.actQueue && miner.actQueue.length) {
+      const started = this._startAct(miner, miner.actQueue.shift());
+      if (started) break;
+    }
+  }
+
+  _startAct(miner, act) {
+    if (!miner || !act) return false;
+    const queueDepth = miner.actQueue?.length || 0;
+    const speedScale = queueDepth > 5 ? 0.55 : queueDepth > 2 ? 0.75 : 1;
     if (act.kind === 'move') {
       const fromX = Number.isFinite(act.fromX) ? act.fromX : miner.tx;
       const fromY = Number.isFinite(act.fromY) ? act.fromY : miner.ty;
@@ -766,9 +878,71 @@ export class ChainSource {
       miner.alive = true;
       miner.exited = false;
       miner.respawnAtMs = null;
-      miner.act = { kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_MOVE_MS };
+      miner.act = { ...act, kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_PLAYBACK.moveMs * speedScale };
+      this._emitVisualEvent(act.event);
+      return true;
     } else if (act.kind === 'dig') {
-      miner.act = { kind: 'dig', tx: act.tx, ty: act.ty, blockType: act.blockType, t: 0, dur: CHAIN_DIG_PULSE_MS };
+      miner.act = { ...act, kind: 'dig', t: 0, dur: CHAIN_PLAYBACK.digMs * speedScale };
+      return true;
+    }
+    this._commitQueuedAct(miner, act);
+    return false;
+  }
+
+  _finishAct(miner, act) {
+    if (!miner || !act) return;
+    if (act.kind === 'move') {
+      miner.drawX = act.tx;
+      miner.drawY = act.ty;
+      return;
+    }
+    if (act.kind === 'dig') {
+      this._setRawTile(act.tx, act.rawY, act.rawNewBlock ?? 0);
+      miner.stats.tilesDug += 1;
+      this._emitVisualEvent(act.event);
+    }
+  }
+
+  _commitQueuedAct(miner, act) {
+    if (!miner || !act) return;
+    const event = act.event;
+    if (act.kind === 'resource') {
+      const carriedTotal = event?.sessionId != null ? normalizeEventNumber(event?.amount, miner.cargo) : null;
+      const amount = carriedTotal == null
+        ? normalizeEventNumber(event?.amount, 1)
+        : Math.max(0, carriedTotal - miner.cargo);
+      if (carriedTotal != null) event.carriedTotal = carriedTotal;
+      event.amount = amount;
+      miner.cargo += amount;
+      miner.stats.ore += amount;
+      this._emitVisualEvent(event);
+      return;
+    }
+    if (act.kind === 'ladder') {
+      this._setRawTile(event.x, event.rawY, 4);
+      if (Number.isFinite(event.laddersRemaining)) {
+        miner.items.ladder = event.laddersRemaining;
+      }
+      this._emitVisualEvent(event);
+      return;
+    }
+    if (act.kind === 'surface') {
+      const banked = normalizeResourceTotals(event.banked);
+      const previous = normalizeResourceTotals(miner.bankedResources);
+      const deltaBanked = {
+        scrst: Math.max(0, banked.scrst - previous.scrst),
+        bcrst: Math.max(0, banked.bcrst - previous.bcrst),
+        hcrst: Math.max(0, banked.hcrst - previous.hcrst),
+      };
+      const amount = banked.scrst + banked.bcrst + banked.hcrst;
+      event.deltaBanked = deltaBanked;
+      event.amount = deltaBanked.scrst + deltaBanked.bcrst + deltaBanked.hcrst;
+      miner.banked = amount;
+      miner.bankedResources = banked;
+      miner.cargo = 0;
+      miner.stats.sold = amount;
+      this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
+      this._emitVisualEvent(event);
     }
   }
 
@@ -838,22 +1012,19 @@ export class ChainSource {
   _advanceAnimations(dtMs) {
     this._advanceStoneAnimations(dtMs);
     for (const m of this.s.miners) {
-      if (!m.act && m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
+      if (!m.act && m.actQueue && m.actQueue.length) this._startNextAct(m);
       const a = m.act;
       if (!a) continue;
       a.t += dtMs;
-      const p = Math.min(1, a.t / Math.max(1, a.dur || CHAIN_MOVE_MS));
+      const p = Math.min(1, a.t / Math.max(1, a.dur || CHAIN_PLAYBACK.moveMs));
       if (a.kind === 'move') {
         m.drawX = a.fromX + (a.tx - a.fromX) * p;
         m.drawY = a.fromY + (a.ty - a.fromY) * p;
       }
       if (p >= 1) {
-        if (a.kind === 'move') {
-          m.drawX = a.tx;
-          m.drawY = a.ty;
-        }
+        this._finishAct(m, a);
         m.act = null;
-        if (m.actQueue && m.actQueue.length) this._startAct(m, m.actQueue.shift());
+        if (m.actQueue && m.actQueue.length) this._startNextAct(m);
       }
     }
   }
@@ -864,9 +1035,9 @@ export class ChainSource {
       const stone = this.stones[i];
       stone.elapsed += dtMs;
       if (stone.phase === 'shake') {
-        if (stone.elapsed >= CHAIN_STONE_SHAKE_MS) {
+        if (stone.elapsed >= CHAIN_PLAYBACK.stoneShakeMs) {
           stone.phase = 'fall';
-          stone.stepElapsed = CHAIN_STONE_STEP_MS;
+          stone.stepElapsed = CHAIN_PLAYBACK.stoneStepMs;
         } else {
           this.worldDirty = true;
           continue;
@@ -874,8 +1045,8 @@ export class ChainSource {
       }
 
       stone.stepElapsed += dtMs;
-      while (stone.phase === 'fall' && stone.stepElapsed >= CHAIN_STONE_STEP_MS) {
-        stone.stepElapsed -= CHAIN_STONE_STEP_MS;
+      while (stone.phase === 'fall' && stone.stepElapsed >= CHAIN_PLAYBACK.stoneStepMs) {
+        stone.stepElapsed -= CHAIN_PLAYBACK.stoneStepMs;
         if (stone.y >= stone.toY) {
           this._setVisualTile(stone.x, stone.toY, 2);
           this.stones.splice(i, 1);

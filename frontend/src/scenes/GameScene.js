@@ -2365,7 +2365,7 @@ export default class GameScene extends Phaser.Scene {
     if (type === BLOCK.DIRT && y === surfaceY && this.textures.exists('grass')) {
       texKey = 'grass';
     }
-    if (texKey && this.textures.exists(texKey)) {
+    if (texKey && !this.forceProceduralTiles && this.textures.exists(texKey)) {
       const s = this.acquireTileSprite();
       s.setTexture(texKey);
       s.setDisplaySize(TILE, TILE);

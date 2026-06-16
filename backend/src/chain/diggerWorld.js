@@ -20,6 +20,7 @@ const DEFAULT_WASM = path.resolve(
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const permitDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
 const hexKey = (key) => (key.startsWith('0x') ? key : `0x${key}`);
+const SUCCESS_REPLY_CODES = new Set(['0x00010000', '0x00000000']);
 
 // 12 zero bytes + 20-byte EOA address = 32-byte ActorId (matches the scripts).
 export const actorIdFromAddress = (address) => `0x${'00'.repeat(12)}${address.slice(2)}`;
@@ -40,6 +41,20 @@ async function waitForInjectedReply(injected) {
     return reply.promise || reply;
   }
   throw new Error('injected transaction has no receipt/promise waiter');
+}
+
+function printableReplyPayload(payload) {
+  if (typeof payload !== 'string' || !payload.startsWith('0x')) return '';
+  const bytes = payload.slice(2).match(/.{1,2}/g)?.map((hex) => Number.parseInt(hex, 16)) || [];
+  const text = String.fromCharCode(...bytes).replace(/[^\x20-\x7e]+/g, ' ').trim();
+  return text;
+}
+
+function assertSuccessfulReply(reply, label) {
+  const code = reply?.replyCode || reply?.code?.toString?.();
+  if (!code || SUCCESS_REPLY_CODES.has(String(code))) return;
+  const message = printableReplyPayload(reply.payload);
+  throw new Error(`${label} failed: replyCode=${code}${message ? ` ${message}` : ''}`);
 }
 
 export async function connectDiggerWorldChain(env) {
@@ -140,7 +155,9 @@ export async function connectDiggerWorldChain(env) {
     await tx.send();
     const receipt = await tx.getReceipt();
     const message = await tx.getMessage();
-    return mirror.waitForReply(message.id, receipt.blockNumber);
+    const reply = await mirror.waitForReply(message.id, receipt.blockNumber);
+    assertSuccessfulReply(reply, 'admin message');
+    return reply;
   }
 
   async function query(programId, payload) {

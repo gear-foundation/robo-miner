@@ -100,6 +100,9 @@ function applyWorldSnapshot(db, snapshot, config) {
   const seasonId = world?.seasonId || config.diggerRentalSeason;
   const sessionId = snapshot.session?.[0] || '0';
   const status = Number(snapshot.session?.[2] || 0);
+  const owners = (snapshot.agents || [])
+    .filter((agent) => !agent.error)
+    .map((agent) => actorKey(agent.owner));
   if (world) {
     world.session = {
       id: sessionId,
@@ -107,6 +110,11 @@ function applyWorldSnapshot(db, snapshot, config) {
       status,
       actionSeq: snapshot.session?.[3] || '0',
     };
+    world.sessionId = sessionId;
+    world.seed = String(snapshot.session?.[1] || world.seed || '0');
+    world.status = worldStatusFromSession(status, world.status);
+    world.owners = owners;
+    world.agents = owners.length;
     world.updatedAt = snapshot.capturedAt;
   }
 
@@ -227,6 +235,7 @@ function applyWorldEvent(db, event, config) {
     case 'AgentRegistered':
       digger.status = 'registered';
       stats.registeredAt = stats.registeredAt || event.timestamp;
+      applyWorldRegistration(world, ownerActor, sessionId, event.timestamp);
       break;
     case 'AgentSpawned':
       digger.status = 'active';
@@ -250,6 +259,10 @@ function applyWorldEvent(db, event, config) {
       incrementResource(stats.extracted, toNumber(c), 1);
       stats.lastResource = { x: toNumber(a), y: toNumber(b), kind: toNumber(c), carriedTotal: toNumber(d) };
       break;
+    case 'StoneMoved':
+      stats.stonesMoved = (stats.stonesMoved || 0) + 1;
+      stats.lastStoneMove = { fromX: toNumber(a), fromY: toNumber(b), x: toNumber(c), y: toNumber(d) };
+      break;
     case 'LadderPlaced':
       stats.laddersPlaced += 1;
       stats.laddersRemaining = toNumber(c);
@@ -261,6 +274,8 @@ function applyWorldEvent(db, event, config) {
     case 'AgentDied':
       digger.status = 'dead';
       stats.status = 'dead';
+      stats.x = toNumber(a);
+      stats.y = toNumber(b);
       stats.death = { x: toNumber(a), y: toNumber(b), cause: toNumber(c), at: event.timestamp };
       break;
     case 'AgentExited':
@@ -281,9 +296,21 @@ function applyWorldEvent(db, event, config) {
 function applyWorldSessionEvent(world, event, sessionId, status) {
   if (!world) return;
   world.session = { ...(world.session || {}), id: sessionId };
+  world.sessionId = sessionId;
   world.status = status;
   world.chain = { ...(world.chain || {}), startedAt: event.timestamp };
   world.updatedAt = event.timestamp;
+}
+
+function applyWorldRegistration(world, ownerActor, sessionId, timestamp) {
+  if (!world) return;
+  const owners = new Set((world.owners || []).map(actorKey));
+  owners.add(ownerActor);
+  world.owners = [...owners];
+  world.agents = world.owners.length;
+  world.sessionId = sessionId;
+  if (world.status !== 'active') world.status = 'waiting_agents';
+  world.updatedAt = timestamp;
 }
 
 function applyWorldAdminEvent(_db, event, world) {
@@ -293,6 +320,8 @@ function applyWorldAdminEvent(_db, event, world) {
       world.status = 'map_ready';
       world.chain = { ...(world.chain || {}), generatedAt: event.timestamp };
       world.seed = String(event.args[1] ?? world.seed ?? '');
+      world.agents = 0;
+      world.owners = [];
       break;
     case 'SessionStarted':
       world.status = 'active';
@@ -306,6 +335,13 @@ function applyWorldAdminEvent(_db, event, world) {
       break;
   }
   world.updatedAt = event.timestamp;
+}
+
+function worldStatusFromSession(status, fallback) {
+  if (status === 0) return 'waiting_agents';
+  if (status === 1) return 'active';
+  if (status === 2) return 'finished';
+  return fallback || 'waiting_agents';
 }
 
 function applyProxyEvent(db, event) {
@@ -409,6 +445,7 @@ function upsertAgentStats(db, worldId, sessionId, ownerActor, seasonId, now) {
       status: 'active',
       moves: 0,
       drills: 0,
+      stonesMoved: 0,
       resourcesExtracted: 0,
       laddersPlaced: 0,
       surfaced: 0,

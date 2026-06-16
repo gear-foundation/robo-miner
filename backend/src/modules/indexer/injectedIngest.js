@@ -1,10 +1,11 @@
 import { IndexerProjector } from './projector.js';
 
 export class InjectedIngestService {
-  constructor({ store, config, now = () => new Date() }) {
+  constructor({ store, config, now = () => new Date(), eventBus = null }) {
     this.store = store;
     this.config = config;
     this.now = now;
+    this.eventBus = eventBus;
     this.projector = new IndexerProjector({ store, config, now });
   }
 
@@ -28,6 +29,12 @@ export class InjectedIngestService {
       });
     });
 
+    this.eventBus?.publishMany?.(
+      eventResults
+        .filter((result) => result.applied && result.event)
+        .map((result) => result.event),
+    );
+
     return {
       receivedAt,
       txHash: payload.receipt?.txHash || payload.txHash || null,
@@ -43,8 +50,7 @@ function normalizeEvents(payload, receivedAt) {
   return input.map((event, index) => ({
     ...event,
     id: event.id || [
-      payload.txHash || payload.receipt?.txHash || 'injected',
-      payload.messageId || 'message',
+      payload.txHash || payload.receipt?.txHash || event.messageId || payload.messageId || `received:${receivedAt}`,
       index,
       event.service || '',
       event.event || '',

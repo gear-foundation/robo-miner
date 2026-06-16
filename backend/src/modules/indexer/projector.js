@@ -1,3 +1,5 @@
+import { applyWorldSessionTiming } from '../gameMaster/sessionTiming.js';
+
 const WORLD_LIVE_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
 
 export class IndexerProjector {
@@ -116,6 +118,7 @@ function applyWorldSnapshot(db, snapshot, config) {
     world.owners = owners;
     world.agents = owners.length;
     world.updatedAt = snapshot.capturedAt;
+    applySnapshotTiming(world, status, snapshot, config);
   }
 
   for (const agent of snapshot.agents || []) {
@@ -298,7 +301,7 @@ function applyWorldSessionEvent(world, event, sessionId, status) {
   world.session = { ...(world.session || {}), id: sessionId };
   world.sessionId = sessionId;
   world.status = status;
-  world.chain = { ...(world.chain || {}), startedAt: event.timestamp };
+  applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status });
   world.updatedAt = event.timestamp;
 }
 
@@ -322,19 +325,38 @@ function applyWorldAdminEvent(_db, event, world) {
       world.seed = String(event.args[1] ?? world.seed ?? '');
       world.agents = 0;
       world.owners = [];
+      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'waiting_agents' });
       break;
     case 'SessionStarted':
       world.status = 'active';
-      world.chain = { ...(world.chain || {}), startedAt: event.timestamp };
+      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'active' });
       break;
     case 'SessionFinished':
       world.status = 'finished';
-      world.chain = { ...(world.chain || {}), finishedAt: event.timestamp };
+      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'finished' });
       break;
     default:
       break;
   }
   world.updatedAt = event.timestamp;
+}
+
+function applySnapshotTiming(world, status, snapshot, config) {
+  if (status === 0) {
+    applyWorldSessionTiming(world, { config, timestamp: snapshot.capturedAt, status: 'waiting_agents' });
+    return;
+  }
+  if (status === 1 && !world.endsAt) {
+    applyWorldSessionTiming(world, {
+      config,
+      timestamp: world.chain?.startedAt || snapshot.capturedAt,
+      status: 'active',
+    });
+    return;
+  }
+  if (status === 2 && !world.finishedAt) {
+    applyWorldSessionTiming(world, { config, timestamp: snapshot.capturedAt, status: 'finished' });
+  }
 }
 
 function worldStatusFromSession(status, fallback) {

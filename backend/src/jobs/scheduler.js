@@ -4,6 +4,7 @@ import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
+import { GameMasterLifecycleService } from '../modules/gameMaster/lifecycle.js';
 import { programsFromConfig } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
 import { SnapshotReader } from '../modules/indexer/snapshotReader.js';
@@ -20,6 +21,7 @@ function usage() {
 Jobs:
   - world registry sync
   - snapshot projection
+  - game master lifecycle
   - digger rental top-up
 
 LP Bonus is intentionally not included.
@@ -45,12 +47,14 @@ async function main() {
   const jobs = {
     registry: () => runRegistry({ store, config }),
     snapshot: () => runSnapshot({ store, config }),
+    lifecycle: () => runLifecycle({ store, config }),
     rental: () => runRental({ store, config }),
   };
 
   if (args.once) {
     await runNamed('registry', jobs.registry);
     await runNamed('snapshot', jobs.snapshot);
+    await runNamed('lifecycle', jobs.lifecycle);
     await runNamed('rental', jobs.rental);
     return;
   }
@@ -61,12 +65,14 @@ async function main() {
     intervals: {
       registryMs: config.schedulerRegistryMs,
       snapshotMs: config.schedulerSnapshotMs,
+      lifecycleMs: config.schedulerSnapshotMs,
       rentalMs: config.schedulerRentalMs,
     },
   });
 
   schedule('registry', jobs.registry, config.schedulerRegistryMs);
   schedule('snapshot', jobs.snapshot, config.schedulerSnapshotMs);
+  schedule('lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
   schedule('rental', jobs.rental, config.schedulerRentalMs);
 }
 
@@ -118,6 +124,16 @@ async function runSnapshot({ store, config }) {
   } finally {
     await reader.disconnect();
   }
+}
+
+async function runLifecycle({ store, config }) {
+  const dryRun = !config.adminKey;
+  const service = new GameMasterLifecycleService({
+    store,
+    config,
+    logger,
+  });
+  return service.run({ dryRun });
 }
 
 async function runRental({ store, config }) {

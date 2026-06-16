@@ -104,6 +104,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/manifest') {
       return json(res, 200, await registry.getManifest());
     }
+    if (req.method === 'GET' && (url.pathname.startsWith('/api/archives/') || url.pathname.startsWith('/archives/'))) {
+      const archiveId = decodeURIComponent(url.pathname.replace(/^\/api\/archives\//, '').replace(/^\/archives\//, ''));
+      const db = await store.read();
+      const archive = db.archives.find((item) => item.archiveId === archiveId);
+      if (!archive) return json(res, 404, { error: 'archive_not_found', archiveId });
+      return json(res, 200, archive);
+    }
     if (req.method === 'GET' && url.pathname === '/api/diggers') {
       const diggers = await diggerRegistry.list({
         seasonId: url.searchParams.get('season') || null,

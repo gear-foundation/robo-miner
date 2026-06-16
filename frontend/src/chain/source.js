@@ -275,6 +275,8 @@ export class ArchivedSource {
     if (this.archiveUrl) {
       const url = this.archiveUrl.startsWith('/') && CHAIN.matchesUrl
         ? `${String(CHAIN.matchesUrl).replace(/\/+$/, '')}${this.archiveUrl}`
+        : this.archiveUrl.startsWith('/') && CHAIN.backendUrl
+          ? `${String(CHAIN.backendUrl).replace(/\/+$/, '')}${this.archiveUrl}`
         : this.archiveUrl;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`archive fetch failed: ${response.status}`);

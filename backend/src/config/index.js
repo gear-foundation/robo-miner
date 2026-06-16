@@ -23,6 +23,7 @@ export function loadConfig(env = process.env) {
     databaseUrl: env.DATABASE_URL || '',
     databaseSchema: env.DATABASE_SCHEMA || 'public',
     databaseDocumentId: env.DATABASE_DOCUMENT_ID || 'main',
+    backendPublicUrl: env.DIGGER_BACKEND_URL || env.BACKEND_URL || '',
     network: env.CHAIN_NETWORK || 'hoodi',
     ethRpc: env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
     varaEthWs: env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
@@ -49,6 +50,14 @@ export function loadConfig(env = process.env) {
     sessionMs: Number(env.SESSION_MS || 30 * 60 * 1000),
     factoryLobbyMin: Number(env.FACTORY_LOBBY_MIN || 8),
     factoryLobbyCap: Number(env.FACTORY_LOBBY_CAP || 10),
+    factoryLobbyTimeoutMs: Number(env.FACTORY_LOBBY_TIMEOUT_MS || 5 * 60 * 1000),
+    factoryAutoStartOnTimeout: parseBool(env.FACTORY_AUTOSTART_ON_TIMEOUT, false),
+    factoryRecycle: parseBool(env.FACTORY_RECYCLE, true),
+    contractSurface: Number(env.CONTRACT_SURFACE_Y || 1),
+    diggerIdlPath: env.DIGGER_IDL_PATH || '',
+    diggerWasmPath: env.DIGGER_WASM_PATH || '',
+    wsReconnectAttempts: Number(env.WS_RECONNECT_ATTEMPTS || 1_000_000),
+    wsReconnectDelay: Number(env.WS_RECONNECT_DELAY_MS || 2_000),
     socialVerifierMode: env.SOCIAL_VERIFIER_MODE || 'live',
     socialXBearerToken: env.SOCIAL_X_BEARER_TOKEN || env.X_BEARER_TOKEN || '',
     socialXSourceUsername: normalizeUsername(env.SOCIAL_X_SOURCE_USERNAME || env.DIGGER_X_USERNAME || 'VaraNetwork'),
@@ -57,6 +66,11 @@ export function loadConfig(env = process.env) {
       quote: parseBigIntEnv(env.SOCIAL_QUOTE_FUEL_GRANT || '', DEFAULT_SOCIAL_QUOTE_FUEL_GRANT),
     },
   };
+}
+
+function parseBool(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase());
 }
 
 export function parseBigIntEnv(value, fallback) {

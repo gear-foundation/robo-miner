@@ -12,6 +12,7 @@ const EMPTY_DB = {
   chainEvents: [],
   agentStats: [],
   economyStats: [],
+  archives: [],
   jobRuns: [],
 };
 
@@ -58,6 +59,7 @@ export function normalizeDb(db) {
     chainEvents: Array.isArray(db?.chainEvents) ? db.chainEvents : [],
     agentStats: Array.isArray(db?.agentStats) ? db.agentStats : [],
     economyStats: Array.isArray(db?.economyStats) ? db.economyStats : [],
+    archives: Array.isArray(db?.archives) ? db.archives : [],
     jobRuns: Array.isArray(db?.jobRuns) ? db.jobRuns : [],
   };
 }

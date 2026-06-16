@@ -90,6 +90,22 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         elapsedMs: Date.now() - startedAt,
       });
 
+      logger?.info?.('deploy.wait_created_mirror.start', {
+        programId,
+        expectedInitialized: false,
+        timeoutMs: config.indexerTimeoutMs || 180000,
+        elapsedMs: Date.now() - startedAt,
+      });
+      const createdMirrorState = await waitForMirrorState(api, getMirrorClient, publicClient, signer, programId, { initialized: false }, config.indexerTimeoutMs || 180000);
+      logger?.info?.('deploy.wait_created_mirror.ok', {
+        programId,
+        stateHash: createdMirrorState.stateHash || null,
+        program: createdMirrorState.program || null,
+        initialized: createdMirrorState.initialized,
+        executableBalance: createdMirrorState.executableBalance || null,
+        elapsedMs: Date.now() - startedAt,
+      });
+
       let topUpReceipt = null;
       if (topUp > 0n) {
         logger?.info?.('deploy.top_up.start', {
@@ -160,6 +176,9 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
       logger?.info?.('deploy.wait_mirror.ok', {
         programId,
         stateHash: mirrorState.stateHash || null,
+        program: mirrorState.program || null,
+        initialized: mirrorState.initialized,
+        executableBalance: mirrorState.executableBalance || null,
         elapsedMs: Date.now() - startedAt,
       });
 
@@ -420,25 +439,35 @@ async function waitForMirrorState(api, getMirrorClient, publicClient, signer, pr
   let last = null;
   while (Date.now() < deadline) {
     try {
-      last = await readMirrorSummary(mirror);
+      last = await readMirrorStateSummary(api, mirror);
       if (expected.initialized === undefined || last.initialized === expected.initialized) return last;
     } catch (error) {
       last = { error: error.message };
     }
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await sleep(3000);
   }
   throw new Error(`Timed out waiting for mirror state ${JSON.stringify(expected)} for ${programId}; last=${JSON.stringify(last)}`);
 }
 
-async function readMirrorSummary(mirror) {
+async function readMirrorStateSummary(api, mirror) {
   const [stateHash, initializer] = await Promise.all([
     callFirst(mirror, ['stateHash', 'getStateHash']),
     callFirst(mirror, ['initializer', 'getInitializer']).catch(() => null),
   ]);
+  if (!stateHash || /^0x0{64}$/i.test(String(stateHash))) {
+    throw new Error(`Program mirror does not have a visible state hash yet; initializer=${initializer || null}`);
+  }
+  const state = await api.query.program.readState(stateHash);
+  const active = state?.program && Object.prototype.hasOwnProperty.call(state.program, 'Active')
+    ? state.program.Active
+    : null;
   return {
     stateHash,
-    initialized: Boolean(stateHash && !/^0x0{64}$/i.test(String(stateHash))),
+    program: active ? 'Active' : Object.keys(state?.program || {})[0] || null,
+    initialized: active?.initialized ?? null,
     initializer,
+    balance: stringifyMaybe(state?.balance),
+    executableBalance: stringifyMaybe(state?.executableBalance),
   };
 }
 
@@ -601,7 +630,11 @@ async function waitForCodeState(api, codeId, expected, timeoutMs) {
   while (Date.now() < deadline) {
     last = await api.eth.router.codeState(codeId);
     if (last === expected) return;
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await sleep(3000);
   }
   throw new Error(`Timed out waiting for code ${codeId} state ${String(expected)}; current=${String(last)}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

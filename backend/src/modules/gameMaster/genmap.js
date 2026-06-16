@@ -129,7 +129,7 @@ export function generateMap(seed = randomSeed(), opts = {}) {
     ...warnings,
   ];
   return {
-    seed: s,
+    seed: w.seed >>> 0,
     width: w.W,
     height: w.H,
     surface: w.surface,

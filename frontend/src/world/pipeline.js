@@ -65,7 +65,7 @@ function generateDiggerPass(seed, dims) {
   const grid = new Uint8Array(dims.W * dims.H);
 
   baseFillDirt(grid);                 // sky + solid dirt
-  const pockets = carveCaves(grid, rnd); // navigable pockets / passages
+  const pockets = carveCaves(grid, rnd, pickDiggerCaveProfile(rnd)); // navigable pockets / passages
   placeStones(grid, rnd);             // scattered rock obstacles (also fall when undermined)
   placeDeepLava(grid, rnd);           // deep pools guarding the bottom band
   const crystals = placeCrystals(grid, rnd); // SCRST / BCRST / HCRST
@@ -78,6 +78,43 @@ function generateDiggerPass(seed, dims) {
   };
   world.validation = validateDigger(world);
   return world;
+}
+
+function pickDiggerCaveProfile(rnd) {
+  const r = rnd();
+  if (r < 0.30) {
+    return {
+      extraPockets: 0,
+      widthMin: 3,
+      widthRange: 5,
+      heightMin: 2,
+      heightRange: 3,
+      horizontalPassageChance: 0.45,
+      verticalPassageChance: 0.18,
+    };
+  }
+  if (r < 0.68) {
+    return {
+      extraPockets: 1,
+      widthMin: 4,
+      widthRange: 6,
+      heightMin: 2,
+      heightRange: 4,
+      horizontalPassageChance: 0.58,
+      verticalPassageChance: 0.30,
+    };
+  }
+  return {
+    extraPockets: 2,
+    widthMin: 3,
+    widthRange: 8,
+    heightMin: 2,
+    heightRange: 5,
+    horizontalPassageChance: 0.70,
+    verticalPassageChance: 0.42,
+    horizontalPassageRange: 14,
+    verticalPassageRange: 13,
+  };
 }
 
 function generatePass(seed, dims) {

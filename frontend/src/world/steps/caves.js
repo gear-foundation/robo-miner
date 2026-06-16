@@ -43,19 +43,23 @@ function carveShortPassage(grid, rnd, x, y, len, dir) {
 
 // Carves elliptical pockets + short passages. Returns pocket centers so later
 // steps (veins, POIs) can cluster interesting content around them.
-export function carveCaves(grid, rnd) {
+export function carveCaves(grid, rnd, opts = {}) {
   const pockets = [];
-  const pocketCount = Math.floor((DIMS.W * (DIMS.H - DIMS.S)) / 620);
+  const pocketCount = Math.max(0, Math.floor((DIMS.W * (DIMS.H - DIMS.S)) / 620) + (opts.extraPockets || 0));
   for (let i = 0; i < pocketCount; i++) {
     const depth = 12 + Math.floor(rnd() * (DIMS.H - DIMS.S - 22));
     const cx = 5 + Math.floor(rnd() * (DIMS.W - 10));
     const cy = DIMS.S + depth;
-    const w = 3 + Math.floor(rnd() * 6);
-    const h = 2 + Math.floor(rnd() * 4);
+    const w = (opts.widthMin || 3) + Math.floor(rnd() * (opts.widthRange || 6));
+    const h = (opts.heightMin || 2) + Math.floor(rnd() * (opts.heightRange || 4));
     carvePocket(grid, rnd, cx, cy, w, h);
     pockets.push({ x: cx, y: cy });
-    if (rnd() < 0.55) carveShortPassage(grid, rnd, cx, cy, 4 + Math.floor(rnd() * 10), 'h');
-    if (rnd() < 0.28) carveShortPassage(grid, rnd, cx, cy, 5 + Math.floor(rnd() * 10), 'v');
+    if (rnd() < (opts.horizontalPassageChance ?? 0.55)) {
+      carveShortPassage(grid, rnd, cx, cy, 4 + Math.floor(rnd() * (opts.horizontalPassageRange || 10)), 'h');
+    }
+    if (rnd() < (opts.verticalPassageChance ?? 0.28)) {
+      carveShortPassage(grid, rnd, cx, cy, 5 + Math.floor(rnd() * (opts.verticalPassageRange || 10)), 'v');
+    }
   }
   return pockets;
 }

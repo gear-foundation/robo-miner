@@ -83,6 +83,57 @@ test('digger registry lists my active digger by normalized owner/world filters',
   assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');
 });
 
+test('queued live digger rental returns pending and completes to active digger', async () => {
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({
+    store,
+    chain: null,
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const queued = await rental.enqueueDiggerRequest({
+    owner: OWNER_MIXED,
+    worldId: WORLD,
+  });
+  const duplicate = await rental.enqueueDiggerRequest({
+    owner: OWNER,
+    worldId: WORLD,
+  });
+
+  assert.equal(queued.status, 'pending');
+  assert.equal(duplicate.status, 'pending');
+  assert.equal(duplicate.requestId, queued.requestId);
+
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() {
+        return {
+          programId: '0x4444444444444444444444444444444444444444',
+          createTxHash: '0xcreate',
+          topUpTxHash: '0xtopup',
+          initTxHash: '0xinit',
+        };
+      },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  await processor.processQueuedDiggerRequest(queued.requestId);
+
+  const db = await store.read();
+  assert.equal(db.rentalRequests.length, 1);
+  assert.equal(db.rentalRequests[0].status, 'confirmed');
+  assert.equal(db.rentalRequests[0].programId, '0x4444444444444444444444444444444444444444');
+  assert.equal(db.diggers.length, 1);
+  assert.equal(db.diggers[0].owner, OWNER);
+  assert.equal(db.diggers[0].worldId, WORLD);
+  assert.equal(db.diggers[0].status, 'active');
+  assert.equal(db.jobRuns[0].status, 'ok');
+});
+
 function fixedNow() {
   return new Date('2026-06-11T00:00:00.000Z');
 }

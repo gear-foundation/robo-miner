@@ -125,11 +125,8 @@ const server = http.createServer(async (req, res) => {
         seasonId: body.seasonId || null,
         dryRun,
       });
-      let chain = null;
-      try {
-        chain = dryRun ? null : await createVaraEthChain(config, { logger: createLogger('chain') });
-        const rental = dryRun ? dryRunRental : new DiggerRentalService({ store, chain, config, logger });
-        return json(res, dryRun ? 202 : 201, await rental.requestDigger({
+      if (dryRun) {
+        return json(res, 202, await dryRunRental.requestDigger({
           owner: body.owner,
           worldId: body.worldId,
           seasonId: body.seasonId || null,
@@ -138,9 +135,20 @@ const server = http.createServer(async (req, res) => {
           codeId: body.codeId || null,
           initialTopUp: body.initialTopUp || null,
         }));
-      } finally {
-        await chain?.disconnect?.();
       }
+      const rental = new DiggerRentalService({ store, chain: null, config, logger });
+      const queued = await rental.enqueueDiggerRequest({
+        owner: body.owner,
+        worldId: body.worldId,
+        seasonId: body.seasonId || null,
+        requestId: body.requestId || null,
+        codeId: body.codeId || null,
+        initialTopUp: body.initialTopUp || null,
+      });
+      if (queued.status === 'pending') {
+        runDiggerDeployInBackground(queued.requestId);
+      }
+      return json(res, queued.status === 'existing' ? 200 : 202, queued);
     }
     if (req.method === 'GET' && url.pathname === '/api/stats/agents') {
       const db = await store.read();
@@ -266,6 +274,24 @@ const server = http.createServer(async (req, res) => {
     return json(res, 500, { error: 'internal_error', message: error.message });
   }
 });
+
+function runDiggerDeployInBackground(requestId) {
+  setImmediate(async () => {
+    let chain = null;
+    try {
+      chain = await createVaraEthChain(config, { logger: createLogger('chain') });
+      const rental = new DiggerRentalService({ store, chain, config, logger });
+      await rental.processQueuedDiggerRequest(requestId);
+    } catch (error) {
+      logger.error('digger.request.background.failed', {
+        requestId,
+        ...errorFields(error),
+      });
+    } finally {
+      await chain?.disconnect?.();
+    }
+  });
+}
 
 server.listen(PORT, () => {
   logger.info('server.listening', {

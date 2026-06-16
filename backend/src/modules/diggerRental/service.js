@@ -211,6 +211,221 @@ export class DiggerRentalService {
     };
   }
 
+  async enqueueDiggerRequest({
+    owner,
+    worldId,
+    seasonId = null,
+    requestId = null,
+    codeId = null,
+    initialTopUp = null,
+  }) {
+    const normalizedOwner = normalizeAddress(owner);
+    const normalizedWorldId = normalizeAddress(worldId);
+    const now = this.now();
+    const target = BigInt(initialTopUp ?? this.config.diggerDailyExecTarget);
+    const resolvedSeasonId = seasonId || this.config.diggerRentalSeason;
+    const resolvedCodeId = codeId || this.config.diggerProxyCodeId;
+
+    const existing = await this.findExistingActiveRental(normalizedOwner, normalizedWorldId, resolvedSeasonId);
+    if (existing) {
+      this.logger?.info?.('request.existing', {
+        owner: normalizedOwner,
+        worldId: normalizedWorldId,
+        seasonId: resolvedSeasonId,
+        programId: existing.programId,
+      });
+      return {
+        status: 'existing',
+        requestId: existing.requestId || null,
+        programId: existing.programId,
+        owner: existing.owner,
+        worldId: existing.worldId,
+        seasonId: existing.seasonId,
+      };
+    }
+
+    const pending = await this.findPendingRentalRequest(normalizedOwner, normalizedWorldId, resolvedSeasonId);
+    if (pending) {
+      this.logger?.info?.('request.pending_existing', {
+        requestId: pending.id,
+        owner: normalizedOwner,
+        worldId: normalizedWorldId,
+        seasonId: resolvedSeasonId,
+      });
+      return {
+        status: pending.status,
+        requestId: pending.id,
+        programId: pending.programId || null,
+        owner: normalizedOwner,
+        worldId: normalizedWorldId,
+        seasonId: resolvedSeasonId,
+        targetExecBalance: pending.targetExecBalance || target.toString(),
+      };
+    }
+
+    const id = requestId || `rent:${resolvedSeasonId}:${normalizedOwner}:${normalizedWorldId}:${now.toISOString()}`;
+    const request = {
+      id,
+      type: 'digger-rental-request',
+      owner: normalizedOwner,
+      worldId: normalizedWorldId,
+      seasonId: resolvedSeasonId,
+      codeId: resolvedCodeId || null,
+      targetExecBalance: target.toString(),
+      status: 'pending',
+      programId: null,
+      createTxHash: null,
+      topUpTxHash: null,
+      initTxHash: null,
+      error: null,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+
+    await this.store.update((db) => {
+      db.rentalRequests.push(request);
+      db.jobRuns.push({
+        id: `digger-rental-request:${request.id}`,
+        job: 'digger-rental-request',
+        mode: 'live',
+        status: 'pending',
+        startedAt: request.createdAt,
+        finishedAt: null,
+        requestId: request.id,
+        programId: null,
+      });
+    });
+
+    return {
+      status: request.status,
+      requestId: request.id,
+      programId: null,
+      owner: normalizedOwner,
+      worldId: normalizedWorldId,
+      seasonId: resolvedSeasonId,
+      targetExecBalance: target.toString(),
+    };
+  }
+
+  async processQueuedDiggerRequest(requestId) {
+    if (!this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
+
+    const request = await this.markRequestRunning(requestId);
+    if (!request) {
+      this.logger?.warn?.('request.queue.missing', { requestId });
+      return null;
+    }
+    if (request.status !== 'running') {
+      this.logger?.info?.('request.queue.skip', { requestId, status: request.status });
+      return request;
+    }
+
+    try {
+      this.logger?.info?.('request.deploy.start', {
+        requestId,
+        owner: request.owner,
+        worldId: request.worldId,
+        seasonId: request.seasonId,
+        targetExecBalance: request.targetExecBalance,
+        codeId: request.codeId,
+      });
+      const deploy = await this.chain.deployDigger({
+        owner: request.owner,
+        worldId: request.worldId,
+        codeId: request.codeId,
+        initialTopUp: BigInt(request.targetExecBalance),
+      });
+      const completedAt = this.now().toISOString();
+      const programId = normalizeAddress(deploy.programId);
+      await this.store.update((db) => {
+        const liveRequest = db.rentalRequests.find((item) => item.id === requestId);
+        if (!liveRequest) throw new Error(`Queued rental request not found: ${requestId}`);
+        liveRequest.status = 'confirmed';
+        liveRequest.programId = programId;
+        liveRequest.createTxHash = deploy.createTxHash || deploy.txHash || null;
+        liveRequest.topUpTxHash = deploy.topUpTxHash || null;
+        liveRequest.initTxHash = deploy.initTxHash || null;
+        liveRequest.error = null;
+        liveRequest.updatedAt = completedAt;
+
+        db.diggers.push({
+          id: programId,
+          requestId,
+          programId,
+          owner: request.owner,
+          seasonId: request.seasonId,
+          worldId: request.worldId,
+          status: 'active',
+          source: 'rental-request',
+          codeId: request.codeId || null,
+          targetExecBalance: request.targetExecBalance,
+          executableBalance: request.targetExecBalance,
+          lastRefuelAt: completedAt,
+          createdAt: request.createdAt,
+          updatedAt: completedAt,
+        });
+        db.fuelGrants.push({
+          id: `${requestId}:initial-top-up`,
+          idempotencyKey: `${requestId}:initial-top-up`,
+          type: 'initial-rental',
+          seasonId: request.seasonId,
+          diggerId: programId,
+          programId,
+          targetExecBalance: request.targetExecBalance,
+          balanceBefore: '0',
+          amount: request.targetExecBalance,
+          txHash: liveRequest.topUpTxHash || liveRequest.createTxHash,
+          status: 'confirmed',
+          createdAt: request.createdAt,
+          updatedAt: completedAt,
+        });
+        const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
+        if (jobRun) {
+          jobRun.status = 'ok';
+          jobRun.finishedAt = completedAt;
+          jobRun.programId = programId;
+        }
+      });
+      this.logger?.info?.('request.deploy.ok', {
+        requestId,
+        programId,
+        createTxHash: deploy.createTxHash || deploy.txHash || null,
+        topUpTxHash: deploy.topUpTxHash || null,
+        initTxHash: deploy.initTxHash || null,
+        dryRun: false,
+      });
+      return {
+        status: 'confirmed',
+        requestId,
+        programId,
+      };
+    } catch (error) {
+      const failedAt = this.now().toISOString();
+      await this.store.update((db) => {
+        const liveRequest = db.rentalRequests.find((item) => item.id === requestId);
+        if (liveRequest) {
+          liveRequest.status = 'failed';
+          liveRequest.error = error.message;
+          liveRequest.updatedAt = failedAt;
+        }
+        const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
+        if (jobRun) {
+          jobRun.status = 'failed';
+          jobRun.finishedAt = failedAt;
+          jobRun.error = error.message;
+        }
+      });
+      this.logger?.error?.('request.deploy.failed', {
+        requestId,
+        owner: request.owner,
+        worldId: request.worldId,
+        dryRun: false,
+        error: error.message,
+      });
+      throw error;
+    }
+  }
+
   async findExistingActiveRental(owner, worldId, seasonId) {
     const db = await this.store.read();
     return db.diggers.find((digger) => (
@@ -221,6 +436,31 @@ export class DiggerRentalService {
       && digger.seasonId === seasonId
       && ['active', 'planned'].includes(digger.status)
     )) || null;
+  }
+
+  async findPendingRentalRequest(owner, worldId, seasonId) {
+    const db = await this.store.read();
+    return db.rentalRequests.find((request) => (
+      request.owner
+      && request.worldId
+      && normalizeAddress(request.owner) === owner
+      && normalizeAddress(request.worldId) === worldId
+      && request.seasonId === seasonId
+      && ['pending', 'running'].includes(request.status)
+    )) || null;
+  }
+
+  async markRequestRunning(requestId) {
+    return this.store.update((db) => {
+      const request = db.rentalRequests.find((item) => item.id === requestId);
+      if (!request) return null;
+      if (request.status !== 'pending') return structuredClone(request);
+      request.status = 'running';
+      request.updatedAt = this.now().toISOString();
+      const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
+      if (jobRun) jobRun.status = 'running';
+      return structuredClone(request);
+    });
   }
 
   async runDailyTopUp({ dryRun = true, diggerProgramIds = [], assumeBalance = null } = {}) {

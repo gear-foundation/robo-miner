@@ -1,10 +1,10 @@
 export async function createVaraEthChain(config, { logger = null } = {}) {
   if (!config.adminKey) throw new Error('DIGGER_ADMIN_KEY is required for live digger rental top-up');
 
-  const { CodeState, WsVaraEthProvider, createVaraEthApi, getMirrorClient } = await import('@vara-eth/api');
+  const { CodeState, ReplyCode, WsVaraEthProvider, createVaraEthApi, getMirrorClient } = await import('@vara-eth/api');
   const { walletClientToSigner } = await import('@vara-eth/api/signer');
   const { generateCodeHash } = await import('@vara-eth/api/util');
-  const { createPublicClient, createWalletClient, http, webSocket } = await import('viem');
+  const { bytesToHex, createPublicClient, createWalletClient, http, webSocket } = await import('viem');
   const { privateKeyToAccount } = await import('viem/accounts');
   const { readFile } = await import('node:fs/promises');
   const path = await import('node:path');
@@ -137,17 +137,19 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         worldActor,
         elapsedMs: Date.now() - startedAt,
       });
-      const initTx = await mirror.sendMessage(createCtor.encodePayload(ownerActor, worldActor), 0n);
-      logger?.info?.('deploy.init.send.start', {
+      const initPayload = createCtor.encodePayload(ownerActor, worldActor);
+      const initResult = await sendMirrorMessageAndWaitForReply({
+        mirror,
+        payload: initPayload,
+        value: 0n,
+        label: 'DiggerProxy.Create',
+        sails,
+        ReplyCode,
+        bytesToHex,
+        timeoutMs: config.indexerTimeoutMs || 180000,
+        logger,
         programId,
-        elapsedMs: Date.now() - startedAt,
-      });
-      const initReceipt = await sendAndWait(initTx, 'DiggerProxy.Create');
-      logger?.info?.('deploy.init.receipt', {
-        programId,
-        txHash: initReceipt.transactionHash || initReceipt.hash || null,
-        status: initReceipt.status,
-        elapsedMs: Date.now() - startedAt,
+        startedAt,
       });
       logger?.info?.('deploy.wait_mirror.start', {
         programId,
@@ -167,9 +169,9 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         topUp: topUp.toString(),
         createTxHash: createReceipt.transactionHash || createReceipt.hash || null,
         topUpTxHash: topUpReceipt?.transactionHash || topUpReceipt?.hash || null,
-        initTxHash: initReceipt.transactionHash || initReceipt.hash || null,
+        initTxHash: initResult.receipt.transactionHash || initResult.receipt.hash || initResult.txHash || null,
         createStatus: createReceipt.status,
-        initStatus: initReceipt.status,
+        initStatus: initResult.receipt.status,
       };
     },
     async depositRedeemReserve(programId, amount) {
@@ -219,6 +221,159 @@ async function sendAndWait(tx, label) {
     return sent || { status: 'sent', label };
   }
   throw new Error(`${label} transaction object does not expose send method`);
+}
+
+async function sendMirrorMessageAndWaitForReply({
+  mirror,
+  payload,
+  value,
+  label,
+  sails,
+  ReplyCode,
+  bytesToHex,
+  timeoutMs,
+  logger = null,
+  programId,
+  startedAt = Date.now(),
+}) {
+  const previousStateHash = await callFirst(mirror, ['stateHash', 'getStateHash']).catch(() => null);
+  const tx = await mirror.sendMessage(payload, value);
+  logger?.info?.('deploy.init.send.start', {
+    programId,
+    payloadBytes: payloadBytes(payload),
+    value: value.toString(),
+    previousStateHash,
+    elapsedMs: Date.now() - startedAt,
+  });
+
+  const txHash = typeof tx.send === 'function' ? await tx.send() : null;
+  const receipt = typeof tx.getReceipt === 'function'
+    ? await tx.getReceipt()
+    : await sendAndWait(tx, label);
+  const message = typeof tx.getMessage === 'function' ? await tx.getMessage() : null;
+  logger?.info?.('deploy.init.receipt', {
+    programId,
+    txHash: receipt.transactionHash || receipt.hash || txHash || null,
+    status: receipt.status,
+    blockNumber: stringifyMaybe(receipt.blockNumber),
+    messageId: message?.id || null,
+    elapsedMs: Date.now() - startedAt,
+  });
+
+  if (!message?.id || typeof mirror.waitForReply !== 'function') {
+    logger?.warn?.('deploy.init.reply.skipped', {
+      programId,
+      reason: !message?.id ? 'missing_message_id' : 'waitForReply_unavailable',
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { receipt, txHash, reply: null, previousStateHash };
+  }
+
+  logger?.info?.('deploy.init.reply.wait_start', {
+    programId,
+    messageId: message.id,
+    blockNumber: stringifyMaybe(receipt.blockNumber),
+    timeoutMs,
+    elapsedMs: Date.now() - startedAt,
+  });
+  const reply = await withTimeout(
+    mirror.waitForReply(message.id, receipt.blockNumber),
+    timeoutMs,
+    `${label} mirror reply`,
+  );
+
+  if (!reply) {
+    logger?.warn?.('deploy.init.reply.timeout', {
+      programId,
+      messageId: message.id,
+      timeoutMs,
+      elapsedMs: Date.now() - startedAt,
+    });
+    return { receipt, txHash, reply: null, previousStateHash };
+  }
+
+  const replyCode = reply.replyCode || reply.code;
+  logger?.info?.('deploy.init.reply.received', {
+    programId,
+    messageId: message.id,
+    txHash: reply.txHash || null,
+    blockNumber: stringifyMaybe(reply.blockNumber),
+    code: normalizeReplyCode(replyCode, ReplyCode, bytesToHex),
+    reason: replyReason(replyCode, ReplyCode),
+    value: stringifyMaybe(reply.value),
+    payloadBytes: payloadBytes(reply.payload),
+    elapsedMs: Date.now() - startedAt,
+  });
+  assertSuccessReply(replyCode, { ReplyCode, bytesToHex, sails, payload: reply.payload });
+  return { receipt, txHash, reply, previousStateHash };
+}
+
+async function withTimeout(promise, timeoutMs, label) {
+  let timeout = null;
+  const timeoutPromise = new Promise((resolve) => {
+    timeout = setTimeout(() => {
+      resolve(null);
+    }, Number(timeoutMs || 180000));
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function assertSuccessReply(code, { ReplyCode, bytesToHex, sails, payload } = {}) {
+  if (!code) throw new Error('program reply did not include reply code');
+  const replyCode = parseReplyCode(code, ReplyCode);
+  if (replyCode?.isSuccess === true) return;
+  if (!replyCode && String(code).toLowerCase().startsWith('0x00')) return;
+  throw new Error(`program reply failed: ${normalizeReplyCode(code, ReplyCode, bytesToHex)} (${replyReason(code, ReplyCode)})${decodeErrorPayload(sails, payload)}`);
+}
+
+function parseReplyCode(code, ReplyCode) {
+  if (!code || typeof code === 'string') {
+    try {
+      return code && ReplyCode?.fromBytes?.(code);
+    } catch {
+      return null;
+    }
+  }
+  return code;
+}
+
+function normalizeReplyCode(code, ReplyCode, bytesToHex) {
+  if (!code) return null;
+  if (typeof code === 'string') return code;
+  if (typeof code.toBytes === 'function') return bytesToHex(code.toBytes());
+  const parsed = parseReplyCode(code, ReplyCode);
+  if (parsed && parsed !== code && typeof parsed.toBytes === 'function') return bytesToHex(parsed.toBytes());
+  return String(code);
+}
+
+function replyReason(code, ReplyCode) {
+  const replyCode = parseReplyCode(code, ReplyCode);
+  return replyCode?.reason === undefined ? null : String(replyCode.reason);
+}
+
+function decodeErrorPayload(sails, payload) {
+  if (!sails || !payload || payload === '0x') return '';
+  try {
+    return `; decoded=${JSON.stringify(sails.decodeError(payload), jsonBigIntReplacer)}`;
+  } catch {
+    return '';
+  }
+}
+
+function payloadBytes(payload) {
+  return typeof payload === 'string' && payload.startsWith('0x') ? (payload.length - 2) / 2 : 0;
+}
+
+function stringifyMaybe(value) {
+  return typeof value === 'bigint' ? value.toString() : value ?? null;
+}
+
+function jsonBigIntReplacer(_key, value) {
+  return typeof value === 'bigint' ? value.toString() : value;
 }
 
 async function topUpProgramExecutableBalance({ api, getMirrorClient, publicClient, signer, account, programId, amount, logger = null, startedAt = Date.now() }) {

@@ -5,6 +5,7 @@ import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { GameMasterLifecycleService } from '../modules/gameMaster/lifecycle.js';
+import { WorldBalanceService } from '../modules/gameMaster/worldBalance.js';
 import { programsFromConfig } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
 import { SnapshotReader } from '../modules/indexer/snapshotReader.js';
@@ -22,6 +23,7 @@ Jobs:
   - world registry sync
   - snapshot projection
   - game master lifecycle
+  - world executable balance top-up
   - digger rental top-up
 
 LP Bonus is intentionally not included.
@@ -48,6 +50,7 @@ async function main() {
     registry: () => runRegistry({ store, config }),
     snapshot: () => runSnapshot({ store, config }),
     lifecycle: () => runLifecycle({ store, config }),
+    worldBalance: () => runWorldBalance({ store, config }),
     rental: () => runRental({ store, config }),
   };
 
@@ -55,6 +58,7 @@ async function main() {
     await runNamed('registry', jobs.registry);
     await runNamed('snapshot', jobs.snapshot);
     await runNamed('lifecycle', jobs.lifecycle);
+    await runNamed('world-balance', jobs.worldBalance);
     await runNamed('rental', jobs.rental);
     return;
   }
@@ -66,6 +70,7 @@ async function main() {
       registryMs: config.schedulerRegistryMs,
       snapshotMs: config.schedulerSnapshotMs,
       lifecycleMs: config.schedulerSnapshotMs,
+      worldBalanceMs: config.balanceCheckMs,
       rentalMs: config.schedulerRentalMs,
     },
   });
@@ -73,6 +78,7 @@ async function main() {
   schedule('registry', jobs.registry, config.schedulerRegistryMs);
   schedule('snapshot', jobs.snapshot, config.schedulerSnapshotMs);
   schedule('lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
+  schedule('world-balance', jobs.worldBalance, config.balanceCheckMs);
   schedule('rental', jobs.rental, config.schedulerRentalMs);
 }
 
@@ -134,6 +140,18 @@ async function runLifecycle({ store, config }) {
     logger,
   });
   return service.run({ dryRun });
+}
+
+async function runWorldBalance({ store, config }) {
+  const dryRun = !config.adminKey;
+  const chain = dryRun ? null : await createVaraEthChain(config);
+  try {
+    const service = new WorldBalanceService({ store, chain, config });
+    const results = await service.run({ dryRun });
+    return { mode: dryRun ? 'dry-run' : 'live', selected: results.length, results };
+  } finally {
+    await chain?.disconnect?.();
+  }
 }
 
 async function runRental({ store, config }) {

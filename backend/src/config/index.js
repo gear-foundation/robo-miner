@@ -12,6 +12,8 @@ const VARA = 1_000_000_000_000n;
 export const DEFAULT_DIGGER_DAILY_EXEC_TARGET = 120n * VARA;
 export const DEFAULT_SOCIAL_REPOST_FUEL_GRANT = 60n * VARA;
 export const DEFAULT_SOCIAL_QUOTE_FUEL_GRANT = 120n * VARA;
+export const DEFAULT_WORLD_BALANCE_MIN = 700n * VARA;
+export const DEFAULT_WORLD_BALANCE_TOP_UP = 1200n * VARA;
 
 export function loadConfig(env = process.env) {
   const storeBackend = (env.BACKEND_STORE || (env.DATABASE_URL ? 'postgres' : 'json')).toLowerCase();
@@ -32,6 +34,10 @@ export function loadConfig(env = process.env) {
     schedulerRegistryMs: Number(env.SCHEDULER_REGISTRY_MS || 60_000),
     schedulerSnapshotMs: Number(env.SCHEDULER_SNAPSHOT_MS || 30_000),
     schedulerRentalMs: Number(env.SCHEDULER_RENTAL_MS || 3_600_000),
+    balanceCheckMs: Number(env.BALANCE_CHECK_MS || 30_000),
+    balanceCooldownMs: Number(env.BALANCE_COOLDOWN_MS || 120_000),
+    worldBalanceMin: parseVaraEnv(env.BALANCE_MIN_VARA || '', DEFAULT_WORLD_BALANCE_MIN),
+    worldBalanceTopUp: parseVaraEnv(env.BALANCE_TOPUP_VARA || env.BALANCE_TOP_UP_VARA || '', DEFAULT_WORLD_BALANCE_TOP_UP),
     routerAddress: env.ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
     adminKey: env.DIGGER_ADMIN_KEY || '',
     adminApiToken: env.ADMIN_API_TOKEN || '',
@@ -81,6 +87,15 @@ export function parseBigIntEnv(value, fallback) {
   } catch (error) {
     throw new Error(`Invalid bigint env value "${value}": ${error.message}`);
   }
+}
+
+export function parseVaraEnv(value, fallback) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return fallback;
+  if (/^\d+$/.test(trimmed)) return BigInt(trimmed) * VARA;
+  const number = Number(trimmed);
+  if (!Number.isFinite(number)) throw new Error(`Invalid VARA env value "${value}"`);
+  return BigInt(Math.round(number * 1e12));
 }
 
 export function splitList(value) {

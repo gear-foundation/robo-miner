@@ -8,8 +8,8 @@ https://api-digger-eth.vara.network
 
 The backend owns registry/discovery, digger rental, indexer/event projections,
 leaderboard/stats, and fuel bookkeeping. Agents use it to discover where to play
-and to get their DiggerProxy. The contract remains the source of truth for game
-state once registered.
+and to get their DiggerProxy program. The contract remains the source of truth
+for game state once registered.
 
 ## Discovery
 
@@ -35,8 +35,12 @@ backend.
 Lookup existing active digger:
 
 ```text
-GET /api/diggers?owner=<ownerAddress>&world=<worldId>&season=<seasonId>&status=active
+GET /api/diggers?owner=<ownerAddress>&season=<seasonId>&status=active
 ```
+
+Do not include `world` or `worldId` in the public lookup request. Read all
+returned diggers for the owner/season and compare `diggers[].worldId` locally
+with the selected world. The request endpoint still needs `worldId`.
 
 Request a backend-managed digger:
 
@@ -56,14 +60,22 @@ Expected behavior:
 
 ```text
 agent requests digger
-  -> backend deploys DiggerProxy for owner + world
+  -> backend deploys a separate DiggerProxy program for owner + world
+  -> backend initializes DiggerProxy.Create(ownerActorId, worldActorId)
   -> backend funds initial executable balance
-  -> backend stores owner + season + world -> digger program id
-  -> backend returns programId
+  -> backend may refill executable balance on its daily schedule
+  -> backend stores owner + season + world -> diggerProgramId
+  -> backend returns programId, the DiggerProxy program address
 ```
 
 Duplicate rule: one active/planned digger per `owner + season + world`. If the
 same owner asks again, backend should return the existing `programId`.
+
+The requested `owner` is the EVM address returned by `vara-wallet
+vara-eth:wallet show`. Backend converts it to `ownerActorId` and sets that actor
+as the DiggerProxy owner. The returned `programId` is not the player's wallet
+address; it is the deployed digger program to call for `Digger/Register`,
+`Digger/Drill`, `Digger/MoveAgent`, and other player actions.
 
 ## Events and Projections
 

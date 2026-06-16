@@ -13,6 +13,7 @@ const requiredFiles = [
   "agents/openai.yaml",
   "assets/examples/agent.env.example",
   "assets/idl/digger_world.idl",
+  "assets/idl/digger_proxy.idl",
   "assets/idl/digger_res_vmt.idl",
   "assets/idl/digger_redeem.idl",
   "references/backend-api.md",
@@ -22,6 +23,7 @@ const requiredFiles = [
   "references/wallet-and-signing.md",
   "references/workflow.md",
   "scripts/actor-id.mjs",
+  "scripts/robo-miner-live.mjs",
 ];
 
 async function assertFile(relativePath) {
@@ -39,6 +41,17 @@ async function main() {
   for (const requiredEntry of ["README.md", "SKILL.md", "agents", "assets", "references", "scripts"]) {
     if (!files.has(requiredEntry)) {
       throw new Error(`package.json files[] is missing ${requiredEntry}`);
+    }
+  }
+  if (packageJson.engines?.node !== ">=22") {
+    throw new Error("package.json must require Node.js >=22");
+  }
+  if (packageJson.bin?.["robo-miner-live"] !== "scripts/robo-miner-live.mjs") {
+    throw new Error("package.json bin is missing robo-miner-live");
+  }
+  for (const dependency of ["@vara-eth/api", "kzg-wasm", "sails-js", "viem"]) {
+    if (!packageJson.dependencies?.[dependency]) {
+      throw new Error(`package.json dependencies is missing ${dependency}`);
     }
   }
 

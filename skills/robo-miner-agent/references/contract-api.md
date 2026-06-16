@@ -4,6 +4,7 @@ Bundled IDLs:
 
 ```text
 assets/idl/digger_world.idl
+assets/idl/digger_proxy.idl
 assets/idl/digger_res_vmt.idl
 assets/idl/digger_redeem.idl
 ```
@@ -19,10 +20,11 @@ For Vara.eth EVM addresses:
 actorId = 0x + 12 zero bytes + 20-byte EVM address without 0x
 ```
 
-This ActorId is used for `World.Register(owner)`, VMT `BalanceOf`, and redeem
-ownership checks.
+This ActorId is used by the rented DiggerProxy during registration, by VMT
+`BalanceOf`, and by redeem ownership checks. In the live skill, agents do not
+call `World.Register` directly.
 
-In proxy mode:
+In the rented DiggerProxy flow:
 
 - `ownerActorId` is the wallet owner.
 - `agentActorId` is the DiggerProxy program ActorId.
@@ -58,7 +60,7 @@ Current default is `40x64`, `100` resources, `77/19/4` split, `startingHp=1`,
 `Session()` shape:
 
 ```text
-[sessionId, seed, status, agentCount, actionSeq]
+[sessionId, seed, status, actionSeq]
 status: 0 created/waiting, 1 active, 2 finished
 ```
 
@@ -73,7 +75,7 @@ status: 0 created/waiting, 1 active, 2 finished
 status: 1 active, 2 surfaced, 3 dead, 4 exited
 ```
 
-World player writes:
+Underlying World player methods forwarded by DiggerProxy:
 
 ```text
 World.Register(ownerActorId)
@@ -111,7 +113,7 @@ SessionStarted(sessionId)
 ## RES VMT
 
 Resource token ids are queried from the contract; current ids are expected to be
-`SCRST=0`, `BCRST=1`, `HCRST=2` in the frontend flow.
+`SCRST=0`, `BCRST=1`, `HCRST=2` in the live resource contracts.
 
 Queries:
 
@@ -161,47 +163,86 @@ Redeem.ConfirmRedeem(redeemId)
 Rates are multiplied by `VaraUnit()`. Current intended rates are
 `SCRST=66`, `BCRST=330`, `HCRST=1650`.
 
-## CLI-Shape Examples
+## `vara-wallet` Examples
 
-Read state with IDL:
-
-```bash
-vara-wallet call <worldId> World/Session --args '[]' --idl assets/idl/digger_world.idl
-vara-wallet call <worldId> World/AgentOf --args '["<agentActorId>"]' --idl assets/idl/digger_world.idl
-vara-wallet call <worldId> World/MapSnapshot --args '[]' --idl assets/idl/digger_world.idl
-```
-
-Direct-mode writes:
+Read live world state:
 
 ```bash
-vara-wallet --account robo-miner-agent call <worldId> World/Register \
-  --args '["<ownerActorId>"]' --idl assets/idl/digger_world.idl
+agentActorId="0x000000000000000000000000${diggerProgramId#0x}"
 
-vara-wallet --account robo-miner-agent call <worldId> World/Drill \
-  --args '[2]' --idl assets/idl/digger_world.idl
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/Session --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/AgentOf --args "[\"$agentActorId\"]" --idl "$ROBO_MINER_WORLD_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/MapSnapshot --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
 ```
 
-Proxy-mode writes use the DiggerProxy interface. If a generated proxy IDL is
-available in the runtime, call `Digger/Register`, `Digger/MoveAgent`, etc. If it
-is not available, use the project TypeScript scripts or generated client for the
-proxy until the IDL is produced.
-
-The proxy IDL should be generated from `contracts/digger-proxy`, not copied from
-World. See `references/digger-proxy-interface.md`.
-
-Repo script examples:
+Send rented DiggerProxy writes through `vara-wallet` Vara.eth injected calls:
 
 ```bash
-cd contracts
-pnpm install
-DIGGER_BACKEND_URL=https://api-digger-eth.vara.network \
-DIGGER_WORLD_ID=<worldId> \
-DIGGER_REQUEST_DIGGER=true \
-PRIVATE_KEY=<secret-from-safe-store> \
-pnpm run play-agent -- --steps 20
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/Register \
+  --args '[]' \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
 
-PRIVATE_KEY=<secret-from-safe-store> pnpm run mint-resources
-PRIVATE_KEY=<secret-from-safe-store> pnpm tsx scripts/redeem-resources.ts
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/SetWorld \
+  --args "[\"$newWorldActorId\"]" \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/MoveAgent \
+  --args '[2]' \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/Drill \
+  --args '[1]' \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/PlaceLadder \
+  --args '[4]' \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
 ```
 
-Never print `PRIVATE_KEY`. Prefer secret store/env injection.
+Supported proxy action methods:
+
+```text
+Digger.MoveAgent(direction)
+Digger.Drill(direction)
+Digger.PlaceLadder(direction)
+Digger.Surface()
+Digger.Exit()
+Digger.MintResources()
+Vmt.Approve(redeemActorId)
+Redeem.Redeem(scrst, bcrst, hcrst)
+Redeem.CancelRedeem(redeemId)
+Redeem.ConfirmRedeem(redeemId)
+```
+
+Never print wallet secrets or `PASSPHRASE`. Prefer secret store/env
+injection.

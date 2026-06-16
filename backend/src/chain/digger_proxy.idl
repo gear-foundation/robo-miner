@@ -1,0 +1,38 @@
+
+!@sails: 1.0.0-beta.5
+
+service Digger@0x28cc4046ef964fc5 {
+    events {
+        Forwarded(u64, u32, [u8; 32]),
+        Killed([u8; 32]),
+        WorldUpdated([u8; 32], [u8; 32]),
+    }
+    functions {
+        Drill(direction: u32) -> [u8; 32] throws String;
+        Exit() -> [u8; 32] throws String;
+        Kill(inheritor: ActorId) throws String;
+        @query
+        LastMessageId() -> [u8; 32] throws String;
+        MintResources() -> [u8; 32] throws String;
+        MoveAgent(direction: u32) -> [u8; 32] throws String;
+        @query
+        Owner() -> ActorId throws String;
+        PlaceLadder(direction: u32) -> [u8; 32] throws String;
+        Register() -> [u8; 32] throws String;
+        SetWorld(world: ActorId) -> ActorId throws String;
+        @query
+        Status() -> [u128] throws String;
+        Surface() -> [u8; 32] throws String;
+        @query
+        World() -> ActorId throws String;
+    }
+}
+
+program DiggerProxy {
+    constructors {
+        Create(owner: ActorId, world: ActorId);
+    }
+    services {
+        Digger@0x28cc4046ef964fc5,
+    }
+}

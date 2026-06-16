@@ -18,7 +18,7 @@ COPY --chown=node:node backend/src /app/backend/src
 COPY --chown=node:node frontend/src /app/frontend/src
 
 COPY --chown=node:node frontend/src/chain/world.idl          /app/contracts/target/wasm32-gear/release/digger_world.idl
-COPY --chown=node:node frontend/src/chain/world.idl          /app/contracts/target/wasm32-gear/release/digger_proxy.idl
+COPY --chown=node:node backend/src/chain/digger_proxy.idl    /app/contracts/target/wasm32-gear/release/digger_proxy.idl
 COPY --chown=node:node frontend/src/chain/digger_res_vmt.idl /app/contracts/target/wasm32-gear/release/digger_res_vmt.idl
 COPY --chown=node:node frontend/src/chain/digger_redeem.idl  /app/contracts/target/wasm32-gear/release/digger_redeem.idl
 

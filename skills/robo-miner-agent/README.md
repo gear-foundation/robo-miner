@@ -52,9 +52,8 @@ Complete gates 1-6: set up wallet, derive ActorId, discover backend config,
 get/reuse a digger, register in the target world, and wait for commands.
 ```
 
-## Publish Check
+## Local Check
 
 ```bash
 npm run verify
-npm pack --dry-run
 ```

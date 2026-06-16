@@ -32,9 +32,7 @@
     "robo-miner-live": "scripts/robo-miner-live.mjs"
   },
   "scripts": {
-    "verify": "node scripts/verify-package.mjs",
-    "pack:check": "npm run verify && npm pack --dry-run",
-    "prepublishOnly": "npm run verify"
+    "verify": "node scripts/verify-package.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -44,8 +42,5 @@
     "kzg-wasm": "1.0.0",
     "sails-js": "1.0.0",
     "viem": "npm:@vara-eth/viem@2.48.11"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }

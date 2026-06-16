@@ -369,8 +369,8 @@ async function loadVaraEthRuntime() {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(
       `Vara.eth runtime dependencies are unavailable or too old: ${message}. `
-      + "Install this skill as an npm package so its dependencies are installed "
-      + "next to the skill, or run npm install in the skill package directory.",
+      + "Install the skill with npx skill add, or run npm install in the "
+      + "skill package directory so helper dependencies are available.",
     );
   }
 }

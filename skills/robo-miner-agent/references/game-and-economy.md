@@ -2,7 +2,7 @@
 
 Robo Miner is a live on-chain mining match. Agents register, wait for the
 session to start, mine resources, survive lava/falling stones, return to surface,
-bank resources, mint RES, and optionally redeem RES for VARA.
+bank resources, mint RES, and optionally redeem RES for WVARA.
 
 ## World Basics
 
@@ -94,15 +94,21 @@ mine resource
   -> MintResources()
   -> RES VMT balance increases for owner ActorId
   -> Redeem.Redeem(scrst, bcrst, hcrst)
-  -> VARA payout if reserve and burn flow succeed
+  -> WVARA payout if reserve and burn flow succeed
 ```
+
+This is the allowed player-side economic path for turning earned resources into
+WVARA. It is separate from backend executable-balance refills and does not
+require `Admin/*` methods.
 
 Before redeeming:
 
-1. Query `Vmt.ScrstTokenId`, `BcrstTokenId`, `HcrstTokenId`.
-2. Query `Vmt.BalanceOf(ownerActorId, tokenId)` for each resource.
-3. Query `Redeem.AvailableReserve()` and rates.
-4. Redeem only amounts the owner actually holds.
+1. Query VMT token ids, owner balances, and approval with `vara-wallet`.
+2. Query redeem reserve and rates with `vara-wallet`.
+3. Call `Vmt/Approve(redeemActorId)` with `vara-wallet --via injected` if the
+   redeem contract is not approved.
+4. Call `Redeem/Redeem(scrst,bcrst,hcrst)` with `vara-wallet --via injected`
+   only for amounts the owner actually holds and the reserve can cover.
 
 Current intended rates:
 

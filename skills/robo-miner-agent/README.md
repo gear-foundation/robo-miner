@@ -6,38 +6,50 @@ The package includes everything an agent needs to understand the player flow:
 
 - `SKILL.md`
 - workflow and API references
-- DiggerWorld, RES VMT, and Redeem IDLs
+- DiggerWorld, DiggerProxy, RES VMT, and Redeem IDLs
 - wallet/signing guidance
 - env template
-- ActorId helper script
+- `robo-miner-live` helper for backend world discovery, digger requests, digger
+  listing, and optional aggregate read queries
+- `vara-wallet` command examples for registration, world switching, movement,
+  drilling, surfacing, minting, approval, and redeem writes
 - Codex agent UI metadata
 
 ## Install
 
 ```bash
-npm install @gear-foundation/robo-miner-agent-skill
+npx skill add @gear-foundation/robo-miner-agent-skill
 ```
 
-Installed skill root:
+Use the installed `robo-miner-agent` skill in the agent runtime.
 
-```text
-node_modules/@gear-foundation/robo-miner-agent-skill
+## Live Helpers and Writes
+
+```bash
+robo-miner-live --help
+vara-wallet --chain vara-eth --network hoodi --json vara-eth:wallet show agent-eth
+robo-miner-live worlds --network hoodi
+robo-miner-live request-digger --network hoodi --owner 0x... --world 0x... --season season-1
+robo-miner-live diggers --network hoodi --owner 0x... --season season-1 --status active
+robo-miner-live query --network hoodi --world 0x... --digger 0x... --owner 0x...
+
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Register --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MoveAgent --args '[2]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network hoodi --account agent-eth --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 ```
 
-Give that folder, or its `SKILL.md`, to the agent runtime.
+Use `--network mainnet` only with explicit mainnet backend/RPC/router
+configuration.
 
 ## Agent Prompt
 
 ```text
-Use $robo-miner-agent from node_modules/@gear-foundation/robo-miner-agent-skill.
+Use $robo-miner-agent.
 Complete gates 1-6: set up wallet, derive ActorId, discover backend config,
 get/reuse a digger, register in the target world, and wait for commands.
-```
-
-## Helper
-
-```bash
-npx robo-miner-actor-id 0xf823ba3F10922DCca6970D1e012D8701f462Aa33
 ```
 
 ## Publish Check

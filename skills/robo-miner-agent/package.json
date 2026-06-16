@@ -28,7 +28,8 @@
     "scripts"
   ],
   "bin": {
-    "robo-miner-actor-id": "scripts/actor-id.mjs"
+    "robo-miner-actor-id": "scripts/actor-id.mjs",
+    "robo-miner-live": "scripts/robo-miner-live.mjs"
   },
   "scripts": {
     "verify": "node scripts/verify-package.mjs",
@@ -36,7 +37,13 @@
     "prepublishOnly": "npm run verify"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@vara-eth/api": "^0.5.0",
+    "kzg-wasm": "1.0.0",
+    "sails-js": "1.0.0",
+    "viem": "npm:@vara-eth/viem@2.48.11"
   },
   "publishConfig": {
     "access": "public"

@@ -17,6 +17,61 @@ import { navigateBack, navigateTo } from '../router.js';
 // the configured program ids as "current" when no backend is wired.
 const ARENA_MODES = ['coop-gem', 'coop-race', 'coop-timed', 'arena'];
 
+function makeWorldBadge(label, bg, fg = '#1b1309') {
+  const el = document.createElement('div');
+  el.textContent = label;
+  el.style.cssText = `box-sizing:border-box;max-width:142px;padding:5px 7px;
+    border:3px solid #000;border-radius:8px;background:${bg};color:${fg};
+    box-shadow:3px 3px 0 rgba(0,0,0,.45);font-size:10px;font-weight:bold;
+    line-height:1;letter-spacing:1px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`;
+  return el;
+}
+
+function worldStatusMeta(status) {
+  const value = String(status || '').toLowerCase();
+  if (['open', 'waiting_agents', 'map_ready', 'deployed'].includes(value)) {
+    return {
+      label: 'REGISTRATION',
+      bg: '#6ee7a8',
+      fg: '#102318',
+      description: 'Registration is open — agents can join this world.',
+    };
+  }
+  if (value === 'active') {
+    return {
+      label: 'IN GAME',
+      bg: '#ffdd55',
+      fg: '#261a06',
+      description: 'Session is running — agents are mining now.',
+    };
+  }
+  if (['finished', 'archived', 'retired'].includes(value)) {
+    return {
+      label: value === 'finished' ? 'FINISHED' : 'PAST',
+      bg: '#cdd3da',
+      fg: '#18202a',
+      description: 'Finished world — open the final snapshot.',
+    };
+  }
+  return {
+    label: value ? value.toUpperCase().slice(0, 14) : 'SYNCING',
+    bg: '#5fd0e6',
+    fg: '#10343d',
+    description: 'World status is syncing from the operator.',
+  };
+}
+
+function agentCountMeta(info) {
+  const max = Number(info.maxAgents ?? info.targetAgents ?? 10);
+  const agents = Number(info.agents);
+  if (!Number.isFinite(agents)) {
+    const maxLabel = Number.isFinite(max) ? max : 10;
+    return { detail: `agents syncing · ${maxLabel} max` };
+  }
+  const cap = Number.isFinite(max) ? max : Math.max(agents, 10);
+  return { detail: `${agents}/${cap} agents registered` };
+}
+
 export default class LobbyScene extends Phaser.Scene {
   constructor() { super('Lobby'); }
 
@@ -240,6 +295,8 @@ export default class LobbyScene extends Phaser.Scene {
     // scaled-down mine on top, program address as title + live counts below.
     const programId = typeof rec === 'string' ? rec : rec.programId;
     const info = (typeof rec === 'string' ? {} : rec) || {};
+    const status = worldStatusMeta(info.status);
+    const agents = agentCountMeta(info);
     const seed = hashStr(programId);
     const world = generateWorld(seed, 'agents');
     const thumb = roomThumbnail(world, { cols: 84, rows: 60 });
@@ -248,27 +305,28 @@ export default class LobbyScene extends Phaser.Scene {
     card.style.cssText = `width:300px;background:#3a2616;border:3px solid #000;border-radius:14px;
       box-shadow:5px 5px 0 rgba(0,0,0,.45);overflow:hidden;display:flex;flex-direction:column`;
 
+    const media = document.createElement('div');
+    media.style.cssText = 'position:relative;border-bottom:3px solid #000;background:#0c0c0c';
     const cv = document.createElement('canvas');
     const scale = 3;
     cv.width = thumb.cols * scale; cv.height = thumb.rows * scale;
-    cv.style.cssText = 'width:100%;height:190px;image-rendering:pixelated;display:block;background:#0c0c0c;border-bottom:3px solid #000';
+    cv.style.cssText = 'width:100%;height:190px;image-rendering:pixelated;display:block;background:#0c0c0c';
     paintThumb(cv, thumb, scale);
-    card.appendChild(cv);
+    media.appendChild(cv);
+
+    const badgeRow = document.createElement('div');
+    badgeRow.style.cssText = 'position:absolute;left:8px;right:8px;top:8px;display:flex;align-items:flex-start;pointer-events:none';
+    badgeRow.appendChild(makeWorldBadge(status.label, status.bg, status.fg));
+    media.appendChild(badgeRow);
+    card.appendChild(media);
 
     const short = `${programId.slice(0, 10)}…${programId.slice(-8)}`;
     const body = document.createElement('div');
     body.style.cssText = 'padding:12px 14px;flex:1;display:flex;flex-direction:column;gap:6px';
-    const countLine = Number.isFinite(info.agents)
-      ? `${info.agents}/${info.maxAgents ?? 10} agents${info.status ? ` · ${info.status}` : ''}`
-      : 'up to 10 agents';
-    const desc = info.status === 'active'
-      ? 'Session running — agents are mining.'
-      : ['finished', 'archived', 'retired'].includes(info.status)
-        ? 'Finished — explore the dug-out mine.'
-        : 'Open lobby — agents register and dig.';
+    const desc = status.description;
     body.innerHTML = `<div title="${programId}" style="font-size:16px;font-weight:bold;color:#ffdd55;word-break:break-all">${short}</div>
       <div style="font-size:12px;opacity:.85;flex:1;line-height:1.35">${desc}</div>
-      <div style="font-size:11px;opacity:.65">map ${world.W}×${world.H} · ${countLine}</div>`;
+      <div style="font-size:11px;opacity:.72">map ${world.W}×${world.H} · ${agents.detail}</div>`;
 
     const watch = wireBtn(document.createElement('button'));
     watch.textContent = '▶  WATCH';

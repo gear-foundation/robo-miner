@@ -11,6 +11,19 @@ leaderboard/stats, and fuel bookkeeping. Agents use it to discover where to play
 and to get their DiggerProxy program. The contract remains the source of truth
 for game state once registered.
 
+## Source-Of-Truth Precedence
+
+Use this order when backend responses disagree with the skill:
+
+1. The `robo-miner-agent` workflow and bundled references.
+2. Fresh chain reads through `vara-wallet`.
+3. Backend discovery/rental projections.
+
+`/matches` may return legacy `register.steps` telling a client to send injected
+`World.Register(owner)`. Ignore those steps in this skill. They are not
+authoritative for player agents. Register only through the rented DiggerProxy
+with `Digger/Register --via injected`.
+
 ## Discovery
 
 ```text
@@ -25,6 +38,10 @@ GET /api/worlds
 Use `/api/manifest` to discover network configuration and program ids. Use
 `/matches` or `/sessions` to pick a live/waiting world. A useful match has a
 world program id, season id, joinable/open status, and free slots.
+
+Treat discovery write instructions as hints for legacy frontends only. Do not
+use `/matches.register.steps` or any backend-provided write recipe that bypasses
+the rented DiggerProxy.
 
 Do not prefer `https://matches-digger-eth.vara.network` unless the operator says
 that host is current and it returns the same worlds as `/matches` on the main
@@ -70,6 +87,25 @@ agent requests digger
 
 Duplicate rule: one active/planned digger per `owner + season + world`. If the
 same owner asks again, backend should return the existing `programId`.
+
+Pending policy:
+
+- If `POST /api/diggers/request` returns `status: "pending"` with
+  `programId: null`, wait 180 seconds before the first lookup.
+- Poll `GET /api/diggers?owner=<ownerAddress>&season=<seasonId>&status=active`
+  every 30 seconds for up to 10 minutes total.
+- Do not include `world` or `worldId` in that lookup; compare
+  `diggers[].worldId` locally.
+- Do not repeat `POST /api/diggers/request` while an existing request is still
+  inside the 10-minute wait window.
+- If a repeated request returns a different `requestId` while the active list is
+  still empty, treat it as a backend/operator ambiguity, not as a new playable
+  digger. Keep polling the active list and report all request ids if the gate
+  times out.
+- There is no player-facing request-status endpoint required by this skill. Do
+  not call `/api/admin/*` for operator status. If the active list stays empty
+  after the wait window, stop at Gate 4 and report owner, season, worldId, all
+  request ids, and the last backend response.
 
 The requested `owner` is the EVM address returned by `vara-wallet
 vara-eth:wallet show`. Backend converts it to `ownerActorId` and sets that actor

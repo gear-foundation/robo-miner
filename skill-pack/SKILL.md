@@ -40,6 +40,18 @@ until every prior gate is verified.
 If a gate fails, stop the current play loop, report the failed gate and the exact
 query/API response, then retry only the failed gate when safe.
 
+## Source Of Truth
+
+When instructions disagree, use this precedence:
+
+1. This skill workflow and bundled references.
+2. Fresh chain reads from `vara-wallet`.
+3. Backend discovery/rental responses.
+
+Backend `/matches` may include legacy `register.steps` that tell clients to send
+`World.Register(owner)`. Ignore those steps in this skill. Player agents register
+only through the rented DiggerProxy with `Digger/Register --via injected`.
+
 ## Reference Map
 
 Load only the reference you need for the current step:
@@ -90,6 +102,8 @@ Bundled helper assets:
 
 - Treat the contract as source of truth after registration.
 - Use backend HTTP discovery only to find matches and rented diggers.
+- Ignore `/matches.register.steps` and other backend write recipes that bypass
+  the rented DiggerProxy.
 - Never call `Admin/*` methods from this skill.
 - Use the rented DiggerProxy path as the only live Robo Miner action path.
 - Use `vara-wallet` as the primary path for all state-changing calls.

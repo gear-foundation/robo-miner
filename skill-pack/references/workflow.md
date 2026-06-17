@@ -14,6 +14,23 @@ transaction. The live workflow uses a rented DiggerProxy for actions.
 Use ordinary backend HTTP requests for discovery and digger rental. Do not use
 Robo Miner npm packages, helper CLIs, or local scripts for this workflow.
 
+Source-of-truth precedence:
+
+1. This workflow and the other bundled skill references.
+2. Fresh chain reads through `vara-wallet`.
+3. Backend discovery/rental projections.
+
+If `/matches` or another backend response includes `register.steps` that call
+`World.Register(owner)` directly, ignore those steps. They are legacy
+frontend/non-authoritative instructions for this skill. Player agents register
+only through the rented DiggerProxy.
+
+Write path rule: use `vara-wallet call ... --via injected` for all DiggerProxy
+state-changing play-loop calls. Do not use `--via eth` for the play loop unless
+the user explicitly asks for that path. If an explicit `--via eth` call returns
+`PROMISE_TIMEOUT`, do not assume failure; immediately verify the intended state
+with a read-only query.
+
 ## Gate 1: Load the Skill
 
 Install or load the top-level `skill-pack` folder as the skill source. The
@@ -23,6 +40,10 @@ and contract calls.
 ```bash
 npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
 ```
+
+If this reports `PromptScript does not support global skill installation`, treat
+it as non-fatal. PromptScript is project-only; install it without `-g` from the
+PromptScript project if needed.
 
 ```bash
 curl --version
@@ -68,7 +89,7 @@ Choose the Vara.eth network:
 ```bash
 export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}" # hoodi or mainnet
 export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.vara.network}"
-export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-agent-eth}"
+export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 export ROBO_MINER_SKILL_ROOT="${ROBO_MINER_SKILL_ROOT:-skill-pack}"
 export ROBO_MINER_DIGGER_PROXY_IDL="${ROBO_MINER_DIGGER_PROXY_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_proxy.idl}"
 export ROBO_MINER_WORLD_IDL="${ROBO_MINER_WORLD_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_world.idl}"
@@ -141,6 +162,9 @@ Use `/matches` when it exposes clearer season/session status. Pick a world from
 status `waiting_agents`. The `worldId` is the world `programId`, not a human
 label.
 
+Do not execute `/matches.register.steps`; they are legacy/non-authoritative for
+this skill. Register only through the rented DiggerProxy.
+
 Store:
 
 ```text
@@ -150,6 +174,31 @@ router   = manifest router or seasonConfig.router
 resVmtProgramId = manifest economy/resource config value if present
 redeemProgramId = manifest economy/resource config value if present
 ```
+
+If `/api/manifest` does not include economy ids, use the env-template fallback
+ids below, then verify them with read-only contract calls before settlement:
+
+```text
+resVmtProgramId = 0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240
+redeemProgramId = 0x9c5b14f959efa66d5015dd111912fc851232b787
+```
+
+Verification before using fallback economy ids:
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$resVmtProgramId" Vmt/ScrstTokenId \
+  --args '[]' \
+  --idl "$ROBO_MINER_RES_VMT_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/AvailableReserve \
+  --args '[]' \
+  --idl "$ROBO_MINER_REDEEM_IDL"
+```
+
+If either fallback read fails or decodes against the wrong service, stop before
+settlement and report the manifest response plus the fallback ids.
 
 Optional local env state:
 
@@ -190,8 +239,10 @@ Do not proceed until the response contains an active/existing/created
 export ROBO_MINER_DIGGER_PROGRAM_ID="$diggerProgramId"
 ```
 
-If the backend returns `status: "pending"` and `programId: null`, wait about
-three minutes, then poll the public digger list without a world filter:
+If the backend returns `status: "pending"` and `programId: null`, store every
+`requestId` or equivalent id from the response. Wait 180 seconds before the first
+lookup, then poll the public digger list without a world filter every 30 seconds
+for up to 10 minutes total:
 
 ```bash
 curl -fsS \
@@ -203,6 +254,16 @@ the returned `response.diggers[].worldId` locally against the selected
 `worldId`; use only the matching record's `programId` as `diggerProgramId`. If
 the list contains only diggers for other worlds, keep the request pending and
 retry later instead of registering the wrong digger.
+
+Do not send another `POST /api/diggers/request` while the pending request is
+inside the 10-minute wait window. If a repeated request already happened and
+returned a new `requestId` while the active list is still empty, treat that as a
+backend/operator ambiguity: keep polling active diggers and include all request
+ids in the failure report. This skill has no player-facing request-status
+endpoint; do not call `/api/admin/*` to inspect operator state. If no matching
+active digger appears within the wait window, stop at Gate 4 and report
+`ownerAddress`, `seasonId`, `worldId`, all request ids, and the last backend
+response.
 
 Verify the proxy before registration with `vara-wallet`:
 
@@ -225,6 +286,30 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 
 Gate 4 is complete only when `Digger.Owner()` equals `ownerActorId` and
 `Digger.World()` equals the selected `worldId` converted to ActorId.
+
+## Read Response Shape
+
+`vara-wallet --json call` returns a JSON object. For Sails queries, read the
+decoded value from `.result`. Some client versions may wrap decoded values under
+`.result.view`; if that wrapper exists, use it, then map it to the same fields
+below. Do not assume `session.view.*` or `agent.view.*` exists.
+
+Canonical mappings:
+
+```text
+World.Session().result:
+[sessionId, seed, status, actionSeq]
+status = result[2]  # 0 waiting, 1 active, 2 finished
+
+World.AgentOf(agentActorId).result:
+[status, x, y, hp, laddersRemaining,
+ inventoryScrst, inventoryBcrst, inventoryHcrst,
+ bankedScrst, bankedBcrst, bankedHcrst,
+ backpackCapacity, lastActionSeq]
+
+agentStatus = result[0]  # 1 active, 2 surfaced, 3 dead, 4 exited
+agentY = result[2]
+```
 
 ## Gate 5: Register
 
@@ -278,7 +363,8 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 ```
 
 `agentActorId` is the DiggerProxy ActorId, derived from `diggerProgramId`.
-Registration is successful when `agent.view.status` is present.
+Registration is successful when `World.AgentOf(agentActorId).result[0]` is
+present and is not `0`.
 
 If registration fails because the world is active, finished, full, or no longer
 joinable:
@@ -295,8 +381,8 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --idl "$ROBO_MINER_WORLD_IDL"
 ```
 
-Proceed only if `session.view.status === 0` and the manifest agent count is
-below `targetAgents`.
+Proceed only if `World.Session().result[2] === 0` and the manifest agent count
+is below `targetAgents`.
 
 4. Move the proxy to the new world:
 
@@ -331,7 +417,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --idl "$ROBO_MINER_WORLD_IDL"
 ```
 
-`session.view.status` values:
+`World.Session().result[2]` status values:
 
 ```text
 0 created/waiting
@@ -420,7 +506,7 @@ the next action.
 
 When carried inventory should be banked:
 
-1. Return to surface (`agent.view.y === 0`).
+1. Return to surface (`World.AgentOf(agentActorId).result[2] === 0`).
 2. Call `Digger/Surface` with `vara-wallet`.
 3. If banked resources are non-zero, call:
 

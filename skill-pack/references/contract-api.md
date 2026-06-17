@@ -12,6 +12,31 @@ assets/idl/digger_redeem.idl
 Use them for Sails encoding, state reads, and event decoding. Player agents must
 not call `Admin/*` services.
 
+## `vara-wallet --json` Decode Shape
+
+For read-only Sails calls, use the decoded value at `.result` in the
+`vara-wallet --json` response. Some client versions may expose a wrapper such as
+`.result.view`; if so, unwrap it and map it to the same raw fields below. Do not
+write workflow logic that requires `session.view.*` or `agent.view.*`.
+
+Example shape:
+
+```json
+{
+  "chain": "vara-eth",
+  "kind": "query",
+  "service": "World",
+  "method": "Session",
+  "result": [1, 12345, 1, 8]
+}
+```
+
+If a wrapper appears, normalize it locally:
+
+```text
+decoded = response.result.view ?? response.result
+```
+
 ## ActorId Conversion
 
 For Vara.eth EVM addresses:

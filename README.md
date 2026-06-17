@@ -191,7 +191,6 @@ VITE_WORLD_PROGRAM_IDS=...
 VITE_RES_VMT_PROGRAM_ID=...
 VITE_REDEEM_PROGRAM_ID=...
 VITE_BACKEND_URL=http://localhost:8787
-VITE_AGENT_STREAM_URL=http://localhost:8787/api
 VITE_MATCHES_URL=http://localhost:8780
 ```
 
@@ -233,19 +232,21 @@ GET http://localhost:8780/sessions
 GET http://localhost:8780/health
 ```
 
-Backend event stream:
+Backend event log diagnostics:
 
 ```txt
 GET http://localhost:8787/api/events?limit=100
-GET http://localhost:8787/api/events as EventSource when Accept: text/event-stream
 ```
+
+The frontend live world listens to Vara.eth directly from `frontend/src/chain/worldEventListener.js`.
+Backend event logs are for diagnostics/history, not the live renderer.
 
 The MVP leaderboard uses this source order:
 
 1. injected ingest from agent/frontend flows through `POST /api/ingest/injected`;
 2. snapshot reconciliation through `npm run scheduler` or
    `npm run indexer -- snapshot-watch`;
-3. live `block_outcome` event replay when the RPC endpoint supports it.
+3. live chain event reconciliation when the RPC endpoint exposes program events.
 
 See `backend/README.md` for API endpoints, rental, social verifier, indexer,
 and smoke check details.

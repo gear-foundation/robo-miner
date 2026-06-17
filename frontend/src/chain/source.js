@@ -29,7 +29,7 @@
 import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
 import { CHAIN, CHAIN_PLAYBACK, chainReady } from './config.js';
-import { decodeWorldEvent, worldQueries, worldActions } from './world.js';
+import { connectWorldProgram, createWorldEventListener } from './worldEventListener.js';
 import { skinFromAddress } from '../render/robot.js';
 
 // Pick the data source. Local engine today; the chain source once a World
@@ -41,8 +41,6 @@ export function createWorldSource(opts) {
 }
 
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
-const ZERO_ACTOR_RE = /^0x0+$/i;
-const MAX_BLOCK_BACKFILL = 24;
 const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
 const AGENT_STATUS = {
   ACTIVE: 1,
@@ -67,10 +65,6 @@ const CONTRACT_TO_RENDER_TILE = {
 
 function renderTile(contractTile) {
   return CONTRACT_TO_RENDER_TILE[Number(contractTile)] ?? BLOCK.DIRT;
-}
-
-function isZeroActor(id) {
-  return typeof id === 'string' && ZERO_ACTOR_RE.test(id);
 }
 
 function sameActor(a, b) {
@@ -319,21 +313,13 @@ export class ChainSource {
     this._pending = []; // events buffered from the subscription between frames
     this._api = null;
     this._program = null;
+    this._eventListener = null;
     this._eventPollEveryMs = Math.max(400, Number(CHAIN.pollMs || 1000));
-    this._eventPollInMs = this._eventPollEveryMs;
-    this._snapshotEveryMs = Math.max(5000, this._eventPollEveryMs * 5);
-    this._snapshotInMs = this._snapshotEveryMs;
     this._polling = false;
-    this._draining = false;
-    this._lastBlockHash = null;
-    this._lastBlockHeight = 0;
-    this._eventDecoders = [];
-    this._seenEventKeys = new Set();
     this._playbackGroups = [];
     this._playbackOpenGroups = new Map();
     this._lastGrid = null;
     this._lastAgents = new Map();
-    this._outcomeUnavailableNotified = false;
     this.ready = this._boot();
   }
 
@@ -349,41 +335,15 @@ export class ChainSource {
 
   // 1) Connect @vara-eth/api (Router + Ethereum RPC + Vara.eth WS). Read-only.
   async connect() {
-    const { Buffer } = await import('buffer');
-    globalThis.Buffer ||= Buffer;
-    const { WsVaraEthProvider, createVaraEthApi } = await import('@vara-eth/api');
-    const { createPublicClient, http } = await import('viem');
-    const { SailsProgram } = await import('sails-js');
-    const { SailsIdlParser } = await import('sails-js/parser');
-
-    const publicClient = createPublicClient({ transport: http(CHAIN.ethRpc) });
-    this._api = await createVaraEthApi(
-      new WsVaraEthProvider(CHAIN.varaEthWs),
-      publicClient,
-      CHAIN.routerAddress,
-    );
-
-    const parser = new SailsIdlParser();
-    await parser.init();
-    const idl = await (await fetch(new URL('./world.idl', import.meta.url))).text();
-    this._program = new SailsProgram(parser.parse(idl));
-    this._program.setProgramId(this.programId);
-    this._q = worldQueries(this._program);
-    this._act = worldActions(this._program);
-    this._eventDecoders = this._buildEventDecoders();
-  }
-
-  _buildEventDecoders() {
-    const decoders = [];
-    for (const service of Object.values(this._program.services || {})) {
-      for (const [name, event] of Object.entries(service.events || {})) {
-        decoders.push({
-          name,
-          decode: (payload) => decodeWorldEvent(name, event.decode(payload)),
-        });
-      }
-    }
-    return decoders;
+    const connection = await connectWorldProgram({
+      programId: this.programId,
+      idlUrl: new URL('./world.idl', import.meta.url),
+      config: CHAIN,
+    });
+    this._api = connection.api;
+    this._program = connection.program;
+    this._q = connection.queries;
+    this._act = connection.actions;
   }
 
   // 2) Load the world for display. The map is generated OFF-CHAIN by us
@@ -397,56 +357,21 @@ export class ChainSource {
     this._applySnapshot(snap, { emitEvents: false });
   }
 
-  // 3) Live event path. Vara.eth exposes block queries here, so the frontend
-  // tracks new block headers, reads block outcomes, decodes Sails event payloads
-  // emitted by this program, and applies those deltas immediately. After the
-  // initial read, live motion is event-only; snapshots must not drive animation.
+  // 3) Live event path. After the initial snapshot, animation is event-only:
+  // decoded World events are queued and played back in order. Snapshots are not
+  // used to invent movement because a final state cannot preserve action timing.
   async subscribe() {
-    this._unsub = null;
-    if (CHAIN.streamUrl) {
-      const url = `${CHAIN.streamUrl.replace(/\/$/, '')}/events`;
-      this._stream = new EventSource(url);
-      this._stream.onmessage = (e) => {
-        try {
-          const ev = this._eventFromStreamMessage(JSON.parse(e.data));
-          if (ev && ev.type && ev.type !== 'hello') this._queuePlaybackEvent(ev);
-        } catch {
-          // Ignore keep-alives / malformed development stream messages.
-        }
-      };
-      this._stream.onerror = () => {
-        if (this._streamFallbackStarted) return;
-        this._streamFallbackStarted = true;
-        this._pending.push({ type: 'chain_error', message: 'agent stream unavailable; using chain event polling' });
-        try { this._stream?.close?.(); } catch { /* ignore */ }
-        this._stream = null;
-        this._primeEventCursor().catch((error) => {
-          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-        });
-      };
-      return;
-    }
-    await this._primeEventCursor();
-  }
-
-  _eventFromStreamMessage(message) {
-    if (!message || message.type === 'hello') return message;
-    if (message.programId && !sameActor(message.programId, this.programId)) return null;
-    if (message.event && Array.isArray(message.args)) {
-      const decoded = decodeWorldEvent(message.event, message.args);
-      if (!decoded) return null;
-      return {
-        ...decoded,
-        id: message.id,
-        source: message.source || 'backend-events',
-        programId: message.programId || null,
-        txHash: message.txHash || null,
-        messageId: message.messageId || null,
-        timestamp: message.timestamp || message.receivedAt || null,
-        logIndex: Number.isFinite(Number(message.logIndex)) ? Number(message.logIndex) : null,
-      };
-    }
-    return message;
+    this._eventListener = createWorldEventListener({
+      api: this._api,
+      program: this._program,
+      programId: this.programId,
+      pollMs: this._eventPollEveryMs,
+      onEvent: (event) => this._queuePlaybackEvent(event),
+      onError: (error) => {
+        this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+      },
+    });
+    await this._eventListener.start();
   }
 
   _queuePlaybackEvent(event) {
@@ -498,15 +423,7 @@ export class ChainSource {
     this._drainPlaybackQueue();
     this._advanceAnimations(dtMs);
 
-    if (!this._stream) {
-      this._eventPollInMs -= dtMs;
-      if (this._eventPollInMs <= 0 && !this._draining) {
-        this._eventPollInMs = this._eventPollEveryMs;
-        this._drainNewBlocks().catch((error) => {
-          this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
-        });
-      }
-    }
+    this._eventListener?.tick(dtMs);
     this.events = this._pending.splice(0);
     if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'stone_moved', 'death', 'map_generated'].includes(e.type))) {
       this.worldDirty = true;
@@ -520,98 +437,6 @@ export class ChainSource {
       payload,
     );
     return reply.payload;
-  }
-
-  async _primeEventCursor() {
-    const header = await this._api.query.block.header();
-    this._lastBlockHash = header.hash;
-    this._lastBlockHeight = Number(header.height || 0);
-  }
-
-  async _drainNewBlocks() {
-    if (!this._lastBlockHash) {
-      await this._primeEventCursor();
-      return;
-    }
-
-    this._draining = true;
-    try {
-      const latest = await this._api.query.block.header();
-      if (!latest?.hash || latest.hash === this._lastBlockHash) return;
-
-      if (typeof this._api?.query?.block?.outcome !== 'function') {
-        if (!this._outcomeUnavailableNotified) {
-          this._pending.push({
-            type: 'chain_events_unavailable',
-            message: 'block outcome RPC is unavailable; live view requires events',
-          });
-          this._outcomeUnavailableNotified = true;
-        }
-        this._lastBlockHash = latest.hash;
-        this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
-        return;
-      }
-
-      const chain = [];
-      let cursor = latest;
-      let foundCursor = false;
-      for (let i = 0; cursor && i < MAX_BLOCK_BACKFILL; i++) {
-        if (cursor.hash === this._lastBlockHash) {
-          foundCursor = true;
-          break;
-        }
-        chain.push(cursor);
-        if (!cursor.parentHash) break;
-        cursor = await this._api.query.block.header(cursor.parentHash);
-      }
-
-      if (!foundCursor) {
-        this._pending.push({ type: 'chain_gap', from: this._lastBlockHeight, to: latest.height });
-        this._lastBlockHash = latest.hash;
-        this._lastBlockHeight = Number(latest.height || this._lastBlockHeight);
-        return;
-      }
-
-      for (const header of chain.reverse()) {
-        await this._processBlock(header);
-        this._lastBlockHash = header.hash;
-        this._lastBlockHeight = Number(header.height || this._lastBlockHeight);
-      }
-    } finally {
-      this._draining = false;
-    }
-  }
-
-  async _processBlock(header) {
-    const transitions = await this._api.query.block.outcome(header.hash);
-    let messageIndex = 0;
-    for (const transition of transitions || []) {
-      if (!sameActor(transition.actorId, this.programId)) continue;
-      for (const message of transition.messages || []) {
-        if (!isZeroActor(message.destination)) continue;
-        const key = `${header.hash}:${message.id || messageIndex++}`;
-        const event = this._decodeSailsEvent(message.payload);
-        if (!event || this._seenEventKeys.has(key)) continue;
-        this._seenEventKeys.add(key);
-        if (this._seenEventKeys.size > 500) this._seenEventKeys = new Set([...this._seenEventKeys].slice(-250));
-        this._queuePlaybackEvent({ ...event, id: key });
-      }
-    }
-  }
-
-  _decodeSailsEvent(payload) {
-    if (!payload) return null;
-    const hex = typeof payload === 'string' ? payload : `0x${Buffer.from(payload).toString('hex')}`;
-    try {
-      const decoded = this._program.decodeEvent(hex);
-      if (decoded?.kind === 'event' && decoded.entry?.kind === 'event') {
-        const mapped = decodeWorldEvent(decoded.entry.event, decoded.data);
-        if (mapped) return { ...mapped, chainEvent: decoded.entry.event };
-      }
-    } catch {
-      // payload is not a decodable program event
-    }
-    return null;
   }
 
   async _readSnapshot() {
@@ -1181,15 +1006,14 @@ export class ChainSource {
     this._polling = true;
     try {
       const snap = await this._readSnapshot();
-      this._applySnapshot(snap, opts);
+      this._applySnapshot(snap, { ...opts, emitEvents: false });
     } finally {
       this._polling = false;
     }
   }
 
   dispose() {
-    if (this._unsub) this._unsub();
-    this._stream?.close?.();
+    this._eventListener?.stop?.();
     this._api?.provider?.disconnect?.();
   }
 }

@@ -73,7 +73,7 @@ Set the local account and network:
 
 ```bash
 export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}"
-export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-agent-eth}"
+export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 ```
 
 Create a new wallet once:

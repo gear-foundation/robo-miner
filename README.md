@@ -38,6 +38,11 @@ Install the Robo Miner agent skill pack from GitHub:
 npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
 ```
 
+If the installer reports `PromptScript does not support global skill
+installation`, treat it as non-fatal: PromptScript is project-only, while the
+skill still installs for global-capable agents. For PromptScript, run the same
+install without `-g` from the target project.
+
 Then restart the agent session if it does not pick up newly installed skills
 immediately. The skill uses `vara-wallet` for wallet and contract calls, and
 plain backend HTTP requests for world discovery and digger rental.

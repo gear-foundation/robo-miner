@@ -16,6 +16,10 @@ const DEFAULT_WASM = path.resolve(
   __dirname,
   '../../../contracts/target/wasm32-gear/release/digger_world.opt.wasm',
 );
+const DEFAULT_RES_VMT_IDL = path.resolve(
+  __dirname,
+  '../../../contracts/target/wasm32-gear/release/digger_res_vmt.idl',
+);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const permitDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
@@ -24,6 +28,23 @@ const SUCCESS_REPLY_CODES = new Set(['0x00010000', '0x00000000']);
 
 // 12 zero bytes + 20-byte EOA address = 32-byte ActorId (matches the scripts).
 export const actorIdFromAddress = (address) => `0x${'00'.repeat(12)}${address.slice(2)}`;
+
+function normalizeAddress(value) {
+  const text = String(value || '').trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(text)) throw new Error(`invalid address: ${value}`);
+  return text;
+}
+
+function actorIdValueToHex(value) {
+  if (typeof value === 'string') return value;
+  if (value instanceof Uint8Array) return `0x${Buffer.from(value).toString('hex')}`;
+  if (Array.isArray(value)) return `0x${Buffer.from(value).toString('hex')}`;
+  if (value && typeof value === 'object') {
+    if (typeof value.toHex === 'function') return value.toHex();
+    if (typeof value.asHex === 'string') return value.asHex;
+  }
+  throw new Error(`cannot convert ActorId value to hex: ${String(value)}`);
+}
 
 // Send an injected (gasless) message and wait for its reply — the destination
 // program's executable balance pays, so the sender EOA needs no funds.
@@ -95,6 +116,7 @@ export async function connectDiggerWorldChain(env) {
   const parser = new SailsIdlParser();
   await parser.init();
   const sails = new SailsProgram(parser.parse(await readFile(env.idlPath || DEFAULT_IDL, 'utf8')));
+  let resVmtSails = null;
 
   const mirrorFor = (programId) =>
     getMirrorClient({ address: programId, publicClient: api.eth.publicClient, signer: api.eth.signer });
@@ -164,6 +186,50 @@ export async function connectDiggerWorldChain(env) {
     return api.call.program.calculateReplyForHandle(accountAddress, programId, payload, 0n);
   }
 
+  async function loadResVmtSails() {
+    if (!resVmtSails) {
+      resVmtSails = new SailsProgram(parser.parse(await readFile(env.resVmtIdlPath || DEFAULT_RES_VMT_IDL, 'utf8')));
+    }
+    return resVmtSails;
+  }
+
+  async function ensureWorldEconomy(programId, options = {}) {
+    const resVmtProgramId = options.resVmtProgramId || env.resVmtProgramId;
+    if (!resVmtProgramId) return { skipped: true, reason: 'res VMT is not configured' };
+
+    const normalizedWorld = normalizeAddress(programId);
+    const normalizedResVmt = normalizeAddress(resVmtProgramId);
+    const worldActor = actorIdFromAddress(normalizedWorld);
+    const resVmtActor = actorIdFromAddress(normalizedResVmt);
+    const vmtSails = await loadResVmtSails();
+    const vmtAdmin = vmtSails.services.Admin;
+    const worldAdmin = sails.services.Admin;
+    const result = {
+      resVmtProgramId: normalizedResVmt,
+      worldProgramId: normalizedWorld,
+      minterAdded: false,
+      resourceVmtUpdated: false,
+    };
+
+    const minterReply = await query(normalizedResVmt, vmtAdmin.queries.IsMinter.encodePayload(worldActor));
+    const isMinter = vmtAdmin.queries.IsMinter.decodeResult(minterReply.payload);
+    result.wasMinter = Boolean(isMinter);
+    if (!isMinter) {
+      await sendAdmin(normalizedResVmt, vmtAdmin.functions.AddMinter.encodePayload(worldActor));
+      result.minterAdded = true;
+    }
+
+    const resourceReply = await query(normalizedWorld, worldAdmin.queries.ResourceVmt.encodePayload());
+    const currentResourceVmt = actorIdValueToHex(worldAdmin.queries.ResourceVmt.decodeResult(resourceReply.payload));
+    result.previousResourceVmt = currentResourceVmt;
+    if (currentResourceVmt.toLowerCase() !== resVmtActor.toLowerCase()) {
+      await sendAdmin(normalizedWorld, worldAdmin.functions.SetResourceVmt.encodePayload(resVmtActor));
+      result.resourceVmtUpdated = true;
+    }
+
+    return result;
+  }
+
   // Agent-side write (register/move/drill): injected from this connection's key.
   // Throws on a contract-level error reply so callers see real failures.
   async function sendInjected(programId, payload, value = 0n) {
@@ -215,6 +281,7 @@ export async function connectDiggerWorldChain(env) {
     topUpExecutableBalance,
     wvaraBalanceOf,
     query,
+    ensureWorldEconomy,
     encode: {
       create: () => sails.ctors.Create.encodePayload(),
       uploadMap: (seed, tiles) => admin.UploadMap.encodePayload(seed, tiles),

@@ -28,6 +28,13 @@ export function loadChainEnv(overrides = {}) {
     codeId: process.env.DIGGER_CODE_ID || '',
     wasmPath: process.env.DIGGER_WASM_PATH || '',
     idlPath: process.env.DIGGER_IDL_PATH || '',
+    resVmtProgramId: firstListValue(
+      process.env.DIGGER_RES_VMT_PROGRAM_ID ||
+      process.env.DIGGER_RES_VMT_PROGRAM_IDS ||
+      process.env.INDEXER_RES_VMT_PROGRAM_IDS ||
+      '',
+    ),
+    resVmtIdlPath: process.env.DIGGER_RES_VMT_IDL_PATH || '',
     contractSurface: num('CONTRACT_SURFACE_Y', 1),
     timeoutMs: num('DIGGER_EVENT_TIMEOUT_MS', 180000),
     // WS resilience — keep reconnecting on a dropped node connection (so the
@@ -45,6 +52,13 @@ export function loadChainEnv(overrides = {}) {
 
     ...overrides,
   };
+}
+
+function firstListValue(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)[0] || '';
 }
 
 export function loadConfig(overrides = {}) {

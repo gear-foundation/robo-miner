@@ -132,6 +132,21 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
     return { seed: String(map.seed), mapHash: gridHash(map.map), sessionId: session.sessionId };
   }
 
+  async function configureWorldEconomy(programId) {
+    if (!env.resVmtProgramId) return;
+    const result = await chain.ensureWorldEconomy(programId);
+    if (result?.skipped) {
+      log(`[chain] economy skipped ${programId}: ${result.reason}`);
+      return;
+    }
+    log(
+      `[chain] economy configured ${programId} ` +
+      `resVmt=${result.resVmtProgramId} ` +
+      `minter=${result.wasMinter ? 'existing' : 'added'} ` +
+      `resourceVmt=${result.resourceVmtUpdated ? 'updated' : 'existing'}`,
+    );
+  }
+
   return {
     async provision() {
       // Reuse an already-deployed program before paying to create a new one.
@@ -142,12 +157,14 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
         if (reservedPrograms.has(programId)) continue;
         log(`[chain] reusing program ${programId}`);
         await keeper.ensureNow(programId); // a reused program may be low — top up before opening
+        await configureWorldEconomy(programId);
         reservedPrograms.add(programId);
         return { programId };
       }
       const code = await ensureCode();
       const programId = await chain.createProgram(code, BigInt(env.topUp));
       await chain.sendAdmin(programId, chain.encode.create());
+      await configureWorldEconomy(programId);
       pool.programs.push(programId);
       reservedPrograms.add(programId);
       reuseIdx += 1; // this program is now assigned to a world — don't reuse it for the next one

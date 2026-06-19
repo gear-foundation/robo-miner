@@ -4,6 +4,27 @@ import { connectWallet as connectBrowserWallet, getWalletState, startWalletDisco
 import { btnCss, wireBtn } from './arenaUI.js';
 import { navigateBack } from '../router.js';
 
+const SOCIAL_TASKS = {
+  repost: {
+    title: 'Repost',
+    reward: '60 wVARA fuel',
+    badge: 'Simple share',
+    urlLabel: 'Campaign post or repost URL',
+    urlPlaceholder: 'https://x.com/VaraNetwork/status/... or your repost URL',
+    summary: 'Share the official campaign post. If you paste the campaign post, your X username is required so the backend can find your repost.',
+    checks: ['Official post is reposted', 'X account matches the claim', 'One repost claim per week'],
+  },
+  quote: {
+    title: 'Quote',
+    reward: '120 wVARA fuel',
+    badge: 'Original post',
+    urlLabel: 'Your quote post URL',
+    urlPlaceholder: 'https://x.com/your_handle/status/...',
+    summary: 'Quote the campaign post with your own context. The quote must reference the official post and mention Digger, Vara, mining, agent, or RES.',
+    checks: ['Quotes the official post', 'Text mentions the campaign', 'One quote claim per week'],
+  },
+};
+
 export default class SocialFuelScene extends Phaser.Scene {
   constructor() { super('SocialFuel'); }
 
@@ -82,16 +103,18 @@ export default class SocialFuelScene extends Phaser.Scene {
       </div>
 
       <div style="display:grid;grid-template-columns:${narrow ? '1fr' : '1fr 1fr'};gap:10px;margin-bottom:14px">
-        <button data-task="repost" type="button" class="social-task-btn">Repost<br><span>60 wVARA fuel</span></button>
-        <button data-task="quote" type="button" class="social-task-btn">Quote<br><span>120 wVARA fuel</span></button>
+        ${taskButton('repost')}
+        ${taskButton('quote')}
       </div>
+
+      <div id="social-task-detail" style="border:2px solid #26333f;background:#0b1016;border-radius:8px;padding:13px;margin-bottom:14px"></div>
 
       <label style="${labelCss()}">
         <span>X username</span>
         <input id="social-x-username" placeholder="@username" autocomplete="off" />
       </label>
       <label style="${labelCss()}">
-        <span>Post URL</span>
+        <span id="social-url-label">Post URL</span>
         <input id="social-tweet-url" placeholder="https://x.com/.../status/..." autocomplete="off" />
       </label>
       <label style="${labelCss()}">
@@ -136,6 +159,8 @@ export default class SocialFuelScene extends Phaser.Scene {
     this.submitBtn = root.querySelector('#social-submit');
     this.statusEl = root.querySelector('#social-status');
     this.historyEl = root.querySelector('#social-history');
+    this.taskDetailEl = root.querySelector('#social-task-detail');
+    this.urlLabelEl = root.querySelector('#social-url-label');
     this.usernameInput = root.querySelector('#social-x-username');
     this.tweetInput = root.querySelector('#social-tweet-url');
     this.diggerInput = root.querySelector('#social-digger-id');
@@ -147,8 +172,9 @@ export default class SocialFuelScene extends Phaser.Scene {
     });
 
     root.querySelectorAll('.social-task-btn').forEach((btn) => {
-      btn.style.cssText = `${btnCss('#1d2730')}color:#f8fbff;font-size:16px;padding:13px 10px;line-height:1.25`;
-      btn.querySelector('span').style.cssText = 'font-size:12px;color:#9db0bf';
+      btn.style.cssText = `${btnCss('#1d2730')}color:#f8fbff;text-align:left;font-size:16px;padding:13px 12px;line-height:1.25;min-height:92px`;
+      btn.querySelector('.social-task-reward').style.cssText = 'display:block;margin-top:5px;font-size:12px;color:#9db0bf';
+      btn.querySelector('.social-task-badge').style.cssText = 'display:inline-block;margin-top:8px;font-size:11px;color:#ffdd55;text-transform:uppercase';
       btn.onclick = () => {
         this.taskType = btn.dataset.task;
         this.render();
@@ -227,6 +253,7 @@ export default class SocialFuelScene extends Phaser.Scene {
 
   render() {
     if (!this.rootEl) return;
+    const task = SOCIAL_TASKS[this.taskType] || SOCIAL_TASKS.repost;
     this.walletEl.textContent = this.account ? shortHash(this.account) : 'Not connected';
     this.connectBtn.textContent = this.account ? 'CHANGE' : 'CONNECT';
     this.connectBtn.disabled = this.busy;
@@ -234,12 +261,21 @@ export default class SocialFuelScene extends Phaser.Scene {
     this.connectBtn.style.opacity = this.connectBtn.disabled ? '0.55' : '1';
     this.submitBtn.style.opacity = this.submitBtn.disabled ? '0.55' : '1';
     this.statusEl.textContent = this.status || (!backendEnabled() ? 'Backend URL is not configured.' : '');
+    this.urlLabelEl.textContent = task.urlLabel;
+    this.tweetInput.placeholder = task.urlPlaceholder;
+    this.submitBtn.textContent = `VERIFY ${task.title.toUpperCase()} AND FUEL`;
+    this.taskDetailEl.innerHTML = taskDetail(task);
 
     for (const btn of this.taskButtons) {
       const selected = btn.dataset.task === this.taskType;
       btn.style.background = selected ? '#7CFFB0' : '#1d2730';
       btn.style.color = selected ? '#07150d' : '#f8fbff';
+      btn.style.borderColor = selected ? '#000' : '#445362';
       btn.style.transform = 'scale(1)';
+      const reward = btn.querySelector('.social-task-reward');
+      const badge = btn.querySelector('.social-task-badge');
+      if (reward) reward.style.color = selected ? '#143324' : '#9db0bf';
+      if (badge) badge.style.color = selected ? '#4d2d00' : '#ffdd55';
     }
 
     this.historyEl.innerHTML = this.submissions.length
@@ -274,6 +310,30 @@ function labelCss() {
 
 function panelTitleCss() {
   return 'margin:0;color:#ffdd55;font-size:24px;text-shadow:2px 2px 0 #000';
+}
+
+function taskButton(taskType) {
+  const task = SOCIAL_TASKS[taskType];
+  return `
+    <button data-task="${taskType}" type="button" class="social-task-btn">
+      <strong>${task.title}</strong>
+      <span class="social-task-reward">${task.reward}</span>
+      <span class="social-task-badge">${task.badge}</span>
+    </button>
+  `;
+}
+
+function taskDetail(task) {
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <strong style="color:#fff;font-size:17px">${task.title}: ${task.reward}</strong>
+      <span style="color:#ffdd55;font-size:12px;text-transform:uppercase">${task.badge}</span>
+    </div>
+    <p style="margin:8px 0 11px;color:#c8d3dd;line-height:1.45;font-size:14px">${task.summary}</p>
+    <div style="display:grid;gap:6px">
+      ${task.checks.map((check) => `<div style="color:#9db0bf;font-size:13px">- ${check}</div>`).join('')}
+    </div>
+  `;
 }
 
 function step(number, title, text) {
@@ -319,6 +379,14 @@ function explainError(message) {
     tweet_url_invalid: 'The X post URL is invalid.',
     tweet_url_must_point_to_x: 'Use an x.com or twitter.com post URL.',
     tweet_url_missing_status_id: 'The X URL must point to a concrete status post.',
+    repost_must_target_source_account: 'Repost must target the official campaign account.',
+    quote_must_target_source_account: 'Quote must target the official campaign account.',
+    source_post_not_reposted_by_user: 'This X account has not reposted the submitted campaign post.',
+    x_username_required_for_original_post: 'Enter your X username when submitting the original campaign post.',
+    quote_text_must_mention_campaign: 'Quote text must mention Digger, Vara, mining, agent, or RES.',
+    post_must_mention_campaign: 'The post must mention Digger, Vara, mining, agent, or RES.',
+    repost_author_mismatch: 'The repost author does not match the submitted X username.',
+    quote_author_mismatch: 'The quote author does not match the submitted X username.',
   };
   return known[message] || message;
 }

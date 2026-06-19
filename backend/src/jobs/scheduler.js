@@ -6,6 +6,7 @@ import { createStore } from '../db/store.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { GameMasterLifecycleService } from '../modules/gameMaster/lifecycle.js';
 import { WorldBalanceService } from '../modules/gameMaster/worldBalance.js';
+import { BestStateEventReader } from '../modules/indexer/bestStateReader.js';
 import { programsFromConfig } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
 import { SnapshotReader } from '../modules/indexer/snapshotReader.js';
@@ -21,6 +22,7 @@ function usage() {
 
 Jobs:
   - world registry sync
+  - best-state event projection
   - snapshot projection
   - game master lifecycle
   - world executable balance top-up
@@ -68,6 +70,7 @@ async function main() {
     dbFile: config.dbFile,
     intervals: {
       registryMs: config.schedulerRegistryMs,
+      bestState: true,
       snapshotMs: config.schedulerSnapshotMs,
       lifecycleMs: config.schedulerSnapshotMs,
       worldBalanceMs: config.balanceCheckMs,
@@ -75,15 +78,22 @@ async function main() {
     },
   });
 
-  schedule('registry', jobs.registry, config.schedulerRegistryMs);
+  await runNamed('registry', jobs.registry);
+  try {
+    await startBestStateWatcher({ store, config });
+  } catch (error) {
+    logger.error('best_state.start.failed', errorFields(error));
+  }
+
+  schedule('registry', jobs.registry, config.schedulerRegistryMs, false);
   schedule('snapshot', jobs.snapshot, config.schedulerSnapshotMs);
   schedule('lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
   schedule('world-balance', jobs.worldBalance, config.balanceCheckMs);
   schedule('rental', jobs.rental, config.schedulerRentalMs);
 }
 
-function schedule(name, fn, intervalMs) {
-  runNamed(name, fn);
+function schedule(name, fn, intervalMs, immediate = true) {
+  if (immediate) runNamed(name, fn);
   setInterval(() => runNamed(name, fn), intervalMs);
 }
 
@@ -130,6 +140,48 @@ async function runSnapshot({ store, config }) {
   } finally {
     await reader.disconnect();
   }
+}
+
+async function startBestStateWatcher({ store, config }) {
+  const indexerConfig = await buildIndexerConfig({ store, config });
+  if (indexerConfig.indexerPrograms.length === 0) {
+    logger.warn('best_state.skipped', { reason: 'no_programs' });
+    return null;
+  }
+
+  const projector = new IndexerProjector({ store, config });
+  const reader = new BestStateEventReader({
+    config: indexerConfig,
+    logger,
+    onEvents: async (events) => {
+      const results = await projector.applyEvents(events);
+      logger.info('best_state.events.ok', {
+        decodedEvents: events.length,
+        applied: results.filter((result) => result.applied).length,
+        skipped: results.filter((result) => !result.applied).length,
+      });
+    },
+  });
+  await reader.start();
+  logger.info('best_state.started', {
+    programs: reader.programs.map((program) => ({
+      type: program.programType,
+      id: program.programId,
+    })),
+  });
+  return reader;
+}
+
+async function buildIndexerConfig({ store, config }) {
+  const db = await store.read();
+  const worldProgramIds = db.worlds
+    .filter((world) => world.programId)
+    .map((world) => ({ programType: 'world', programId: world.programId }));
+  return {
+    ...config,
+    worldProgramIds,
+    indexerPrograms: programsFromConfig({ ...config, worldProgramIds }),
+  };
 }
 
 async function runLifecycle({ store, config }) {

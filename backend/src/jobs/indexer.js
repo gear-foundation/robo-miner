@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
+import { BestStateEventReader } from '../modules/indexer/bestStateReader.js';
 import { loadContractIdls } from '../modules/indexer/idlRegistry.js';
 import { programsFromConfig, VaraEthLiveReader } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
@@ -19,6 +20,7 @@ function usage() {
   npm run indexer -- ingest-injected --file injected-result.json
   npm run indexer -- live-once
   npm run indexer -- watch
+  npm run indexer -- best-state-watch
   npm run indexer -- snapshot-once
   npm run indexer -- snapshot-watch
 
@@ -29,6 +31,8 @@ Commands:
                 Apply frontend/agent submitted injected watch result.
   live-once     Read latest Vara.eth block outcome, decode configured program events, apply them.
   watch         Poll latest Vara.eth block and apply new configured program events.
+  best-state-watch
+                Subscribe to Vara.eth best-state program events and apply them.
   snapshot-once Read current contract state through Sails queries and apply projections.
   snapshot-watch
                 Poll snapshots through Sails queries. Fallback for RPCs without block_outcome.
@@ -111,6 +115,9 @@ async function main() {
       break;
     case 'watch':
       await runWatch(config);
+      break;
+    case 'best-state-watch':
+      await runBestStateWatch(config);
       break;
     case 'snapshot-once':
       await runSnapshotOnce(config);
@@ -215,6 +222,32 @@ async function runWatch(config) {
   }
 }
 
+async function runBestStateWatch(config) {
+  const store = createStore(config);
+  const projector = new IndexerProjector({ store, config });
+  const reader = new BestStateEventReader({
+    config: await addDbPrograms(config, store),
+    logger,
+    onEvents: async (events) => {
+      const results = await projector.applyEvents(events);
+      logger.info('best_state.watch.ok', {
+        decodedEvents: events.length,
+        applied: results.filter((result) => result.applied).length,
+        skipped: results.filter((result) => !result.applied).length,
+      });
+    },
+  });
+  await reader.start();
+  logger.info('best_state.watch.started', {
+    dbFile: config.dbFile,
+    programs: reader.programs.map((program) => ({
+      type: program.programType,
+      id: program.programId,
+    })),
+  });
+  await waitForever();
+}
+
 async function addDbPrograms(config, store) {
   const db = await store.read();
   const worldProgramIds = db.worlds
@@ -229,6 +262,10 @@ async function addDbPrograms(config, store) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForever() {
+  return new Promise(() => {});
 }
 
 main().catch((error) => {

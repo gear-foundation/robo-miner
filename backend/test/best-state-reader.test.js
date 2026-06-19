@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { BestStateEventReader } from '../src/modules/indexer/bestStateReader.js';
+
+test('best-state reader decodes zero-destination program events once', () => {
+  const programId = '0x000000000000000000000000000000000000dEaD';
+  const reader = new BestStateEventReader({
+    config: { rootDir: process.cwd(), varaEthWs: 'ws://example.invalid' },
+    programs: [{ programType: 'world', programId }],
+  });
+  reader.sailsByType.set('world', {
+    decodeEvent() {
+      return {
+        kind: 'event',
+        entry: { kind: 'event', service: 'World', event: 'AgentMoved' },
+        data: ['7', '0x0000000000000000000000000000000000000001', 1, 2, 1, 3],
+      };
+    },
+  });
+
+  const sub = { program: reader.programs[0] };
+  const bestState = { mbHash: '0xabc', messages: [] };
+  const message = {
+    id: '0xmessage',
+    destination: '0x0000000000000000000000000000000000000000',
+    payload: [1, 2, 3],
+  };
+
+  const event = reader.decodeMessage(sub, message, bestState, 0);
+  assert.equal(event.source, 'vara-eth-best-state');
+  assert.equal(event.programType, 'world');
+  assert.equal(event.programId, programId.toLowerCase());
+  assert.equal(event.service, 'World');
+  assert.equal(event.event, 'AgentMoved');
+  assert.deepEqual(event.args, ['7', '0x0000000000000000000000000000000000000001', 1, 2, 1, 3]);
+
+  assert.equal(reader.decodeMessage(sub, message, bestState, 0), null);
+});

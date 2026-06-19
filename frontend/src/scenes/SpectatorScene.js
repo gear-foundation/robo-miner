@@ -27,6 +27,37 @@ function formatClock(ms) {
   return `${mm}:${String(ss).padStart(2, '0')} left`;
 }
 
+function normalizeWorldStatus(metaStatus, rt) {
+  const chainStatus = Number(rt?.session?.[2]);
+  if (chainStatus === 1) return 'active';
+  if (chainStatus === 2) return 'archived';
+  if (chainStatus === 0) return 'open';
+
+  const value = String(metaStatus || '').toLowerCase();
+  if (['active', 'running', 'in_game'].includes(value)) return 'active';
+  if (['finished', 'archived', 'retired'].includes(value)) return 'archived';
+  if (['open', 'waiting_agents', 'map_ready', 'deployed'].includes(value)) return 'open';
+  return value || 'unknown';
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case 'active': return 'IN GAME';
+    case 'open': return 'REGISTRATION';
+    case 'archived': return 'ARCHIVE';
+    case 'configured': return 'CONFIGURED';
+    default: return status ? status.toUpperCase().slice(0, 14) : 'UNKNOWN';
+  }
+}
+
+function hudStateLabel(status, remainingMs) {
+  if (status === 'archived') return statusLabel(status);
+  if (Number.isFinite(remainingMs)) {
+    return `${statusLabel(status)} · ${formatClock(remainingMs)}`;
+  }
+  return statusLabel(status);
+}
+
 function shortAddress(address) {
   const addr = displayAddress(address);
   if (!addr || addr.length <= 16) return addr || '0x...';
@@ -886,14 +917,14 @@ export default class SpectatorScene extends GameScene {
     const alive = ms.filter((m) => m.alive).length;
     const maxAgents = Number(this.worldMeta?.maxAgents || this.mode.miners || ms.length || 10);
     const currentAgents = Number(this.worldMeta?.agents ?? ms.length);
-    const status = this.worldMeta?.status || (this.rt.finished ? 'finished' : currentAgents ? 'active' : 'open');
+    const status = normalizeWorldStatus(this.worldMeta?.status, this.rt);
     const countLabel = status === 'active'
       ? `${alive}/${maxAgents}`
       : `${currentAgents}/${maxAgents}`;
     const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;
-    const clockLabel = status === 'archived' ? 'archived' : formatClock(remainingMs);
+    const stateLabel = hudStateLabel(status, remainingMs);
     const banked = ms.reduce((totals, m) => {
       totals.scrst += Number(m.bankedResources?.scrst || 0);
       totals.bcrst += Number(m.bankedResources?.bcrst || 0);
@@ -904,7 +935,7 @@ export default class SpectatorScene extends GameScene {
     const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     this.statsEl.innerHTML =
       `<span style="color:${fc}">${fps} fps</span>　` +
-      `${clockLabel}　agents <b>${countLabel}</b>　` +
+      `${stateLabel}　agents <b>${countLabel}</b>　` +
       `SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
@@ -944,6 +975,35 @@ export default class SpectatorScene extends GameScene {
     return data;
   }
 
+  isChainWorld() {
+    return Boolean(this.specProgramId || this.specArchiveId || this.specArchiveUrl || this.specMode === 'chain-live' || this.specMode === 'chain-replay');
+  }
+
+  bankedResourceTotals() {
+    return (this.rt?.s?.miners || []).reduce((totals, miner) => {
+      totals.scrst += Number(miner.bankedResources?.scrst || 0);
+      totals.bcrst += Number(miner.bankedResources?.bcrst || 0);
+      totals.hcrst += Number(miner.bankedResources?.hcrst || 0);
+      return totals;
+    }, { scrst: 0, bcrst: 0, hcrst: 0 });
+  }
+
+  finishSummaryHtml() {
+    if (!this.isChainWorld()) {
+      return `<div style="font-size:22px">team score: <b style="color:#ffec6e">$${this.rt.teamScore}</b></div>`;
+    }
+    const totals = this.bankedResourceTotals();
+    const entries = Object.entries(totals).filter(([, count]) => Number(count) > 0);
+    if (!entries.length) {
+      return '<div style="font-size:22px;color:#cdd3da">session finished</div>';
+    }
+    const resources = entries.map(([key, count]) => {
+      const meta = BANK_RESOURCE_LABELS[key] || { label: key.toUpperCase(), color: '#ffec6e' };
+      return `<b style="color:${meta.color}">${count} ${meta.label}</b>`;
+    }).join(' · ');
+    return `<div style="font-size:22px;color:#cdd3da">banked resources: ${resources}</div>`;
+  }
+
   showFinish() {
     if (document.getElementById('spec-finish')) return;
     const ov = document.createElement('div');
@@ -951,10 +1011,12 @@ export default class SpectatorScene extends GameScene {
     ov.style.cssText = `position:fixed;inset:0;z-index:22;display:flex;flex-direction:column;
       align-items:center;justify-content:center;gap:18px;background:#000a;
       font-family:'Courier New',monospace;color:#fff;text-align:center`;
-    const reason = this.rt.match.finishedReason === 'diamond' ? '💎 DIAMOND DELIVERED'
-      : this.rt.match.finishedReason === 'score_target' ? '🏁 SCORE TARGET REACHED' : '⏱ TIME UP';
+    const reason = this.isChainWorld()
+      ? 'SESSION FINISHED'
+      : this.rt.match.finishedReason === 'diamond' ? '💎 DIAMOND DELIVERED'
+        : this.rt.match.finishedReason === 'score_target' ? '🏁 SCORE TARGET REACHED' : '⏱ TIME UP';
     ov.innerHTML = `<div style="font-size:40px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">${reason}</div>
-      <div style="font-size:22px">team score: <b style="color:#ffec6e">$${this.rt.teamScore}</b></div>`;
+      ${this.finishSummaryHtml()}`;
     const again = wireBtn(document.createElement('button'));
     again.textContent = '↺  LOBBY';
     again.style.cssText = btnCss('#5fd0e6') + 'font-size:18px;padding:12px 30px';

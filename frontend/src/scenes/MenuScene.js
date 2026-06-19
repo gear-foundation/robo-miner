@@ -11,6 +11,10 @@ import { navigateTo } from '../router.js';
 
 const SINGLE_PLAYER_MENU_ENABLED = false;
 
+function sfxSources(name) {
+  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+}
+
 // Title / splash scene. Shows the game logo, the robot, and the
 // "Start Digging" button. On start, the robot plays a little fall-
 // through-the-ground animation before we hand off to the Game scene.
@@ -28,11 +32,11 @@ export default class MenuScene extends Phaser.Scene {
     this.load.image('menu-bg',    'assets/menu/bg.png');
     this.load.image('menu-logo',  'assets/menu/logo.png');
     this.load.image('menu-robot', 'assets/menu/robot.png');
-    this.load.audio('menu-rock-drill', 'assets/sfx/rock-drill-generated.wav');
-    this.load.audio('menu-music', 'assets/sfx/menu-music.wav');
-    this.load.audio('robot-chirp', 'assets/sfx/robot-chirp.wav');
-    this.load.audio('robot-question', 'assets/sfx/robot-question.wav');
-    this.load.audio('robot-sad', 'assets/sfx/robot-sad.wav');
+    this.load.audio('menu-rock-drill', sfxSources('rock-drill-generated'));
+    this.load.audio('menu-music', sfxSources('menu-music'));
+    this.load.audio('robot-chirp', sfxSources('robot-chirp'));
+    this.load.audio('robot-question', sfxSources('robot-question'));
+    this.load.audio('robot-sad', sfxSources('robot-sad'));
   }
 
   create() {

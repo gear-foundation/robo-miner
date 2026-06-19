@@ -19,6 +19,56 @@ const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse a
 const CHUNK_TILES = 8;
 const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
 
+function sfxSources(name) {
+  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+}
+
+const SFX = {
+  DRILL: 'spec-rock-drill',
+  BREAK: 'spec-rock-break',
+  DRILL_FAIL: 'spec-drill-fail',
+  ORE_CASH: 'spec-ore-cash',
+  ROBOT_CHIRP: 'spec-robot-chirp',
+  ROBOT_QUESTION: 'spec-robot-question',
+  ROBOT_SAD: 'spec-robot-sad',
+  LADDER: 'spec-ladder-place',
+  FUSE: 'spec-dynamite-fuse',
+  BOOM: 'spec-dynamite-boom',
+  SHAKE: 'spec-rock-shake',
+  IMPACT: 'spec-rock-impact',
+};
+
+const SFX_ASSETS = [
+  [SFX.DRILL, sfxSources('rock-drill-generated'), { instances: 2 }],
+  [SFX.BREAK, sfxSources('rock-break'), { instances: 8 }],
+  [SFX.DRILL_FAIL, sfxSources('drill-fail'), { instances: 4 }],
+  [SFX.ORE_CASH, sfxSources('ore-cash'), { instances: 6 }],
+  [SFX.ROBOT_CHIRP, sfxSources('robot-chirp'), { instances: 3 }],
+  [SFX.ROBOT_QUESTION, sfxSources('robot-question'), { instances: 3 }],
+  [SFX.ROBOT_SAD, sfxSources('robot-sad'), { instances: 4 }],
+  [SFX.LADDER, sfxSources('ladder-place'), { instances: 6 }],
+  [SFX.FUSE, sfxSources('dynamite-fuse'), { instances: 2 }],
+  [SFX.BOOM, sfxSources('dynamite-boom'), { instances: 4 }],
+  [SFX.SHAKE, sfxSources('rock-shake'), { instances: 2 }],
+  [SFX.IMPACT, sfxSources('rock-impact'), { instances: 6 }],
+];
+
+const SPATIAL_AUDIO = {
+  nearTiles: 5,
+  maxTiles: 32,
+  offscreenMultiplier: 0.34,
+  minVolume: 0.035,
+};
+
+const SFX_FRAME_LIMIT = {
+  [SFX.BREAK]: 5,
+  [SFX.ORE_CASH]: 4,
+  [SFX.LADDER]: 4,
+  [SFX.BOOM]: 2,
+  [SFX.ROBOT_SAD]: 3,
+  [SFX.IMPACT]: 4,
+};
+
 function formatClock(ms) {
   if (!Number.isFinite(ms)) return 'waiting';
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -99,10 +149,12 @@ export default class SpectatorScene extends GameScene {
   constructor() { super('Spectator'); }
 
   preload() {
-    // Live worlds render tiles procedurally; optional sounds are used only when
-    // already available from another scene. Keep this preload empty so Phaser
-    // does not report missing legacy tile PNGs or browser-specific audio decode
-    // failures for assets the spectator can safely skip.
+    // Live worlds render tiles procedurally, but they still need the arcade sfx.
+    // Load only files that exist in public/assets/sfx so direct /world entries
+    // sound the same as entering through the original game/menu.
+    for (const [key, url, config] of SFX_ASSETS) {
+      if (!this.cache.audio.exists(key)) this.load.audio(key, url, config);
+    }
   }
 
   init(data) {
@@ -208,17 +260,54 @@ export default class SpectatorScene extends GameScene {
     this.worldDirty = true;
     this.buildHUD();
     this.refreshWorldMeta();
-    this.robotChirpSound = this.cache.audio.exists('robot-chirp')
-      ? this.sound.add('robot-chirp', { volume: 0.42 })
-      : null;
-    this.robotQuestionSound = this.cache.audio.exists('robot-question')
-      ? this.sound.add('robot-question', { volume: 0.42 })
-      : null;
-    this.oreCashSound = this.cache.audio.exists('ore-cash')
-      ? this.sound.add('ore-cash', { volume: 0.55 })
-      : null;
-    this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound].filter(Boolean);
+    this.setupSpectatorSounds();
     this.scale.on('resize', this.onSpecResize, this);
+  }
+
+  makeSound(key, config = {}) {
+    return this.cache.audio.exists(key) ? this.sound.add(key, config) : null;
+  }
+
+  makeSoundPool(key, size, config = {}) {
+    const pool = [];
+    for (let i = 0; i < size; i += 1) {
+      const sound = this.makeSound(key, config);
+      if (sound) pool.push(sound);
+    }
+    return pool;
+  }
+
+  setupSpectatorSounds() {
+    this.drillLoop = this.makeSound(SFX.DRILL, { loop: true, volume: 0 });
+    this.fuseLoop = this.makeSound(SFX.FUSE, { loop: true, volume: 0 });
+    this.shakeLoop = this.makeSound(SFX.SHAKE, { loop: true, volume: 0 });
+
+    this.soundPools = {
+      [SFX.BREAK]: this.makeSoundPool(SFX.BREAK, 6, { volume: 0.7 }),
+      [SFX.DRILL_FAIL]: this.makeSoundPool(SFX.DRILL_FAIL, 3, { volume: 0.68 }),
+      [SFX.ORE_CASH]: this.makeSoundPool(SFX.ORE_CASH, 5, { volume: 0.55 }),
+      [SFX.ROBOT_SAD]: this.makeSoundPool(SFX.ROBOT_SAD, 3, { volume: 0.42 }),
+      [SFX.LADDER]: this.makeSoundPool(SFX.LADDER, 5, { volume: 0.55 }),
+      [SFX.BOOM]: this.makeSoundPool(SFX.BOOM, 3, { volume: 0.85 }),
+      [SFX.IMPACT]: this.makeSoundPool(SFX.IMPACT, 5, { volume: 0.72 }),
+    };
+
+    this.robotChirpSound = this.makeSound(SFX.ROBOT_CHIRP, { volume: 0.42 });
+    this.robotQuestionSound = this.makeSound(SFX.ROBOT_QUESTION, { volume: 0.42 });
+    this.robotTouchSounds = [this.robotChirpSound, this.robotQuestionSound].filter(Boolean);
+    this.spectatorSounds = [
+      this.drillLoop,
+      this.robotChirpSound,
+      this.robotQuestionSound,
+      this.fuseLoop,
+      this.shakeLoop,
+      ...Object.values(this.soundPools).flat(),
+    ].filter(Boolean);
+    this._lastStoneSoundCount = 0;
+    this._pendingSfx = [];
+    this._drillLevel = 0;
+    this._fuseLevel = 0;
+    this._shakeLevel = 0;
   }
 
   drawVisualFrame() {
@@ -486,7 +575,9 @@ export default class SpectatorScene extends GameScene {
     if (!this.rt.finished) {
       // Advance real time (cap dt so a tab-stall doesn't teleport everyone).
       this.rt.update(Math.min(50, dt));
+      this._pendingSfx = [];
       for (const e of this.rt.events) {
+        this.playSoundForEvent(e);
         if (e.type === 'dug') this.spawnDebris(e.x, e.y, e.block, 8);
         else if (e.type === 'detonation') {
           this.flashes.push({ x: e.x, y: e.y, maxR: (e.radius + 1) * TILE, life: 320, maxLife: 320 });
@@ -498,12 +589,14 @@ export default class SpectatorScene extends GameScene {
         }
         this.pushEvent(e);
       }
+      this.flushQueuedSounds();
       if (this.rt.worldDirty) { this.worldDirty = true; this.rt.worldDirty = false; }
     }
 
     // Feed the realtime falling stones into the inherited drawTile so they get
     // the same wobble/jitter as single-player; keep redrawing while any wobble.
     this.fallingStones = this.rt.stones.map((s) => ({ x: s.x, y: s.y, state: s.phase }));
+    this.updateContinuousSounds(dt);
     if (this.rt.stones.length) this.worldDirty = true;
 
     if (this.debris.length) this.updateDebris(dt);
@@ -536,6 +629,256 @@ export default class SpectatorScene extends GameScene {
       this.updateHUD();
       if (this.rt.finished && !this.isArchiveReplay) this.showFinish();
     }
+  }
+
+  playSoundForEvent(e) {
+    switch (e?.type) {
+      case 'dug':
+        this.queueSpatialSound(SFX.BREAK, e.x, e.y, { base: 0.7 });
+        break;
+      case 'resource_extracted':
+        this.queueSpatialSound(SFX.ORE_CASH, e.x, e.y, { base: 0.55, nearTiles: 7, maxTiles: 36 });
+        break;
+      case 'ladder_placed':
+        this.queueSpatialSound(SFX.LADDER, e.x, e.y, { base: 0.55 });
+        break;
+      case 'detonation':
+        this.queueSpatialSound(SFX.BOOM, e.x, e.y, {
+          base: Number(e.radius) >= 2 ? 1 : 0.85,
+          nearTiles: 9,
+          maxTiles: 54,
+          minVolume: 0.05,
+          priority: 2,
+        });
+        break;
+      case 'death':
+        this.stopDrillSound();
+        this.queueSpatialSound(SFX.ROBOT_SAD, e.x, e.y, { base: 0.46, nearTiles: 7, maxTiles: 34, priority: 1 });
+        break;
+      case 'exited':
+        this.queueSpatialSound(SFX.ROBOT_SAD, ...this.eventSoundTile(e), { base: 0.34, nearTiles: 7, maxTiles: 28 });
+        break;
+      case 'stone_moved':
+        this.queueSpatialSound(SFX.IMPACT, e.x, e.y, { base: 0.46, nearTiles: 6, maxTiles: 30 });
+        break;
+      default:
+        break;
+    }
+  }
+
+  eventSoundTile(e) {
+    if (Number.isFinite(e?.x) && Number.isFinite(e?.y)) return [e.x, e.y];
+    const miner = e?.owner
+      ? this.rt?.s?.miners?.find((m) => m.owner && m.owner.toLowerCase() === e.owner.toLowerCase())
+      : e?.id != null ? this.rt?.s?.miners?.find((m) => m.id === e.id) : null;
+    return [miner?.drawX ?? miner?.tx ?? NaN, miner?.drawY ?? miner?.ty ?? NaN];
+  }
+
+  cameraCenterTile() {
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    return {
+      x: (cam.scrollX + cam.width / zoom / 2) / TILE,
+      y: (cam.scrollY + cam.height / zoom / 2) / TILE,
+      left: cam.scrollX / TILE,
+      top: cam.scrollY / TILE,
+      right: (cam.scrollX + cam.width / zoom) / TILE,
+      bottom: (cam.scrollY + cam.height / zoom) / TILE,
+    };
+  }
+
+  spatialVolumeForTile(x, y, options = {}) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return options.base ?? 0;
+    const {
+      base = 1,
+      nearTiles = SPATIAL_AUDIO.nearTiles,
+      maxTiles = SPATIAL_AUDIO.maxTiles,
+      offscreenMultiplier = SPATIAL_AUDIO.offscreenMultiplier,
+      minVolume = SPATIAL_AUDIO.minVolume,
+    } = options;
+    const view = this.cameraCenterTile();
+    const dx = x + 0.5 - view.x;
+    const dy = y + 0.5 - view.y;
+    const distance = Math.hypot(dx, dy);
+    const range = Math.max(1, maxTiles - nearTiles);
+    let level = distance <= nearTiles ? 1 : 1 - ((distance - nearTiles) / range);
+    level = Phaser.Math.Clamp(level, 0, 1);
+    level = level * level * (3 - 2 * level);
+
+    const pad = 2;
+    const onscreen = x >= view.left - pad && x <= view.right + pad && y >= view.top - pad && y <= view.bottom + pad;
+    if (!onscreen) level *= offscreenMultiplier;
+
+    const volume = Phaser.Math.Clamp(base * level, 0, 1);
+    return volume >= minVolume ? volume : 0;
+  }
+
+  aggregateSpatialVolumes(points, options = {}) {
+    const volumes = points
+      .map(([x, y]) => this.spatialVolumeForTile(x, y, options))
+      .filter((v) => v > 0)
+      .sort((a, b) => b - a)
+      .slice(0, 4);
+    let combined = 0;
+    for (const volume of volumes) combined = 1 - ((1 - combined) * (1 - volume));
+    return Phaser.Math.Clamp(combined, 0, options.cap ?? 1);
+  }
+
+  queueSpatialSound(key, x, y, options = {}) {
+    const volume = this.spatialVolumeForTile(x, y, options);
+    if (volume <= 0) return;
+    this._pendingSfx ||= [];
+    this._pendingSfx.push({
+      key,
+      volume,
+      rate: options.rate,
+      priority: (options.priority || 0) + volume,
+    });
+  }
+
+  flushQueuedSounds() {
+    if (!this._pendingSfx?.length) return;
+    const counts = new Map();
+    const events = this._pendingSfx.sort((a, b) => b.priority - a.priority);
+    for (const event of events) {
+      const limit = SFX_FRAME_LIMIT[event.key] || 4;
+      const count = counts.get(event.key) || 0;
+      if (count >= limit) continue;
+      if (this.playPooledSound(event.key, { volume: event.volume, rate: event.rate })) {
+        counts.set(event.key, count + 1);
+      }
+    }
+    this._pendingSfx.length = 0;
+  }
+
+  playPooledSound(key, config = {}) {
+    const pool = this.soundPools?.[key] || [];
+    if (!pool.length) return false;
+    const sound = pool.find((s) => !s.isPlaying) || pool[0];
+    if (sound.isPlaying) sound.stop();
+    sound.play({
+      volume: Number.isFinite(config.volume) ? config.volume : 1,
+      rate: config.rate || 1,
+    });
+    return true;
+  }
+
+  updateContinuousSounds(dt = 16) {
+    const digPoints = (this.rt?.s?.miners || [])
+      .filter((m) => m.alive && m.act?.kind === 'dig')
+      .map((m) => [m.act.tx, m.act.ty]);
+    const drillVolume = this.aggregateSpatialVolumes(digPoints, {
+      base: 0.42,
+      nearTiles: 6,
+      maxTiles: 35,
+      cap: 0.62,
+    });
+    this.updateLoopSound(this.drillLoop, '_drillLevel', drillVolume, dt);
+
+    const stoneCount = this.rt?.stones?.length || 0;
+    const fuseVolume = this.aggregateSpatialVolumes((this.rt?.bombs || []).map((b) => [b.x, b.y]), {
+      base: 0.43,
+      nearTiles: 7,
+      maxTiles: 38,
+      cap: 0.48,
+    });
+    this.updateLoopSound(this.fuseLoop, '_fuseLevel', fuseVolume, dt);
+
+    const shakeVolume = this.aggregateSpatialVolumes((this.rt?.stones || [])
+      .filter((s) => s.phase === 'shake')
+      .map((s) => [s.x, s.y]), {
+      base: 0.38,
+      nearTiles: 6,
+      maxTiles: 32,
+      cap: 0.44,
+    });
+    this.updateLoopSound(this.shakeLoop, '_shakeLevel', shakeVolume, dt);
+
+    if ((this._lastStoneSoundCount || 0) > stoneCount) {
+      this.queueSpatialSound(SFX.IMPACT, ...this.nearestCameraTile(), { base: 0.5, nearTiles: 100, maxTiles: 120 });
+      this.flushQueuedSounds();
+    }
+    this._lastStoneSoundCount = stoneCount;
+  }
+
+  nearestCameraTile() {
+    const view = this.cameraCenterTile();
+    return [Math.round(view.x), Math.round(view.y)];
+  }
+
+  updateLoopSound(sound, field, targetVolume, dt) {
+    if (!sound) return;
+    const current = this[field] || 0;
+    const attackMs = 120;
+    const releaseMs = 280;
+    const ms = targetVolume > current ? attackMs : releaseMs;
+    const alpha = 1 - Math.exp(-Math.max(0, dt) / ms);
+    const next = current + (targetVolume - current) * alpha;
+    this[field] = next;
+
+    if (next > 0.035) {
+      if (!sound.isPlaying) sound.play({ volume: next });
+      else sound.setVolume(next);
+    } else if (sound.isPlaying) {
+      sound.stop();
+    }
+  }
+
+  startDrillSound(volume = 0.42) {
+    if (!this.drillLoop) return;
+    this.drillLoop.setVolume?.(volume);
+    if (!this.drillLoop.isPlaying) this.drillLoop.play({ volume });
+  }
+
+  stopDrillSound() {
+    if (!this.drillLoop || !this.drillLoop.isPlaying) return;
+    this.drillLoop.stop();
+  }
+
+  playBreakSound() {
+    this.playPooledSound(SFX.BREAK, { volume: 0.7 });
+  }
+
+  playOreCashSound() {
+    this.playPooledSound(SFX.ORE_CASH, { volume: 0.55 });
+  }
+
+  playRobotSadSound() {
+    this.playPooledSound(SFX.ROBOT_SAD, { volume: 0.42 });
+  }
+
+  playLadderPlaceSound() {
+    this.playPooledSound(SFX.LADDER, { volume: 0.55 });
+  }
+
+  playBoomSound(radius = 1) {
+    this.playPooledSound(SFX.BOOM, { volume: Number(radius) >= 2 ? 1 : 0.85 });
+  }
+
+  playRockImpact() {
+    this.playPooledSound(SFX.IMPACT, {
+      volume: 0.66 + Math.random() * 0.14,
+      rate: 0.92 + Math.random() * 0.16,
+    });
+  }
+
+  teardownSpectatorSounds() {
+    for (const sound of this.spectatorSounds || []) {
+      if (sound.isPlaying) sound.stop();
+      sound.destroy?.();
+    }
+    this.spectatorSounds = [];
+    this.robotTouchSounds = [];
+    this.soundPools = {};
+    this._pendingSfx = [];
+    this.drillLoop = null;
+    this.robotChirpSound = null;
+    this.robotQuestionSound = null;
+    this.fuseLoop = null;
+    this.shakeLoop = null;
+    this._drillLevel = 0;
+    this._fuseLevel = 0;
+    this._shakeLevel = 0;
   }
 
   drawSpecRobots(time) {
@@ -690,7 +1033,13 @@ export default class SpectatorScene extends GameScene {
     if (!amount) return;
     const m = this.rt.s.miners.find((x) => x.id === ref || sameDisplayAddress(x.owner, ref));
     if (!m) return;
-    this.oreCashSound?.play({ volume: 0.58, detune: 80 });
+    this.queueSpatialSound(SFX.ORE_CASH, m.drawX ?? m.tx, m.drawY ?? m.ty, {
+      base: 0.58,
+      nearTiles: 8,
+      maxTiles: 38,
+      priority: 1,
+      rate: 1.06,
+    });
 
     const x = ((Number.isFinite(m.drawX) ? m.drawX : m.tx) + 0.5) * TILE;
     const y = ((Number.isFinite(m.drawY) ? m.drawY : m.ty) - 0.2) * TILE;
@@ -1033,6 +1382,7 @@ export default class SpectatorScene extends GameScene {
   teardown() {
     this._tornDown = true;
     this.rt?.dispose?.();
+    this.teardownSpectatorSounds();
     this.loadingText?.destroy();
     clearTimeout(this._agentBubbleTimer);
     document.getElementById('spec-hud')?.remove();

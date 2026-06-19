@@ -25,6 +25,9 @@ const config = {
   parent: 'game',
   backgroundColor: '#0a0a0a',
   pixelArt: true,
+  audio: {
+    disableWebAudio: true,
+  },
   scale: {
     mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,

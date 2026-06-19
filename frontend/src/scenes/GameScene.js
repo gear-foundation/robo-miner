@@ -23,6 +23,10 @@ const TILE_TEXTURE = {
   [BLOCK.PILLAR]:  'pillar',
 };
 
+function sfxSources(name) {
+  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+}
+
 // Depth-driven dirt tint. Used as a multiplicative Sprite.setTint so each
 // depth band reads as a distinct "biome" without needing separate art.
 // Values are subtle — close to white (= no tint) near the surface, then
@@ -193,18 +197,18 @@ export default class GameScene extends Phaser.Scene {
     for (const k of keys) {
       this.load.image(k, `assets/tiles/${k}.png`);
     }
-    this.load.audio('rock-drill', 'assets/sfx/rock-drill-generated.wav');
-    this.load.audio('rock-break', 'assets/sfx/rock-break.wav');
-    this.load.audio('drill-fail', 'assets/sfx/drill-fail.wav');
-    this.load.audio('ore-cash', 'assets/sfx/ore-cash.wav');
-    this.load.audio('robot-chirp', 'assets/sfx/robot-chirp.wav');
-    this.load.audio('robot-question', 'assets/sfx/robot-question.wav');
-    this.load.audio('robot-sad', 'assets/sfx/robot-sad.wav');
-    this.load.audio('ladder-place', 'assets/sfx/ladder-place.wav');
-    this.load.audio('dynamite-fuse', 'assets/sfx/dynamite-fuse.wav');
-    this.load.audio('dynamite-boom', 'assets/sfx/dynamite-boom.wav');
-    this.load.audio('rock-shake',    'assets/sfx/rock-shake.wav');
-    this.load.audio('rock-impact',   'assets/sfx/rock-impact.wav');
+    this.load.audio('rock-drill', sfxSources('rock-drill-generated'));
+    this.load.audio('rock-break', sfxSources('rock-break'));
+    this.load.audio('drill-fail', sfxSources('drill-fail'));
+    this.load.audio('ore-cash', sfxSources('ore-cash'));
+    this.load.audio('robot-chirp', sfxSources('robot-chirp'));
+    this.load.audio('robot-question', sfxSources('robot-question'));
+    this.load.audio('robot-sad', sfxSources('robot-sad'));
+    this.load.audio('ladder-place', sfxSources('ladder-place'));
+    this.load.audio('dynamite-fuse', sfxSources('dynamite-fuse'));
+    this.load.audio('dynamite-boom', sfxSources('dynamite-boom'));
+    this.load.audio('rock-shake', sfxSources('rock-shake'));
+    this.load.audio('rock-impact', sfxSources('rock-impact'));
   }
 
   create() {

@@ -113,7 +113,7 @@ as the DiggerProxy owner. The returned `programId` is not the player's wallet
 address; it is the deployed digger program to call for `Digger/Register`,
 `Digger/Drill`, `Digger/MoveAgent`, and other player actions.
 
-## Events and Projections
+## Legacy Events and Projections
 
 ```text
 GET /api/events?limit=100
@@ -121,10 +121,9 @@ GET /api/events with Accept: text/event-stream
 POST /api/ingest/injected
 ```
 
-The event stream is useful for UI/projection sync, but the player loop should
-still re-read contract state after writes. For injected transaction flows, post
-transaction metadata to `/api/ingest/injected` when the runtime uses it, so the
-backend can index and project fresh events.
+The live arena UI does not use these endpoints. It reads Vara.eth directly
+through `subscribeBestState`. These endpoints are legacy diagnostics/projection
+helpers only; the player loop should re-read contract state after writes.
 
 ## Stats
 

@@ -30,8 +30,9 @@ export const CHAIN = {
   varaEthWs: env.VITE_VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
   routerAddress: env.VITE_ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
 
-  // The World program (one per active map). For a multi-map lobby this is the
-  // currently-watched map's program id; the lobby switcher swaps it.
+  // The World program (one per active map). Direct world routes pass the id in
+  // the URL. Lobby discovery comes from the operator API; these ids are only a
+  // last-resort fallback when discovery is unavailable.
   worldProgramId: env.VITE_WORLD_PROGRAM_ID || '',
   worldProgramIds: (env.VITE_WORLD_PROGRAM_IDS || env.VITE_WORLD_PROGRAM_ID || '')
     .split(',')
@@ -43,13 +44,9 @@ export const CHAIN = {
   resVmtProgramId: env.VITE_RES_VMT_PROGRAM_ID || '',
   redeemProgramId: env.VITE_REDEEM_PROGRAM_ID || '',
 
-  // Operator discovery feed (factory /sessions + /matches). When set, the lobby
-  // lists live worlds straight from the operator (current vs past + agent
-  // counts), no colleague backend required. Takes precedence over backendUrl.
+  // Operator discovery feed (factory /sessions + /matches). If empty, the
+  // frontend uses backendUrl for the same endpoints.
   matchesUrl: env.VITE_MATCHES_URL || '',
-
-  // Fallback poll interval (ms) if push event subscription isn't used.
-  pollMs: num('VITE_CHAIN_POLL_MS', 1000),
 
   // Logical contract surface. The new Config()[6] is starting_hp, not surface.
   contractSurfaceY: num('VITE_CONTRACT_SURFACE_Y', 1),
@@ -76,6 +73,10 @@ export const CHAIN_PLAYBACK = {
 // a half-filled .env never half-connects.
 export function chainReady(programId = CHAIN.worldProgramId) {
   return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && programId);
+}
+
+export function discoveryBaseUrl() {
+  return String(CHAIN.matchesUrl || CHAIN.backendUrl || '').replace(/\/+$/, '');
 }
 
 export function redeemReady() {

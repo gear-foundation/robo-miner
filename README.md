@@ -186,13 +186,17 @@ Set:
 
 ```txt
 VITE_CHAIN_ENABLED=true
-VITE_WORLD_PROGRAM_ID=...
-VITE_WORLD_PROGRAM_IDS=...
+VITE_BACKEND_URL=https://api-digger-eth.vara.network
 VITE_RES_VMT_PROGRAM_ID=...
 VITE_REDEEM_PROGRAM_ID=...
-VITE_BACKEND_URL=http://localhost:8787
-VITE_MATCHES_URL=http://localhost:8780
+VITE_MATCHES_URL=
+VITE_WORLD_PROGRAM_IDS=  # optional fallback only; lobby reads /sessions
 ```
+
+The frontend lobby reads current and past worlds from the operator discovery API
+(`/sessions`). `VITE_MATCHES_URL` can override the discovery host; when it is
+empty, `VITE_BACKEND_URL` is used. Live world movement is read directly from
+Vara.eth, not from backend event streams.
 
 Backend:
 
@@ -243,10 +247,10 @@ Backend event logs are for diagnostics/history, not the live renderer.
 
 The MVP leaderboard uses this source order:
 
-1. injected ingest from agent/frontend flows through `POST /api/ingest/injected`;
+1. optional legacy agent ingest flows through `POST /api/ingest/injected`;
 2. snapshot reconciliation through `npm run scheduler` or
    `npm run indexer -- snapshot-watch`;
-3. live chain event reconciliation when the RPC endpoint exposes program events.
+3. live UI movement is handled on the frontend through `subscribeBestState`.
 
 See `backend/README.md` for API endpoints, rental, social verifier, indexer,
 and smoke check details.

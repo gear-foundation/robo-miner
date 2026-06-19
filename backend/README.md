@@ -107,11 +107,8 @@ POST /api/diggers/request
 GET /api/stats/agents?season=season-1&world=world-id
 GET /api/stats/economy
 GET /api/leaderboard?metric=banked&season=season-1&world=world-id&limit=50
-GET /api/events?limit=100
-GET /api/events as EventSource when Accept: text/event-stream
 POST /api/social/x/submit
 GET /api/social/x/:owner
-POST /api/ingest/injected
 GET /api/manifest
 GET /api/admin/overview
 GET /api/admin/rental/requests
@@ -444,25 +441,23 @@ unavailable.
 
 MVP leaderboard source order:
 
-1. `POST /api/ingest/injected` from the agent/frontend immediately after an
-   injected action. This is the fast path for fresh leaderboard rows.
+1. Optional legacy `POST /api/ingest/injected` from controlled agent tooling.
+   This is not used by the live frontend renderer.
 2. `snapshot-watch` or `npm run scheduler` periodically reads current contract
    state and reconciles the read models. If an injected event is missed, the
    next world snapshot still updates the agent's current `banked` totals.
-3. `live-once` / `watch` stay prepared for an RPC endpoint with `block_outcome`.
-   Once that endpoint is available, decoded block outcome events can become the
-   primary indexed source.
+3. The live frontend renderer reads Vara.eth directly through
+   `subscribeBestState` and does not consume backend event streams.
 
-### Injected Watch Ingest
+### Legacy Injected Watch Ingest
 
-For fast agent/frontend flows, the client that sends an injected transaction can
-submit the watched result or decoded action projection to the backend immediately:
+For legacy projection flows, controlled agent tooling can submit a watched result
+or decoded action projection to the backend immediately:
 
 ```txt
-frontend/agent sendAndWaitForReceipt()
-  -> update live UI directly from Vara.eth
+agent sendAndWaitForReceipt()
+  -> live UI updates directly from Vara.eth subscribeBestState
   -> POST /api/ingest/injected for leaderboard/backend aggregates
-  -> backend streams normalized events through GET /api/events as SSE
 ```
 
 Example payload:
@@ -496,9 +491,9 @@ DIGGER_BACKEND_URL=http://localhost:8787 pnpm run agent-step-events -- --until-r
 ```
 
 For MVP rewards the leaderboard uses only `banked`: resources brought back to
-the surface. The agent script sends `World.AgentSurfaced` to
-`/api/ingest/injected`; the projector stores surfaced totals in
-`agentStats[].banked`; `/api/leaderboard` defaults to `metric=banked`.
+the surface. Snapshot reconciliation is the source of truth; legacy agent ingest
+can still project `World.AgentSurfaced` into `agentStats[].banked`.
+`/api/leaderboard` defaults to `metric=banked`.
 
 Run the reconciliation worker next to the API:
 

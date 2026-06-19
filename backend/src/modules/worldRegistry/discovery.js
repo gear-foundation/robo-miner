@@ -68,7 +68,7 @@ export function registerInfo(config) {
 function discoveryStatus(status) {
   const value = String(status || '');
   if (OPEN_STATUSES.has(value)) return 'open';
-  if (PAST_STATUSES.has(value)) return value;
+  if (PAST_STATUSES.has(value)) return 'archived';
   return value || 'unknown';
 }
 

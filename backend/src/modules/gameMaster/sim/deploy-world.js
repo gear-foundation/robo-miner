@@ -2,7 +2,9 @@
 // One-shot: validate the (rebuilt) digger-world code, create + fund a new program,
 // Create(), and upload a fresh framed map. Prints the new program id.
 //   node src/modules/gameMaster/sim/deploy-world.js
-// After: put the printed id in frontend/.env VITE_WORLD_PROGRAM_IDS + state/factory-programs.json.
+// After: persist the printed id in the world registry/factory store. The
+// frontend lobby discovers worlds from /sessions; VITE_WORLD_PROGRAM_IDS is
+// only a fallback for local emergency checks.
 
 import { connectDiggerWorldChain } from '../../../chain/diggerWorld.js';
 import { loadChainEnv } from '../factory/config.js';

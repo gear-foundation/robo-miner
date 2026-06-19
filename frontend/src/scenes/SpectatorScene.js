@@ -4,7 +4,7 @@ import { getBlock } from '../world.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
-import { CHAIN } from '../chain/config.js';
+import { CHAIN, discoveryBaseUrl } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { btnCss, wireBtn } from './arenaUI.js';
@@ -68,15 +68,10 @@ export default class SpectatorScene extends GameScene {
   constructor() { super('Spectator'); }
 
   preload() {
-    // Spectator/live worlds only need tile textures and the tiny robot-click
-    // sounds. Loading every single-player SFX here creates noisy decode errors
-    // in browsers for assets this scene never plays.
-    this.load.on('loaderror', () => {});
-    const keys = ['dirt', 'coal', 'iron', 'copper', 'silver', 'gold', 'emerald', 'ruby', 'diamond', 'stone', 'grass', 'ladder', 'pillar'];
-    for (const k of keys) this.load.image(k, `assets/tiles/${k}.png`);
-    this.load.audio('robot-chirp', 'assets/sfx/robot-chirp.wav');
-    this.load.audio('robot-question', 'assets/sfx/robot-question.wav');
-    this.load.audio('ore-cash', 'assets/sfx/ore-cash.wav');
+    // Live worlds render tiles procedurally; optional sounds are used only when
+    // already available from another scene. Keep this preload empty so Phaser
+    // does not report missing legacy tile PNGs or browser-specific audio decode
+    // failures for assets the spectator can safely skip.
   }
 
   init(data) {
@@ -821,6 +816,8 @@ export default class SpectatorScene extends GameScene {
     line.hash = '0x' + ((0x9e3779b1 * this.txCount) >>> 0).toString(16).padStart(8, '0').slice(0, 6);
     this.eventLog.push(line);
     if (this.eventLog.length > 220) this.eventLog.splice(0, this.eventLog.length - 220);
+    const cnt = document.getElementById('spec-tx-count');
+    if (cnt) cnt.textContent = `${this.txCount} tx`;
   }
 
   formatEvent(e) {
@@ -923,9 +920,9 @@ export default class SpectatorScene extends GameScene {
       this.updateHUD();
       return;
     }
-    if (!CHAIN.matchesUrl || !this.specProgramId) return;
+    const base = discoveryBaseUrl();
+    if (!base || !this.specProgramId) return;
     try {
-      const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
       const data = await this.fetchDiscoverySessions(base);
       const found = data.sessions.find((w) =>
         String(w.programId || '').toLowerCase() === String(this.specProgramId).toLowerCase(),

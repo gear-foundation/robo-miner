@@ -13,13 +13,14 @@
 import http from 'node:http';
 
 const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
+const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
 
 export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
   const sessionRecord = (w) => ({
     id: w.id,
     sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
     programId: w.programId,
-    status: w.status, // open | active | finished | …
+    status: publicStatus(w.status), // open | active | archived | …
     joinable: w.status === 'open' && (w.agents ?? 0) < (w.capAgents ?? 0),
     agents: w.agents ?? 0,
     minAgents: w.minAgents,
@@ -117,4 +118,9 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     },
     stop() { try { server.close(); } catch { /* ignore */ } },
   };
+}
+
+function publicStatus(status) {
+  const value = String(status || '');
+  return PAST_STATUSES.has(value) ? 'archived' : value;
 }

@@ -3,8 +3,7 @@ import { GAME_MODES } from '../engine/index.js';
 import { generateWorld } from '../world.js';
 import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
-import { CHAIN, chainReady } from '../chain/config.js';
-import { backendEnabled, fetchManifest } from '../backend/api.js';
+import { CHAIN, chainReady, discoveryBaseUrl } from '../chain/config.js';
 import { navigateBack, navigateTo } from '../router.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
@@ -12,10 +11,50 @@ import { navigateBack, navigateTo } from '../router.js';
 // spectator. Single-player ('solo') is intentionally NOT here — that's the
 // normal START GAME flow; this screen is the machine-vs-map modes.
 //
-// In chain mode it lists deployed worlds with a CURRENT / PAST toggle, sourced
-// from the backend World Registry manifest (active vs finished), falling back to
-// the configured program ids as "current" when no backend is wired.
+// In chain mode it lists worlds through the operator discovery API (/sessions):
+// current worlds, past snapshots, statuses, and agent counts. Configured env
+// program ids are only a fallback when discovery is unavailable.
 const ARENA_MODES = ['coop-gem', 'coop-race', 'coop-timed', 'arena'];
+
+function isPastStatus(status) {
+  return ['finished', 'retired', 'archived'].includes(String(status || '').toLowerCase());
+}
+
+function normalizeWorldRecord(world) {
+  const maxAgents = world.maxAgents ?? world.targetAgents ?? world.capAgents;
+  return {
+    id: world.id,
+    programId: world.programId,
+    status: world.status,
+    agents: world.agents,
+    maxAgents,
+    archiveId: world.archiveId,
+    archiveUrl: world.archiveUrl,
+    seed: world.seed,
+    sessionId: world.sessionId ?? world.session,
+    endsAt: world.endsAt,
+  };
+}
+
+function uniqueWorlds(worlds) {
+  const seen = new Set();
+  return worlds.filter((world) => {
+    const key = [
+      String(world.programId || '').toLowerCase(),
+      world.archiveId || world.sessionId || world.id || '',
+      world.status || '',
+    ].join(':');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function configuredFallbackWorlds() {
+  return CHAIN.worldProgramIds
+    .filter((id) => chainReady(id))
+    .map((programId) => ({ programId, status: 'configured' }));
+}
 
 function makeWorldBadge(label, bg, fg = '#1b1309') {
   const el = document.createElement('div');
@@ -37,6 +76,14 @@ function worldStatusMeta(status) {
       description: 'Registration is open — agents can join this world.',
     };
   }
+  if (value === 'configured') {
+    return {
+      label: 'CONFIGURED',
+      bg: '#5fd0e6',
+      fg: '#10343d',
+      description: 'Discovery is unavailable — showing configured fallback world.',
+    };
+  }
   if (value === 'active') {
     return {
       label: 'IN GAME',
@@ -47,17 +94,17 @@ function worldStatusMeta(status) {
   }
   if (['finished', 'archived', 'retired'].includes(value)) {
     return {
-      label: value === 'finished' ? 'FINISHED' : 'PAST',
+      label: 'ARCHIVE',
       bg: '#cdd3da',
       fg: '#18202a',
       description: 'Finished world — open the final snapshot.',
     };
   }
   return {
-    label: value ? value.toUpperCase().slice(0, 14) : 'SYNCING',
+    label: value ? value.toUpperCase().slice(0, 14) : 'UNKNOWN',
     bg: '#5fd0e6',
     fg: '#10343d',
-    description: 'World status is syncing from the operator.',
+    description: 'World status has not been reported by discovery yet.',
   };
 }
 
@@ -66,7 +113,7 @@ function agentCountMeta(info) {
   const agents = Number(info.agents);
   if (!Number.isFinite(agents)) {
     const maxLabel = Number.isFinite(max) ? max : 10;
-    return { detail: `agents syncing · ${maxLabel} max` };
+    return { detail: `agents unknown · ${maxLabel} max` };
   }
   const cap = Number.isFinite(max) ? max : Math.max(agents, 10);
   return { detail: `${agents}/${cap} agents registered` };
@@ -82,10 +129,8 @@ export default class LobbyScene extends Phaser.Scene {
   create() {
     this.cleanupDOM();
     this.tab = 'current'; // current | past
-    this.worlds = {
-      current: CHAIN.worldProgramIds.filter((id) => chainReady(id)).map((programId) => ({ programId })),
-      past: [],
-    };
+    this.loadingWorlds = CHAIN.enabled;
+    this.worlds = { current: [], past: [] };
     const W = this.scale.width, H = this.scale.height;
     this.add.graphics().fillStyle(0x20140a, 1).fillRect(0, 0, W, H);
     this.buildDOM();
@@ -175,67 +220,64 @@ export default class LobbyScene extends Phaser.Scene {
     }
   }
 
-  // Pull worlds (with statuses) from the backend World Registry manifest and
-  // bucket into current (active/open) vs past (finished). No-op without a
-  // backend — the chain-seeded current bucket stays.
+  // Pull worlds from operator discovery. This is only a lobby/catalog read; live
+  // world movement is handled by the frontend chain subscription.
   async refreshWorlds() {
     if (!CHAIN.enabled) return;
-    // Prefer the operator discovery feed: live current/past + agent counts,
-    // no colleague backend required.
-    if (CHAIN.matchesUrl) {
+    this.loadingWorlds = true;
+    this.renderGrid();
+
+    const base = discoveryBaseUrl();
+    if (base) {
       try {
-        const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
-        const data = await this.fetchDiscoverySessions(base);
-        const isPast = (s) => s === 'finished' || s === 'retired' || s === 'archived';
-        const rec = (w) => ({
-          id: w.id,
-          programId: w.programId,
-          status: w.status,
-          agents: w.agents,
-          maxAgents: w.maxAgents,
-          archiveId: w.archiveId,
-          archiveUrl: w.archiveUrl,
-          seed: w.seed,
-          sessionId: w.sessionId,
-        });
-        const ws = data.sessions.filter((w) => w.programId);
-        this.worlds.current = ws.filter((w) => !isPast(w.status)).map(rec);
-        this.worlds.past = ws.filter((w) => isPast(w.status)).map(rec);
-        this.renderGrid();
+        const worlds = await this.fetchDiscoveryWorlds(base);
+        this.applyWorlds(worlds);
         return;
       } catch (error) {
-        console.warn('[matches] failed to load worlds', error);
+        console.warn('[discovery] failed to load worlds', error);
       }
     }
-    if (!backendEnabled()) return;
+
+    this.applyWorlds({ current: configuredFallbackWorlds(), past: [] });
+  }
+
+  async fetchDiscoveryWorlds(base) {
     try {
-      const manifest = await fetchManifest();
-      const rec = (w) => ({
-        id: w.id,
-        programId: w.programId,
-        status: w.status,
-        agents: w.agents,
-        maxAgents: w.targetAgents,
-        archiveId: w.archiveId,
-        archiveUrl: w.archiveUrl,
-        seed: w.seed,
-        sessionId: w.sessionId,
-      });
-      const active = (manifest?.active || []).filter((w) => w.programId).map(rec);
-      if (active.length) this.worlds.current = active;
-      this.worlds.past = (manifest?.past || []).filter((w) => w.programId).map(rec);
-      this.renderGrid();
-    } catch (error) {
-      console.warn('[backend] failed to load worlds', error);
+      const sessions = await this.fetchJson(`${base}/sessions`);
+      const worlds = (sessions?.sessions || [])
+        .filter((world) => world.programId)
+        .map(normalizeWorldRecord);
+      return {
+        current: worlds.filter((world) => !isPastStatus(world.status)),
+        past: worlds.filter((world) => isPastStatus(world.status)),
+      };
+    } catch (sessionsError) {
+      const manifest = await this.fetchJson(`${base}/api/manifest`);
+      const manifestWorlds = Array.isArray(manifest?.worlds)
+        ? manifest.worlds
+        : [...(manifest?.active || []), ...(manifest?.past || [])];
+      const worlds = manifestWorlds
+        .filter((world) => world.programId)
+        .map(normalizeWorldRecord);
+      return {
+        current: worlds.filter((world) => !isPastStatus(world.status)),
+        past: worlds.filter((world) => isPastStatus(world.status)),
+      };
     }
   }
 
-  async fetchDiscoverySessions(base) {
-    const response = await fetch(`${base}/sessions`);
+  async fetchJson(url) {
+    const response = await fetch(url);
     if (!response.ok) throw new Error(`discovery failed: ${response.status}`);
-    const data = await response.json();
-    if (!Array.isArray(data?.sessions)) throw new Error('discovery response has no sessions');
-    return data;
+    return response.json();
+  }
+
+  applyWorlds(worlds) {
+    if (!this.gridEl) return;
+    this.loadingWorlds = false;
+    this.worlds.current = uniqueWorlds((worlds.current || []).filter((world) => world.programId));
+    this.worlds.past = uniqueWorlds((worlds.past || []).filter((world) => world.programId));
+    this.renderGrid();
   }
 
   renderGrid() {
@@ -249,7 +291,9 @@ export default class LobbyScene extends Phaser.Scene {
     if (!list.length) {
       const empty = document.createElement('div');
       empty.style.cssText = 'opacity:.55;font-size:14px;padding:48px;text-align:center;width:100%';
-      empty.textContent = this.tab === 'past' ? 'no finished worlds yet' : 'no open worlds right now';
+      empty.textContent = this.loadingWorlds
+        ? 'loading worlds...'
+        : this.tab === 'past' ? 'no archived worlds yet' : 'no open worlds right now';
       this.gridEl.appendChild(empty);
       return;
     }

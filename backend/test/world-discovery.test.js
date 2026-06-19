@@ -77,7 +77,7 @@ test('world registry manifest becomes agent match discovery feed', () => {
   });
   assert.equal(discovery.sessions[1].status, 'active');
   assert.equal(discovery.sessions[1].joinable, false);
-  assert.equal(discovery.sessions[2].status, 'finished');
+  assert.equal(discovery.sessions[2].status, 'archived');
   assert.equal(discovery.sessions[2].joinable, false);
 });
 

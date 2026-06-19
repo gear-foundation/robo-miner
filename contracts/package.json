@@ -23,7 +23,7 @@
     "world-events": "tsx scripts/read-events.ts --watch --service World --no-requests --latest-computed-outcome --events-only"
   },
   "dependencies": {
-    "@vara-eth/api": "0.5.1",
+    "@vara-eth/api": "0.5.2",
     "dotenv": "^17.2.3",
     "kzg-wasm": "1.0.0",
     "sails-js": "1.0.0",

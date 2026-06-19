@@ -28,7 +28,7 @@
 
 import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
-import { CHAIN, CHAIN_PLAYBACK, chainReady } from './config.js';
+import { CHAIN, CHAIN_PLAYBACK, chainReady, discoveryBaseUrl } from './config.js';
 import { connectWorldProgram, createWorldEventListener } from './worldEventListener.js';
 import { skinFromAddress } from '../render/robot.js';
 
@@ -78,6 +78,14 @@ function rawToVisualY(rawY, surface, rawSurface, yOffset) {
 function normalizeEventNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function facingToTarget(fromX, fromY, targetX, targetY, fallback = 'down') {
+  if (targetX < fromX) return 'left';
+  if (targetX > fromX) return 'right';
+  if (targetY < fromY) return 'up';
+  if (targetY > fromY) return 'down';
+  return fallback;
 }
 
 function normalizeResourceTotals(value = {}) {
@@ -266,19 +274,17 @@ export class ArchivedSource {
   }
 
   async _fetchArchive() {
+    const base = discoveryBaseUrl();
     if (this.archiveUrl) {
-      const url = this.archiveUrl.startsWith('/') && CHAIN.matchesUrl
-        ? `${String(CHAIN.matchesUrl).replace(/\/+$/, '')}${this.archiveUrl}`
-        : this.archiveUrl.startsWith('/') && CHAIN.backendUrl
-          ? `${String(CHAIN.backendUrl).replace(/\/+$/, '')}${this.archiveUrl}`
+      const url = this.archiveUrl.startsWith('/') && base
+        ? `${base}${this.archiveUrl}`
         : this.archiveUrl;
       const response = await fetch(url);
       if (!response.ok) throw new Error(`archive fetch failed: ${response.status}`);
       return response.json();
     }
     if (!this.archiveId) throw new Error('archive id is required');
-    if (!CHAIN.matchesUrl) throw new Error('VITE_MATCHES_URL is required to load archived worlds');
-    const base = String(CHAIN.matchesUrl).replace(/\/+$/, '');
+    if (!base) throw new Error('VITE_MATCHES_URL or VITE_BACKEND_URL is required to load archived worlds');
     const response = await fetch(`${base}/archives/${encodeURIComponent(this.archiveId)}`);
     if (!response.ok) throw new Error(`archive fetch failed: ${response.status}`);
     return response.json();
@@ -314,7 +320,6 @@ export class ChainSource {
     this._api = null;
     this._program = null;
     this._eventListener = null;
-    this._eventPollEveryMs = Math.max(400, Number(CHAIN.pollMs || 1000));
     this._polling = false;
     this._playbackGroups = [];
     this._playbackOpenGroups = new Map();
@@ -365,7 +370,7 @@ export class ChainSource {
       api: this._api,
       program: this._program,
       programId: this.programId,
-      pollMs: this._eventPollEveryMs,
+      config: CHAIN,
       onEvent: (event) => this._queuePlaybackEvent(event),
       onError: (error) => {
         this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
@@ -483,14 +488,7 @@ export class ChainSource {
         miner.spawnY = this.world?.surface ?? event.y;
         break;
       case 'moved':
-        this._enqueueAct(miner, {
-          kind: 'move',
-          fromX: Number.isFinite(event.fromX) ? event.fromX : undefined,
-          fromY: Number.isFinite(event.fromY) ? event.fromY : undefined,
-          tx: event.x,
-          ty: event.y,
-          event,
-        });
+        this._enqueueMoveEvent(miner, event);
         return;
       case 'dug':
         if (miner) {
@@ -669,6 +667,43 @@ export class ChainSource {
     miner.actQueue.push(act);
   }
 
+  _enqueueMoveEvent(miner, event) {
+    if (!miner) return;
+    const fromX = Number.isFinite(event.fromX) ? event.fromX : miner.tx;
+    const fromY = Number.isFinite(event.fromY) ? event.fromY : miner.ty;
+    const toX = Number.isFinite(event.x) ? event.x : fromX;
+    const toY = Number.isFinite(event.y) ? event.y : fromY;
+
+    if (fromX !== toX && fromY !== toY) {
+      this._enqueueAct(miner, {
+        kind: 'move',
+        fromX,
+        fromY,
+        tx: toX,
+        ty: fromY,
+        event,
+      });
+      this._enqueueAct(miner, {
+        kind: 'move',
+        fromX: toX,
+        fromY,
+        tx: toX,
+        ty: toY,
+        preserveFacing: true,
+      });
+      return;
+    }
+
+    this._enqueueAct(miner, {
+      kind: 'move',
+      fromX,
+      fromY,
+      tx: toX,
+      ty: toY,
+      event,
+    });
+  }
+
   _emitVisualEvent(event) {
     if (!event) return;
     this._pending.push(event);
@@ -694,10 +729,7 @@ export class ChainSource {
       const fromY = Number.isFinite(act.fromY) ? act.fromY : miner.ty;
       const toX = Number.isFinite(act.tx) ? act.tx : fromX;
       const toY = Number.isFinite(act.ty) ? act.ty : fromY;
-      if (toX < fromX) miner.facing = 'left';
-      else if (toX > fromX) miner.facing = 'right';
-      else if (toY < fromY) miner.facing = 'up';
-      else if (toY > fromY) miner.facing = 'down';
+      if (!act.preserveFacing) miner.facing = facingToTarget(fromX, fromY, toX, toY, miner.facing);
       miner.tx = toX;
       miner.ty = toY;
       miner.drawX = fromX;
@@ -706,9 +738,10 @@ export class ChainSource {
       miner.exited = false;
       miner.respawnAtMs = null;
       miner.act = { ...act, kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_PLAYBACK.moveMs * speedScale };
-      this._emitVisualEvent(act.event);
+      if (act.event) this._emitVisualEvent(act.event);
       return true;
     } else if (act.kind === 'dig') {
+      miner.facing = facingToTarget(miner.tx, miner.ty, act.tx, act.ty, miner.facing);
       miner.act = { ...act, kind: 'dig', t: 0, dur: CHAIN_PLAYBACK.digMs * speedScale };
       return true;
     }

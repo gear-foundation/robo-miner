@@ -55,12 +55,15 @@ VITE_CHAIN_ENABLED=true
 VITE_ETH_RPC=...
 VITE_VARA_ETH_WS=...
 VITE_ROUTER_ADDRESS=...
-VITE_WORLD_PROGRAM_ID=...
-VITE_WORLD_PROGRAM_IDS=...
+VITE_BACKEND_URL=https://api-digger-eth.vara.network
+VITE_MATCHES_URL=          # optional override; empty uses VITE_BACKEND_URL
+VITE_WORLD_PROGRAM_IDS=    # optional fallback only
 VITE_RES_VMT_PROGRAM_ID=...
 VITE_REDEEM_PROGRAM_ID=...
-VITE_BACKEND_URL=http://localhost:8787
 ```
+
+The arena lobby discovers current and past worlds from `/sessions`. Direct
+`/world/:programId` routes still work without listing that program id in env.
 
 If `VITE_CHAIN_ENABLED=false`, the arena falls back to the local realtime
 engine.
@@ -105,7 +108,7 @@ Set `VITE_BACKEND_URL` to the backend API origin. Current frontend integrations:
 - leaderboard reads `/api/leaderboard`;
 - live worlds read `/api/worlds/live`;
 - social fuel submits to `/api/social/x/submit`;
-- injected action flows can post to `/api/ingest/injected`;
+- live world movement is read directly from Vara.eth `subscribeBestState`;
 - redeem uses configured RES VMT and redeem program ids directly through
   Vara.eth RPC.
 

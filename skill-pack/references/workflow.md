@@ -308,7 +308,10 @@ World.AgentOf(agentActorId).result:
  backpackCapacity, lastActionSeq]
 
 agentStatus = result[0]  # 1 active, 2 surfaced, 3 dead, 4 exited
+agentX = result[1]
 agentY = result[2]
+agentHp = result[3]
+laddersRemaining = result[4]
 ```
 
 ## Gate 5: Register
@@ -428,6 +431,25 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 Only play when status is `1`. If status is `0`, wait and poll. If status is
 `2`, return to discovery.
 
+## Death and No-Ladder Checks
+
+Run these checks after every confirmed action and before planning the next one:
+
+1. If `AgentOf(agentActorId).result[0] == 3` or `result[3] == 0`, the digger is
+   dead. Stop sending game actions for this digger. Report world id,
+   `diggerProgramId`, position, last action, and the best known death cause.
+2. Prefer event-confirmed causes: `AgentDied(..., causeTile=2)` means falling
+   stone; `AgentDied(..., causeTile=3)` or `ChestOpened(..., outcome=1)` means
+   chest dynamite.
+3. If no event is available, state that the cause is inferred from context:
+   after drilling a chest, likely dynamite; after drilling near/under stone or
+   after `StoneMoved`, likely falling stone.
+4. If `laddersRemaining == 0` while the agent is still active, do not call
+   `PlaceLadder`. Tell the user the digger has no ladders, include position and
+   inventory/banked resources, then search `MapSnapshot` for reachable `CHEST`
+   tiles. A chest is a risky recovery path: `outcome=2` grants `10` ladders,
+   `outcome=1` kills the digger.
+
 ## Gate 7: Play One Confirmed Action at a Time
 
 Before every action, read fresh state:
@@ -492,6 +514,15 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
   --passphrase "$PASSPHRASE" \
   --json \
+  call "$diggerProgramId" Digger/TradeResourcesForLadders \
+  --args "[$scrst,$bcrst,$hcrst]" \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
   call "$diggerProgramId" Digger/Exit \
   --args '[]' \
   --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
@@ -500,6 +531,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 
 Wait for confirmation/events, refresh state, then replan. If a write fails,
 discard the stale plan and read `AgentOf`, `MapSnapshot`, and `Session` before
+the next action. Always apply the death/no-ladder checks above before selecting
 the next action.
 
 ## Gate 8: Bank, Mint, Redeem, Continue
@@ -508,7 +540,31 @@ When carried inventory should be banked:
 
 1. Return to surface (`World.AgentOf(agentActorId).result[2] === 0`).
 2. Call `Digger/Surface` with `vara-wallet`.
-3. If banked resources are non-zero, call:
+3. If ladders are low and banked resources are available, prefer the safe
+   surface refill before mint/redeem. Use `Digger/TradeResourcesForLadders`
+   only when the installed `digger_proxy.idl` exposes that method. Do not call
+   `World/TradeResourcesForLadders` directly in the live proxy workflow.
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --passphrase "$PASSPHRASE" \
+  --json \
+  call "$diggerProgramId" Digger/TradeResourcesForLadders \
+  --args "[$scrst,$bcrst,$hcrst]" \
+  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
+  --via injected
+```
+
+Trade rates:
+
+```text
+5 SCRST -> 1 ladder
+1 BCRST -> 1 ladder
+1 HCRST -> 5 ladders
+```
+
+4. If banked resources are still non-zero and should be monetized, call:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
@@ -608,7 +664,8 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 ```
 
 If the session ends, the agent dies, or the agent exits, record the result and
-return to match discovery.
+return to match discovery. For death, include whether the cause was event-confirmed
+falling stone, event-confirmed chest dynamite, or inferred from last action.
 
 ## Failure Handling
 

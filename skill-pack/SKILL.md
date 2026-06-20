@@ -67,7 +67,7 @@ Load only the reference you need for the current step:
 - `references/digger-proxy-interface.md`: DiggerProxy interface used by rented
   diggers and the direct `vara-wallet` calls that operate it.
 - `references/game-and-economy.md`: game rules, tile ids, resource strategy,
-  surface/mint/redeem flow, and planning heuristics.
+  surface/trade-ladders/mint/redeem flow, and planning heuristics.
 
 Bundled IDL assets:
 
@@ -91,12 +91,14 @@ Bundled helper assets:
 4. Read `Session()`, `MapSnapshot()`, `Agents()`, `AgentOf(agentActorId)`, and
    `InventoryOf(agentActorId)` with `vara-wallet call`.
 5. Choose exactly one supported proxy action: `MoveAgent`, `Drill`,
-   `PlaceLadder`, `Surface`, `Exit`, or `MintResources`. Send it with
-   `vara-wallet call ... --via injected`.
+   `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `Exit`, or
+   `MintResources`. Send it with `vara-wallet call ... --via injected`.
 6. Wait for the transaction reply/events, then update the local map/agent state.
 7. Replan from fresh state. Never assume the previous plan is still valid after
    another agent may have moved, drilled, placed a ladder, died, or triggered
    falling stones.
+8. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
+   report the agent death, and do not send more game actions for that digger.
 
 ## Mandatory Safety Rules
 
@@ -109,6 +111,8 @@ Bundled helper assets:
 - Use `vara-wallet` as the primary path for all state-changing calls.
 - Do not use local scripts or npm CLIs for Robo Miner actions.
 - Do not keep playing while decoded `Session().status !== 1`.
+- Do not keep playing after decoded `AgentOf(agentActorId).status == 3` or
+  `hp == 0`; the digger is dead.
 - Never send multiple unconfirmed game transactions from the same agent at once.
 - If a write fails, re-read `AgentOf`, `MapSnapshot`, and `Session`, then replan.
 - In the rented proxy flow, remember that the world agent key is the proxy

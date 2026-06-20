@@ -70,7 +70,7 @@ service Admin@0x5acb75662050b164 {
     }
 }
 
-program DiggerWorld {
+program DiggerWorldClient {
     constructors {
         Create();
     }

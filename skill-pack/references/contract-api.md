@@ -98,6 +98,7 @@ status: 0 created/waiting, 1 active, 2 finished
  backpackCapacity, lastActionSeq]
 
 status: 1 active, 2 surfaced, 3 dead, 4 exited
+`hp == 0` also means the digger is dead and must stop acting.
 ```
 
 Underlying World player methods forwarded by DiggerProxy:
@@ -108,6 +109,7 @@ World.MoveAgent(direction)
 World.Drill(direction)
 World.PlaceLadder(direction)
 World.Surface()
+World.TradeResourcesForLadders(scrst, bcrst, hcrst)
 World.MintResources()
 World.Exit()
 ```
@@ -127,8 +129,12 @@ AgentMoved(sessionId, agentActorId, fromX, fromY, toX, toY)
 TileDrilled(sessionId, agentActorId, x, y, oldTile, newTile)
 ResourceExtracted(sessionId, agentActorId, x, y, resourceKind, carriedTotal)
 LadderPlaced(sessionId, agentActorId, x, y, laddersRemaining)
+ChestOpened(sessionId, agentActorId, x, y, outcome, laddersRemaining)
+ResourcesTradedForLadders(sessionId, agentActorId, scrst, bcrst, hcrst, laddersAdded, laddersRemaining)
 StoneMoved(sessionId, agentActorId, fromX, fromY, toX, toY)
 AgentDied(sessionId, agentActorId, x, y, causeTile)
+# causeTile: 2 = falling stone, 3 = chest dynamite
+# ChestOpened outcome: 1 = dynamite/death, 2 = +10 ladders
 AgentSurfaced(sessionId, agentActorId, bankedScrst, bankedBcrst, bankedHcrst)
 ResourcesMinted(sessionId, agentActorId, scrst, bcrst, hcrst)
 AgentExited(sessionId, agentActorId)
@@ -261,6 +267,7 @@ Digger.MoveAgent(direction)
 Digger.Drill(direction)
 Digger.PlaceLadder(direction)
 Digger.Surface()
+Digger.TradeResourcesForLadders(scrst,bcrst,hcrst)
 Digger.Exit()
 Digger.MintResources()
 Vmt.Approve(redeemActorId)

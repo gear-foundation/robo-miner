@@ -5,8 +5,9 @@ use crate::{
     constants::*,
     events::WorldEvents,
     map::{
-        ensure_map_loaded, ensure_move_allowed, gravity_target, index_of, is_dug_tile,
-        next_spawn_x, settle_stones_above_open_cell, target_position, tile_at,
+        ChestOutcome, chest_outcome, ensure_drill_allowed, ensure_map_loaded, ensure_move_allowed,
+        gravity_target, index_of, is_dug_tile, next_spawn_x, settle_stones_above_open_cell,
+        target_position, tile_at,
     },
     state::{
         WorldState, active_agent, ensure_registration_open, ensure_session_active, next_action_seq,
@@ -89,31 +90,6 @@ impl WorldService<'_> {
         let current_tile = tile_at(&state.map, agent_before.x, agent_before.y)?;
         let target_tile = tile_at(&state.map, to_x, to_y)?;
 
-        if target_tile == TILE_LAVA {
-            let session_id = state.session.session_id;
-            let action_seq = next_action_seq(&mut state);
-            let agent = state
-                .agents
-                .get_mut(&caller)
-                .expect("agent was checked before mutation");
-            agent.x = to_x;
-            agent.y = to_y;
-            agent.hp = 0;
-            agent.status = AGENT_DEAD;
-            agent.last_action_seq = action_seq;
-
-            self.emit_event(WorldEvents::AgentDied(
-                session_id,
-                caller.into_bytes(),
-                to_x,
-                to_y,
-                TILE_LAVA as u32,
-            ))
-            .expect("failed to emit agent died event");
-
-            return Ok(agent_view(agent));
-        }
-
         ensure_move_allowed(direction, current_tile, target_tile)?;
         let (final_x, final_y) = gravity_target(&state.map, to_x, to_y)?;
 
@@ -153,20 +129,31 @@ impl WorldService<'_> {
         let (x, y) = target_position(agent_before.x, agent_before.y, direction)?;
         let index = index_of(x, y)?;
         let old_tile = tile_at(&state.map, x, y)?;
+        let chest_outcome = if old_tile == TILE_CHEST {
+            Some(chest_outcome(
+                Syscall::block_timestamp(),
+                state.session.seed,
+                x,
+                y,
+            ))
+        } else {
+            None
+        };
 
-        match old_tile {
-            TILE_DIRT | TILE_STONE => {
-                state.map[index] = TILE_EMPTY;
-            }
-            TILE_RESOURCE_SCRST | TILE_RESOURCE_BCRST | TILE_RESOURCE_HCRST => {
-                if agent_before.carried_total() >= agent_before.backpack_capacity {
-                    return Err("backpack is full".into());
-                }
-                state.map[index] = TILE_EMPTY;
-            }
-            TILE_LAVA => return Err("lava cannot be drilled".into()),
-            TILE_EMPTY | TILE_SURFACE | TILE_LADDER => return Err("tile is already open".into()),
-            _ => return Err("unknown tile kind".into()),
+        ensure_drill_allowed(
+            old_tile,
+            agent_before.carried_total(),
+            agent_before.backpack_capacity,
+        )?;
+        if matches!(
+            old_tile,
+            TILE_DIRT
+                | TILE_CHEST
+                | TILE_RESOURCE_SCRST
+                | TILE_RESOURCE_BCRST
+                | TILE_RESOURCE_HCRST
+        ) {
+            state.map[index] = TILE_EMPTY;
         }
 
         let (gravity_x, gravity_y) = gravity_target(&state.map, agent_before.x, agent_before.y)?;
@@ -176,6 +163,8 @@ impl WorldService<'_> {
         let session_id = state.session.session_id;
         let action_seq = next_action_seq(&mut state);
         let mut resource_event: Option<(u32, u32)> = None;
+        let mut chest_event: Option<(u32, u32)> = None;
+        let mut chest_dynamite = false;
         let agent = state
             .agents
             .get_mut(&caller)
@@ -196,10 +185,25 @@ impl WorldService<'_> {
                 agent.inventory_hcrst = agent.inventory_hcrst.saturating_add(1);
                 resource_event = Some((RESOURCE_HCRST, agent.carried_total()));
             }
+            TILE_CHEST => match chest_outcome.expect("chest outcome is set for chest tiles") {
+                ChestOutcome::Dynamite => {
+                    agent.hp = 0;
+                    agent.status = AGENT_DEAD;
+                    chest_dynamite = true;
+                    chest_event = Some((CHEST_OUTCOME_DYNAMITE, agent.ladders_remaining));
+                }
+                ChestOutcome::Ladders => {
+                    agent.ladders_remaining =
+                        agent.ladders_remaining.saturating_add(CHEST_LADDER_REWARD);
+                    chest_event = Some((CHEST_OUTCOME_LADDERS, agent.ladders_remaining));
+                }
+            },
             _ => {}
         }
 
-        if let Some(fall) = stone_crush {
+        if agent.status == AGENT_DEAD {
+            // The agent stays at the drilling position when a chest contains dynamite.
+        } else if let Some(fall) = stone_crush {
             agent.x = fall.to_x;
             agent.y = fall.to_y;
             agent.hp = 0;
@@ -210,13 +214,19 @@ impl WorldService<'_> {
         }
         agent.last_action_seq = action_seq;
         let view = agent_view(agent);
-        let gravity_event = if stone_crush.is_none() && (gravity_x != from_x || gravity_y != from_y)
-        {
-            Some((from_x, from_y, gravity_x, gravity_y))
-        } else {
+        let agent_dead = agent.status == AGENT_DEAD;
+        let gravity_event =
+            if !agent_dead && stone_crush.is_none() && (gravity_x != from_x || gravity_y != from_y)
+            {
+                Some((from_x, from_y, gravity_x, gravity_y))
+            } else {
+                None
+            };
+        let stone_death_event = if chest_dynamite {
             None
+        } else {
+            stone_crush.map(|fall| (fall.to_x, fall.to_y))
         };
-        let stone_death_event = stone_crush.map(|fall| (fall.to_x, fall.to_y));
 
         self.emit_event(WorldEvents::TileDrilled(
             session_id,
@@ -238,6 +248,18 @@ impl WorldService<'_> {
                 carried_total,
             ))
             .expect("failed to emit resource extracted event");
+        }
+
+        if let Some((outcome, ladders_remaining)) = chest_event {
+            self.emit_event(WorldEvents::ChestOpened(
+                session_id,
+                caller.into_bytes(),
+                x,
+                y,
+                outcome,
+                ladders_remaining,
+            ))
+            .expect("failed to emit chest opened event");
         }
 
         for fall in &stone_falls {
@@ -264,7 +286,16 @@ impl WorldService<'_> {
             .expect("failed to emit gravity moved event");
         }
 
-        if let Some((death_x, death_y)) = stone_death_event {
+        if chest_dynamite {
+            self.emit_event(WorldEvents::AgentDied(
+                session_id,
+                caller.into_bytes(),
+                x,
+                y,
+                TILE_CHEST as u32,
+            ))
+            .expect("failed to emit chest dynamite death event");
+        } else if let Some((death_x, death_y)) = stone_death_event {
             self.emit_event(WorldEvents::AgentDied(
                 session_id,
                 caller.into_bytes(),
@@ -348,6 +379,50 @@ impl WorldService<'_> {
             agent.banked_hcrst,
         ))
         .expect("failed to emit agent surfaced event");
+
+        Ok(view)
+    }
+
+    #[export(unwrap_result)]
+    pub fn trade_resources_for_ladders(
+        &mut self,
+        scrst: u32,
+        bcrst: u32,
+        hcrst: u32,
+    ) -> Result<Vec<u128>, String> {
+        let caller = Syscall::message_source();
+        let mut state = self.state.borrow_mut();
+
+        ensure_session_active(&state)?;
+        let agent_before = active_agent(&state, caller)?.clone();
+        if agent_before.y != 0 {
+            return Err("agent is not on the surface".into());
+        }
+
+        let mut preview = agent_before.clone();
+        let ladders_added = preview.trade_banked_resources_for_ladders(scrst, bcrst, hcrst)?;
+        let session_id = state.session.session_id;
+        let action_seq = next_action_seq(&mut state);
+        let agent = state
+            .agents
+            .get_mut(&caller)
+            .expect("agent was checked before mutation");
+        agent
+            .trade_banked_resources_for_ladders(scrst, bcrst, hcrst)
+            .expect("resource trade was checked before mutation");
+        agent.last_action_seq = action_seq;
+
+        let view = agent_view(agent);
+        self.emit_event(WorldEvents::ResourcesTradedForLadders(
+            session_id,
+            caller.into_bytes(),
+            scrst,
+            bcrst,
+            hcrst,
+            ladders_added,
+            agent.ladders_remaining,
+        ))
+        .expect("failed to emit resources traded for ladders event");
 
         Ok(view)
     }

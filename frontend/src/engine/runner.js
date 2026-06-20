@@ -7,9 +7,8 @@
 // to read a wall clock (the engine itself never does). The simulation stays
 // deterministic; only the *timing measurements* depend on real time.
 //
-// Agent contract (same as engine/agents.js): an object with
-//   decide(observation) -> action | Promise<action>
-// indexed so agents[minerId] drives miner `minerId`.
+// Local test-agent shape: an object indexed so agents[minerId] drives miner
+// `minerId` with a controller callback.
 
 const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -20,7 +19,7 @@ function emptyLatency() {
 /**
  * Run a match to completion (or maxTicks).
  * @param {Match}  match
- * @param {Array}  agents              agents[minerId].decide(obs) -> action|Promise
+ * @param {Array}  agents              local scripted controllers by miner id
  * @param {object} [opts]
  * @param {number} [opts.maxTicks=4000]
  * @param {number} [opts.deadlineMs=Infinity]  a decision slower than this is

@@ -16,28 +16,41 @@ const ACTION_PLACE_LADDER: u32 = 4;
 const ACTION_SURFACE: u32 = 5;
 const ACTION_EXIT: u32 = 6;
 const ACTION_MINT_RESOURCES: u32 = 7;
+const ACTION_TRADE_RESOURCES_FOR_LADDERS: u32 = 8;
 
-const WORLD_REGISTER: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x0c, 0x00, 0x01, 0x00,
+const WORLD_SERVICE_ROUTE: [u8; 12] = [
+    0x47, 0x4d, 0x01, 0x10, 0xc6, 0x33, 0x10, 0xd7, 0x70, 0x06, 0xe9, 0x0d,
 ];
-const WORLD_DRILL: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x03, 0x00, 0x01, 0x00,
-];
-const WORLD_MOVE_AGENT: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x09, 0x00, 0x01, 0x00,
-];
-const WORLD_PLACE_LADDER: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x0b, 0x00, 0x01, 0x00,
-];
-const WORLD_SURFACE: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x0e, 0x00, 0x01, 0x00,
-];
-const WORLD_EXIT: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x04, 0x00, 0x01, 0x00,
-];
-const WORLD_MINT_RESOURCES: [u8; 16] = [
-    0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x08, 0x00, 0x01, 0x00,
-];
+
+const fn world_call(method: u16) -> [u8; 16] {
+    [
+        WORLD_SERVICE_ROUTE[0],
+        WORLD_SERVICE_ROUTE[1],
+        WORLD_SERVICE_ROUTE[2],
+        WORLD_SERVICE_ROUTE[3],
+        WORLD_SERVICE_ROUTE[4],
+        WORLD_SERVICE_ROUTE[5],
+        WORLD_SERVICE_ROUTE[6],
+        WORLD_SERVICE_ROUTE[7],
+        WORLD_SERVICE_ROUTE[8],
+        WORLD_SERVICE_ROUTE[9],
+        WORLD_SERVICE_ROUTE[10],
+        WORLD_SERVICE_ROUTE[11],
+        method as u8,
+        (method >> 8) as u8,
+        0x01,
+        0x00,
+    ]
+}
+
+const WORLD_REGISTER: [u8; 16] = world_call(12);
+const WORLD_DRILL: [u8; 16] = world_call(3);
+const WORLD_MOVE_AGENT: [u8; 16] = world_call(9);
+const WORLD_PLACE_LADDER: [u8; 16] = world_call(11);
+const WORLD_SURFACE: [u8; 16] = world_call(14);
+const WORLD_EXIT: [u8; 16] = world_call(4);
+const WORLD_MINT_RESOURCES: [u8; 16] = world_call(8);
+const WORLD_TRADE_RESOURCES_FOR_LADDERS: [u8; 16] = world_call(16);
 
 #[derive(Clone, Debug)]
 struct DiggerState {
@@ -139,6 +152,19 @@ impl DiggerService<'_> {
     #[export(unwrap_result)]
     pub fn mint_resources(&mut self) -> Result<[u8; 32], String> {
         self.forward_no_args(ACTION_MINT_RESOURCES, WORLD_MINT_RESOURCES)
+    }
+
+    #[export(unwrap_result)]
+    pub fn trade_resources_for_ladders(
+        &mut self,
+        scrst: u32,
+        bcrst: u32,
+        hcrst: u32,
+    ) -> Result<[u8; 32], String> {
+        self.forward(
+            ACTION_TRADE_RESOURCES_FOR_LADDERS,
+            encode_world_trade_resources_for_ladders(scrst, bcrst, hcrst),
+        )
     }
 
     #[export(unwrap_result)]
@@ -250,6 +276,14 @@ fn encode_world_register(owner: ActorId) -> Vec<u8> {
     payload
 }
 
+fn encode_world_trade_resources_for_ladders(scrst: u32, bcrst: u32, hcrst: u32) -> Vec<u8> {
+    let mut payload = WORLD_TRADE_RESOURCES_FOR_LADDERS.to_vec();
+    payload.extend_from_slice(&scrst.to_le_bytes());
+    payload.extend_from_slice(&bcrst.to_le_bytes());
+    payload.extend_from_slice(&hcrst.to_le_bytes());
+    payload
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,10 +291,9 @@ mod tests {
     #[test]
     fn world_action_headers_use_current_world_service_hash() {
         assert_eq!(
-            WORLD_REGISTER,
+            &WORLD_REGISTER[..12],
             [
-                0x47, 0x4d, 0x01, 0x10, 0xc9, 0x47, 0xeb, 0xa8, 0xa4, 0x99, 0xd9, 0xa7, 0x0c, 0x00,
-                0x01, 0x00,
+                0x47, 0x4d, 0x01, 0x10, 0xc6, 0x33, 0x10, 0xd7, 0x70, 0x06, 0xe9, 0x0d,
             ]
         );
         assert_eq!(WORLD_DRILL[12], 0x03);
@@ -270,6 +303,7 @@ mod tests {
         assert_eq!(WORLD_PLACE_LADDER[12], 0x0b);
         assert_eq!(WORLD_REGISTER[12], 0x0c);
         assert_eq!(WORLD_SURFACE[12], 0x0e);
+        assert_eq!(WORLD_TRADE_RESOURCES_FOR_LADDERS[12], 0x10);
     }
 
     #[test]
@@ -280,5 +314,16 @@ mod tests {
         assert_eq!(&payload[..16], &WORLD_REGISTER);
         assert_eq!(payload.len(), 16 + 32);
         assert_eq!(&payload[16..48], &owner.encode());
+    }
+
+    #[test]
+    fn trade_resources_for_ladders_payload_forwards_resource_counts() {
+        let payload = encode_world_trade_resources_for_ladders(5, 2, 1);
+
+        assert_eq!(&payload[..16], &WORLD_TRADE_RESOURCES_FOR_LADDERS);
+        assert_eq!(payload.len(), 16 + 12);
+        assert_eq!(&payload[16..20], &5u32.to_le_bytes());
+        assert_eq!(&payload[20..24], &2u32.to_le_bytes());
+        assert_eq!(&payload[24..28], &1u32.to_le_bytes());
     }
 }

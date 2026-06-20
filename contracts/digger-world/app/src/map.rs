@@ -138,7 +138,7 @@ fn is_known_tile(tile: u8) -> bool {
         TILE_EMPTY
             | TILE_DIRT
             | TILE_STONE
-            | TILE_LAVA
+            | TILE_CHEST
             | TILE_LADDER
             | TILE_RESOURCE_SCRST
             | TILE_RESOURCE_BCRST
@@ -155,20 +155,75 @@ pub(crate) fn ensure_move_allowed(
     if !is_dug_tile(target_tile) {
         return Err("target tile is not traversable".into());
     }
-    if direction == DIR_UP && current_tile != TILE_LADDER && target_tile != TILE_LADDER {
-        return Err("upward movement requires a ladder".into());
+    if direction == DIR_UP {
+        let climbs_to_ladder = target_tile == TILE_LADDER;
+        let exits_to_surface = current_tile == TILE_LADDER && target_tile == TILE_SURFACE;
+        if !climbs_to_ladder && !exits_to_surface {
+            return Err("upward movement requires a ladder".into());
+        }
     }
     Ok(())
 }
 
+pub(crate) fn ensure_drill_allowed(
+    tile: u8,
+    carried_total: u32,
+    backpack_capacity: u32,
+) -> Result<(), String> {
+    match tile {
+        TILE_DIRT => Ok(()),
+        TILE_RESOURCE_SCRST | TILE_RESOURCE_BCRST | TILE_RESOURCE_HCRST => {
+            if carried_total >= backpack_capacity {
+                Err("backpack is full".into())
+            } else {
+                Ok(())
+            }
+        }
+        TILE_STONE => Err("stone cannot be drilled".into()),
+        TILE_CHEST => Ok(()),
+        TILE_EMPTY | TILE_SURFACE | TILE_LADDER => Err("tile is already open".into()),
+        _ => Err("unknown tile kind".into()),
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChestOutcome {
+    Dynamite,
+    Ladders,
+}
+
+pub(crate) fn chest_outcome(
+    block_timestamp: u64,
+    session_seed: u64,
+    x: u32,
+    y: u32,
+) -> ChestOutcome {
+    let time_bucket = block_timestamp / 2;
+    let coord_mix = (x as u64) ^ ((y as u64) << 1) ^ (((x as u64).saturating_add(y as u64)) << 4);
+    let roll = time_bucket ^ session_seed ^ coord_mix ^ (coord_mix >> 3) ^ (time_bucket >> 5);
+
+    if roll & 1 == 0 {
+        ChestOutcome::Ladders
+    } else {
+        ChestOutcome::Dynamite
+    }
+}
+
 pub(crate) fn gravity_target(map: &[u8], x: u32, y: u32) -> Result<(u32, u32), String> {
     ensure_map_loaded(map)?;
-    if tile_at(map, x, y)? == TILE_LADDER {
+    if matches!(tile_at(map, x, y)?, TILE_LADDER | TILE_SURFACE) {
         return Ok((x, y));
     }
     let mut target_y = y;
-    while target_y + 1 < MAP_HEIGHT && tile_at(map, x, target_y + 1)? == TILE_EMPTY {
-        target_y = target_y.saturating_add(1);
+    while target_y + 1 < MAP_HEIGHT {
+        match tile_at(map, x, target_y + 1)? {
+            TILE_EMPTY => target_y = target_y.saturating_add(1),
+            TILE_LADDER => {
+                target_y = target_y.saturating_add(1);
+                break;
+            }
+            _ => break,
+        }
     }
     Ok((x, target_y))
 }
@@ -259,7 +314,7 @@ pub(crate) fn generate_map(seed: u64, config: &WorldConfig) -> Vec<u8> {
             let roll = noise(seed, x, y, 1) % 100;
             let depth = y.saturating_mul(100) / MAP_HEIGHT;
             let tile = if depth > 72 && roll < 5 {
-                TILE_LAVA
+                TILE_CHEST
             } else if depth > 45 && roll < 18 {
                 TILE_STONE
             } else if depth > 20 && roll < 8 {
@@ -323,7 +378,7 @@ fn place_resources(
         let index = index_of(x, y).expect("resource coordinate is valid");
         let current = map[index];
 
-        if current == TILE_DIRT || current == TILE_STONE || current == TILE_LAVA {
+        if current == TILE_DIRT || current == TILE_STONE || current == TILE_CHEST {
             map[index] = resource_tile;
             placed += 1;
         }
@@ -417,7 +472,7 @@ mod tests {
 
         assert!(!is_dug_tile(TILE_DIRT));
         assert!(!is_dug_tile(TILE_STONE));
-        assert!(!is_dug_tile(TILE_LAVA));
+        assert!(!is_dug_tile(TILE_CHEST));
         assert!(!is_dug_tile(TILE_RESOURCE_SCRST));
         assert!(!is_dug_tile(TILE_RESOURCE_BCRST));
         assert!(!is_dug_tile(TILE_RESOURCE_HCRST));
@@ -500,7 +555,10 @@ mod tests {
             ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_EMPTY),
             Err("upward movement requires a ladder".into())
         );
-        assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_EMPTY).is_ok());
+        assert_eq!(
+            ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_EMPTY),
+            Err("upward movement requires a ladder".into())
+        );
         assert!(ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_LADDER).is_ok());
         assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_SURFACE).is_ok());
     }
@@ -525,6 +583,53 @@ mod tests {
     }
 
     #[test]
+    fn drill_rules_allow_chests_and_reject_stone_and_open_tiles() {
+        assert!(ensure_drill_allowed(TILE_DIRT, 0, 10).is_ok());
+        assert!(ensure_drill_allowed(TILE_CHEST, 0, 10).is_ok());
+        assert!(ensure_drill_allowed(TILE_RESOURCE_SCRST, 9, 10).is_ok());
+
+        assert_eq!(
+            ensure_drill_allowed(TILE_RESOURCE_BCRST, 10, 10),
+            Err("backpack is full".into())
+        );
+        assert_eq!(
+            ensure_drill_allowed(TILE_STONE, 0, 10),
+            Err("stone cannot be drilled".into())
+        );
+        assert_eq!(
+            ensure_drill_allowed(TILE_EMPTY, 0, 10),
+            Err("tile is already open".into())
+        );
+        assert_eq!(
+            ensure_drill_allowed(TILE_LADDER, 0, 10),
+            Err("tile is already open".into())
+        );
+        assert_eq!(
+            ensure_drill_allowed(TILE_SURFACE, 0, 10),
+            Err("tile is already open".into())
+        );
+    }
+
+    #[test]
+    fn chest_outcome_is_deterministic_but_timestamp_sensitive() {
+        let first = chest_outcome(42, 777, 5, 9);
+        assert_eq!(chest_outcome(42, 777, 5, 9), first);
+        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 778, 5, 9));
+        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 777, 6, 9));
+
+        let mut saw_dynamite = false;
+        let mut saw_ladders = false;
+        for timestamp in 1..=32 {
+            match chest_outcome(timestamp, 777, 5, 9) {
+                ChestOutcome::Dynamite => saw_dynamite = true,
+                ChestOutcome::Ladders => saw_ladders = true,
+            }
+        }
+        assert!(saw_dynamite);
+        assert!(saw_ladders);
+    }
+
+    #[test]
     fn gravity_falls_through_consecutive_empty_tiles() {
         let mut map = vec![TILE_DIRT; MAP_CELLS];
         for x in 0..MAP_WIDTH {
@@ -539,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn gravity_does_not_auto_descend_ladders() {
+    fn gravity_falls_onto_ladder_but_not_through_it() {
         let mut map = vec![TILE_DIRT; MAP_CELLS];
         for x in 0..MAP_WIDTH {
             map[index_of(x, 0).unwrap()] = TILE_SURFACE;
@@ -548,7 +653,48 @@ mod tests {
         map[index_of(3, 2).unwrap()] = TILE_LADDER;
         map[index_of(3, 3).unwrap()] = TILE_EMPTY;
 
+        assert_eq!(gravity_target(&map, 3, 1), Ok((3, 2)));
+    }
+
+    #[test]
+    fn moving_up_from_ladder_to_empty_does_not_leave_agent_floating_above_ladder() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_EMPTY;
+        map[index_of(3, 2).unwrap()] = TILE_LADDER;
+
+        assert_eq!(
+            ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_EMPTY),
+            Err("upward movement requires a ladder".into())
+        );
+        assert_eq!(gravity_target(&map, 3, 1), Ok((3, 2)));
+    }
+
+    #[test]
+    fn moving_up_to_ladder_keeps_agent_on_target_ladder() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_LADDER;
+        map[index_of(3, 2).unwrap()] = TILE_LADDER;
+
+        assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_LADDER).is_ok());
         assert_eq!(gravity_target(&map, 3, 1), Ok((3, 1)));
+    }
+
+    #[test]
+    fn moving_up_from_ladder_to_surface_keeps_agent_on_surface() {
+        let mut map = vec![TILE_DIRT; MAP_CELLS];
+        for x in 0..MAP_WIDTH {
+            map[index_of(x, 0).unwrap()] = TILE_SURFACE;
+        }
+        map[index_of(3, 1).unwrap()] = TILE_LADDER;
+
+        assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_SURFACE).is_ok());
+        assert_eq!(gravity_target(&map, 3, 0), Ok((3, 0)));
     }
 
     #[test]

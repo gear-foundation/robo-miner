@@ -784,7 +784,7 @@ async function ensureCodeValidated(
     api.eth.router.requestCodeValidationExtraFee(),
     api.eth.signer.getAddress(),
   ]);
-  const validationFee = baseFee;
+  const validationFee = baseFee + extraFee;
   const balance = await api.eth.wvara.balanceOf(accountAddress);
 
   if (balance < validationFee) {
@@ -804,7 +804,8 @@ async function ensureCodeValidated(
     wasmPath,
     codeId: tx.codeId,
     validationFee: validationFee.toString(),
-    extraFeeForOnBehalf: extraFee.toString(),
+    baseFee: baseFee.toString(),
+    extraFee: extraFee.toString(),
     blobVersionedHashes: tx.blobVersionedHashes,
   });
   const receipt = await tx.sendAndWaitForReceipt();

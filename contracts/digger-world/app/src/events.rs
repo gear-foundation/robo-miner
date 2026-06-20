@@ -18,6 +18,8 @@ pub enum WorldEvents {
     AgentExited(u64, [u8; 32]),
     ResourcesMinted(u64, [u8; 32], u32, u32, u32),
     StoneMoved(u64, [u8; 32], u32, u32, u32, u32),
+    ChestOpened(u64, [u8; 32], u32, u32, u32, u32),
+    ResourcesTradedForLadders(u64, [u8; 32], u32, u32, u32, u32, u32),
 }
 
 #[event]

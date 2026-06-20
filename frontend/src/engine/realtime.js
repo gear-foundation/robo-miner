@@ -2,16 +2,15 @@
 //
 // "Brain outside, body inside": each character runs a real-time action FSM
 // (idle → move/dig/fall/cooldown), advancing by real milliseconds with smooth
-// interpolated draw positions. An agent's decide(observation) is polled only
-// when its character is IDLE (finished the previous action) — so movement and
-// digging take real durations and animate smoothly, and falls are a fast drop
-// (visibly distinct from walking). No global tick.
+// interpolated draw positions. The local test controller is polled only when
+// its character is IDLE (finished the previous action), so movement and digging
+// take real durations and animate smoothly, and falls are a fast drop (visibly
+// distinct from walking). No global tick.
 //
-// The agent contract (decide(obs) -> action) and the observation are UNCHANGED
-// from the tick engine — same bots, same SKILLS.md. Only the timing model
-// differs. This is meant to become the single shared engine (single-player +
-// agents both drive it); the tick engine in sim.js is kept only for the old
-// headless tests during the transition.
+// The controller callback and observation shape are shared with the tick engine.
+// Only the timing model differs. This is meant to become the single shared
+// engine (single-player + local test agents both drive it); the tick engine in
+// sim.js is kept only for the old headless tests during the transition.
 
 import {
   BLOCK, BLOCK_DATA, SURFACE_Y, UPGRADES, ITEMS, FUEL_PRICE, MIN_DIG_DURATION,

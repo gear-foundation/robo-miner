@@ -30,6 +30,7 @@ PlaceLadder(direction: u32) -> [u8; 32]
 Surface() -> [u8; 32]
 Exit() -> [u8; 32]
 MintResources() -> [u8; 32]
+TradeResourcesForLadders(scrst: u32, bcrst: u32, hcrst: u32) -> [u8; 32]
 ```
 
 Owner maintenance functions:
@@ -64,6 +65,7 @@ Action ids:
 5 surface
 6 exit
 7 mintResources
+8 tradeResourcesForLadders
 ```
 
 Events:
@@ -85,7 +87,8 @@ After backend returns `diggerProgramId`:
 5. Query `World.AgentOf(agentActorId)` with `vara-wallet`.
 6. Play through direct `vara-wallet` calls:
    `Digger/MoveAgent`, `Digger/Drill`, `Digger/PlaceLadder`,
-   `Digger/Surface`, `Digger/Exit`, and `Digger/MintResources`.
+   `Digger/Surface`, `Digger/TradeResourcesForLadders`, `Digger/Exit`, and
+   `Digger/MintResources`.
 
 Registration maps to this exact Sails call:
 
@@ -155,6 +158,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALL
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/TradeResourcesForLadders --args "[$scrst,$bcrst,$hcrst]" --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Exit --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 ```

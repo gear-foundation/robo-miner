@@ -1,0 +1,18 @@
+[package]
+name = "digger-proxy-client"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Generated client for the Digger proxy program"
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sails-rs = { workspace = true, features = ["gclient"] }
+
+[build-dependencies]
+sails-rs = { workspace = true, features = ["build"] }
+digger-proxy-app.workspace = true

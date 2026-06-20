@@ -14,6 +14,14 @@ categories.workspace = true
 sails-rs = { workspace = true, features = ["ethexe"] }
 digger-proxy-app.workspace = true
 
+[dev-dependencies]
+sails-rs = { workspace = true, features = ["ethexe", "gtest", "gclient"] }
+tokio = { workspace = true, features = ["rt", "macros"] }
+digger-proxy-client.workspace = true
+digger-world.workspace = true
+digger-world-app.workspace = true
+digger-world-client.workspace = true
+
 [build-dependencies]
 sails-rs = { workspace = true, features = ["ethexe", "build"] }
 digger-proxy-app.workspace = true

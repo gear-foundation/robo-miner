@@ -3,8 +3,10 @@ resolver = "3"
 members = [
     "digger-world",
     "digger-world/app",
+    "digger-world/client",
     "digger-proxy",
     "digger-proxy/app",
+    "digger-proxy/client",
     "digger-res-vmt",
     "digger-res-vmt/app",
     "digger-res-vmt/client",
@@ -27,7 +29,10 @@ categories = ["cryptography::cryptocurrencies", "no-std", "wasm"]
 sails-rs = "1.0.0-beta.2"
 tokio = "1.48.0"
 digger-world-app = { version = "0.1.0", path = "digger-world/app" }
+digger-world = { version = "0.1.0", path = "digger-world" }
+digger-world-client = { version = "0.1.0", path = "digger-world/client" }
 digger-proxy-app = { version = "0.1.0", path = "digger-proxy/app" }
+digger-proxy-client = { version = "0.1.0", path = "digger-proxy/client" }
 digger-res-vmt-app = { version = "0.1.0", path = "digger-res-vmt/app" }
 digger-res-vmt-client = { version = "0.1.0", path = "digger-res-vmt/client" }
 digger-redeem-app = { version = "0.1.0", path = "digger-redeem/app" }

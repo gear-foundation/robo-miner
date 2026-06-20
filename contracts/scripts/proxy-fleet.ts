@@ -99,6 +99,8 @@ type CliArgs = {
   proxyIndexes?: string;
   noDeploy?: boolean;
   noPlay?: boolean;
+  startSession?: boolean;
+  noWriteEnv?: boolean;
   untilGold?: boolean;
   goldAndSurface?: boolean;
   surfaceCarried?: boolean;
@@ -198,8 +200,8 @@ Flow:
   1. Uses existing DIGGER_PROXY_CODE_ID from .env.
   2. Creates N new DiggerProxy programs.
   3. Initializes each proxy with owner=signer and world=DIGGER_PROGRAM_ID.
-  4. Starts World session if needed.
-  5. Registers every proxy in World.
+  4. Registers every proxy in World while registration is open.
+  5. Optionally starts the World session with --start-session.
   6. Sends simple gameplay actions through every proxy.
 
 Options:
@@ -214,6 +216,8 @@ Options:
   --proxy-indexes   One-based proxy indexes to play, comma-separated. Example: 2,5.
   --no-deploy       Skip creating new proxies; only use env list.
   --no-play         Deploy/register only.
+  --start-session   Start the World session after deployment/registration.
+  --no-write-env     Do not update DIGGER_PROXY_PROGRAM_IDS in .env.
 `);
 }
 
@@ -288,6 +292,12 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--no-play":
         args.noPlay = true;
+        break;
+      case "--start-session":
+        args.startSession = true;
+        break;
+      case "--no-write-env":
+        args.noWriteEnv = true;
         break;
       case "--until-gold":
       case "--gold":
@@ -1822,14 +1832,13 @@ async function main() {
       maxRounds,
       validatorMode,
       topUp: topUp.toString(),
+      startSession: Boolean(args.startSession),
     });
 
     const codeState = await connection.api.eth.router.codeState(codeId);
     if (codeState !== CodeState.Validated) {
       throw new Error(`DIGGER_PROXY_CODE_ID is not validated; state=${String(codeState)}`);
     }
-
-    await ensureSessionActive(connection, worldSails, worldProgramId, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
 
     const proxies = envProxyList();
     const newProxies: Address[] = [];
@@ -1839,7 +1848,7 @@ async function main() {
       await registerProxy(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
       proxies.push(proxy);
       newProxies.push(proxy);
-      await updateProxyList(proxies);
+      if (!args.noWriteEnv) await updateProxyList(proxies);
     }
 
     const allProxies = [...new Set(proxies.map((proxy) => proxy.toLowerCase()))] as Address[];
@@ -1848,7 +1857,11 @@ async function main() {
     for (const proxy of registerProxies) {
       await registerProxy(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
     }
-    await updateProxyList(allProxies);
+    if (!args.noWriteEnv) await updateProxyList(allProxies);
+
+    if (args.startSession) {
+      await ensureSessionActive(connection, worldSails, worldProgramId, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
+    }
 
     if (surfaceCarried && !args.noPlay) {
       for (const proxy of playProxies) {
@@ -1968,10 +1981,37 @@ async function main() {
         console.log("[fleet:gold-not-found]", { maxRounds, goldStrategy });
       }
     } else {
-      for (let step = 0; step < steps; step += 1) {
-        console.log("[fleet:play-step]", { step: step + 1, of: steps, proxies: playProxies.length });
+      let executed = 0;
+      for (let attempt = 0; executed < steps; attempt += 1) {
+        const session = await readSession(connection, worldSails, worldProgramId, queryTimeoutMs);
+        if (session.status !== SESSION_ACTIVE) {
+          console.log("[fleet:play-stop-session]", {
+            executed,
+            target: steps,
+            sessionId: session.sessionId.toString(),
+            status: session.status.toString(),
+            actionSeq: session.actionSeq.toString(),
+          });
+          break;
+        }
+        console.log("[fleet:play-step]", {
+          attempt: attempt + 1,
+          executed: executed + 1,
+          of: steps,
+          proxies: playProxies.length,
+        });
+        let progressed = false;
         for (const proxy of playProxies) {
-          await playProxyStep(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
+          if (executed >= steps) break;
+          const result = await playProxyStep(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
+          if (result.action) {
+            executed += 1;
+            progressed = true;
+          }
+        }
+        if (!progressed) {
+          console.log("[fleet:play-stop-no-action]", { executed, target: steps });
+          break;
         }
       }
     }

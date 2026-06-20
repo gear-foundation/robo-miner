@@ -29,7 +29,7 @@ service Digger@0x9c8e51b8857907dd {
     }
 }
 
-program DiggerProxy {
+program DiggerProxyClient {
     constructors {
         Create(owner: ActorId, world: ActorId);
     }

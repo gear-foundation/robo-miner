@@ -1,8 +1,9 @@
 # Game and Economy
 
 Robo Miner is a live on-chain mining match. Agents register, wait for the
-session to start, mine resources, survive lava/falling stones, return to surface,
-bank resources, mint RES, and optionally redeem RES for WVARA.
+session to start, mine resources, survive chests/falling stones, return to
+surface, bank resources, optionally trade banked resources for ladders, mint RES,
+and optionally redeem RES for WVARA.
 
 ## World Basics
 
@@ -14,8 +15,8 @@ Tile ids:
 | --- | ---: | --- |
 | EMPTY | `0` | Open space; traversable. |
 | DIRT | `1` | Drillable. |
-| STONE | `2` | Drillable/falling hazard. |
-| LAVA | `3` | Kills agent on entry; cannot drill. |
+| STONE | `2` | Falling hazard; not drillable. |
+| CHEST | `3` | Drillable chest; either kills the agent or grants ladders. |
 | LADDER | `4` | Traversable; enables upward movement. |
 | SCRST | `10` | Common resource. |
 | BCRST | `11` | Mid-value resource. |
@@ -48,11 +49,14 @@ Agent status:
 ## Movement and Mining Rules
 
 - Move only into `EMPTY`, `SURFACE`, or `LADDER`.
-- Upward movement requires current tile or target tile to be `LADDER`.
-- Drill `DIRT`, `STONE`, or resources.
-- Do not drill `EMPTY`, `SURFACE`, `LADDER`, or `LAVA`.
-- Lava entry emits `AgentDied`.
-- Drilling may trigger gravity and `StoneMoved`; stones can crush agents.
+- Upward movement requires moving onto a `LADDER`, or moving from a ladder to
+  the surface row.
+- Drill `DIRT`, resources, or `CHEST`.
+- Do not drill `STONE`, `EMPTY`, `SURFACE`, or `LADDER`.
+- Chests are risky: drilling a chest either grants ladders or emits
+  `AgentDied` with `causeTile = CHEST` (`3`), which means dynamite.
+- Drilling may trigger gravity and `StoneMoved`; stones can crush agents and
+  emit `AgentDied` with `causeTile = STONE` (`2`).
 - `PlaceLadder(direction)` only works on an empty target tile and consumes one
   ladder.
 - Backpack capacity is currently `10`; when full, return to surface.
@@ -71,15 +75,68 @@ Prefer safe higher-value resources, but keep a route home. Ladders are scarce
 enough to matter but plentiful enough (`50` default) to build vertical exits.
 Because all agents share the map, replan after every confirmed action.
 
+New ladders come from two places:
+
+1. **Chest:** drill `CHEST` for a chance to gain `10` ladders. This can also
+   contain dynamite and kill the agent, so use it as a risk/reward option.
+2. **Surface trade:** bring resources to `y=0`, call `Surface()` to bank them,
+   then trade banked resources for ladders when the proxy/world IDL supports
+   `TradeResourcesForLadders(scrst,bcrst,hcrst)`.
+
+Surface ladder trade rates:
+
+```text
+5 SCRST -> 1 ladder
+1 BCRST -> 1 ladder
+1 HCRST -> 5 ladders
+```
+
+Do not assume an agent with `0` ladders is dead or permanently stuck. It may
+still be able to find a chest or return to surface and trade banked resources.
+When ladders reach `0`, explicitly report the low-ladder state to the user,
+including position, carried/banked resources, and whether a route to surface is
+still visible. Then enter recovery mode: do not call `PlaceLadder`; look for
+reachable `CHEST` tiles in `MapSnapshot` and treat drilling one as a deliberate
+risk to recover `10` ladders. Warn that the chest can contain dynamite and kill
+the digger.
+
+## Death and Recovery Signals
+
+The chain state is authoritative:
+
+```text
+AgentOf(agentActorId).result[0] == 3  # dead
+AgentOf(agentActorId).result[3] == 0  # hp zero, also dead
+```
+
+When dead, stop all game actions for that digger and report the last known
+position, last action, and best known cause. Use events when available:
+
+```text
+AgentDied(..., causeTile = 2)  # falling stone
+AgentDied(..., causeTile = 3)  # chest dynamite
+ChestOpened(..., outcome = 1)  # dynamite
+ChestOpened(..., outcome = 2)  # +10 ladders
+```
+
+If events are unavailable, infer cautiously from the refreshed state and last
+confirmed action: death right after drilling a chest is likely dynamite; death
+after drilling under/near stone or after `StoneMoved` is likely falling stone.
+Say when the cause is inferred rather than event-confirmed.
+
 Useful action priorities:
 
 1. If session is not active, wait.
 2. If dead/exited/finished, stop and report result.
-3. If backpack full or carrying valuable resources, route to surface.
-4. If at surface with inventory, call `Surface()`.
-5. If banked resources exist, call `MintResources()` when appropriate.
-6. Otherwise target reachable resources, drilling as needed.
-7. If no safe plan exists, move toward surface or exit.
+3. If ladders are `0`, report that to the user, avoid `PlaceLadder`, and look
+   for reachable chests as risky ladder recovery.
+4. If backpack full or carrying valuable resources, route to surface.
+5. If at surface with inventory, call `Surface()`.
+6. If at surface with low ladders and banked resources, consider trading
+   resources for ladders before mint/redeem.
+7. If banked resources exist, call `MintResources()` when appropriate.
+8. Otherwise target reachable resources or chests, drilling as needed.
+9. If no safe plan exists, move toward surface or exit.
 
 ## Banking and Redeem Flow
 
@@ -91,6 +148,7 @@ mine resource
   -> return to y=0
   -> Surface()
   -> bankedScrst/Bcrst/Hcrst increases, inventory clears
+  -> optionally TradeResourcesForLadders(scrst,bcrst,hcrst)
   -> MintResources()
   -> RES VMT balance increases for owner ActorId
   -> Redeem.Redeem(scrst, bcrst, hcrst)

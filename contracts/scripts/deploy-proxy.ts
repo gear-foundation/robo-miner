@@ -75,6 +75,7 @@ type CliArgs = {
   forceNew?: boolean;
   codeIdFromWasm?: boolean;
   noRegister?: boolean;
+  startSession?: boolean;
   noWriteEnv?: boolean;
   dryRun?: boolean;
   help?: boolean;
@@ -120,6 +121,7 @@ Inputs:
   --code-id-from-wasm
                      Ignore DIGGER_PROXY_CODE_ID and derive code id from proxy wasm.
   --no-register      Deploy/init only; skip Digger.Register().
+  --start-session    After registration, start World session if it is not active.
   --no-write-env     Do not write DIGGER_PROXY_PROGRAM_ID/CODE_ID.
   --dry-run          Resolve local inputs and print payload sizes without sending txs.
 
@@ -207,6 +209,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--no-register":
         args.noRegister = true;
+        break;
+      case "--start-session":
+        args.startSession = true;
         break;
       case "--no-write-env":
         args.noWriteEnv = true;
@@ -496,28 +501,32 @@ async function ensureCodeValidated(
   }
 
   const wasm = new Uint8Array(await readFile(wasmPath));
-  const [baseFee, accountAddress] = await Promise.all([
+  const [baseFee, extraFee, accountAddress] = await Promise.all([
     api.eth.router.requestCodeValidationBaseFee(),
+    api.eth.router.requestCodeValidationExtraFee(),
     api.eth.signer.getAddress(),
   ]);
+  const validationFee = baseFee + extraFee;
   const balance = await api.eth.wvara.balanceOf(accountAddress);
-  if (balance < baseFee) {
+  if (balance < validationFee) {
     throw new Error(
-      `Not enough WVARA for code validation: need ${baseFee.toString()}, balance ${balance.toString()}`,
+      `Not enough WVARA for code validation: need ${validationFee.toString()}, balance ${balance.toString()}`,
     );
   }
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
   const { signature } = await api.eth.wvara.prepareAndSignPermitData(
     api.eth.router.address,
-    baseFee,
+    validationFee,
     deadline,
   );
   const tx = await api.eth.router.requestCodeValidation(wasm, deadline, signature);
   console.log("[code] requesting validation", {
     wasmPath,
     codeId: tx.codeId,
-    validationFee: baseFee.toString(),
+    validationFee: validationFee.toString(),
+    baseFee: baseFee.toString(),
+    extraFee: extraFee.toString(),
     blobVersionedHashes: tx.blobVersionedHashes,
   });
   const receipt = await tx.sendAndWaitForReceipt();
@@ -1023,6 +1032,7 @@ async function main() {
     codeIdFromWasm: Boolean(args.codeIdFromWasm),
     writeEnv: !args.noWriteEnv,
     register: !args.noRegister,
+    startSession: Boolean(args.startSession),
     dryRun: Boolean(args.dryRun),
   });
 
@@ -1114,7 +1124,7 @@ async function main() {
       actionSeq: session.actionSeq.toString(),
     });
 
-    if (session.status !== SESSION_ACTIVE) {
+    if (args.startSession && session.status !== SESSION_ACTIVE) {
       const startPayload = worldSails.services.Admin.functions.StartSession.encodePayload() as Hex;
       await sendInjectedMessage(
         connection.api,
@@ -1137,6 +1147,11 @@ async function main() {
         seed: session.seed.toString(),
         status: session.status.toString(),
         actionSeq: session.actionSeq.toString(),
+      });
+    } else if (session.status !== SESSION_ACTIVE) {
+      console.log("[world] session left inactive for registration", {
+        sessionId: session.sessionId.toString(),
+        status: session.status.toString(),
       });
     }
 

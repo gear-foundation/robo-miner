@@ -141,19 +141,8 @@ mod tests {
     }
 
     #[test]
-    fn start_session_requires_minimum_participants() {
+    fn start_session_requires_at_least_one_participant() {
         let mut state = WorldState::new(ActorId::zero(), WorldConfig::default_40x64());
-
-        for index in 0..(MIN_SESSION_PARTICIPANTS - 1) {
-            state.agents.insert(
-                ActorId::new([index as u8; 32]),
-                Agent::new(
-                    ActorId::new([100 + index as u8; 32]),
-                    index as u32,
-                    &state.config,
-                ),
-            );
-        }
 
         assert_eq!(
             ensure_min_participants_to_start(&state),
@@ -161,12 +150,8 @@ mod tests {
         );
 
         state.agents.insert(
-            ActorId::new([MIN_SESSION_PARTICIPANTS as u8; 32]),
-            Agent::new(
-                ActorId::new([200; 32]),
-                MIN_SESSION_PARTICIPANTS as u32,
-                &state.config,
-            ),
+            ActorId::new([1; 32]),
+            Agent::new(ActorId::new([200; 32]), 1, &state.config),
         );
 
         assert_eq!(ensure_min_participants_to_start(&state), Ok(()));

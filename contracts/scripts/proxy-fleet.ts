@@ -72,7 +72,7 @@ const RESOURCE_ASCENT_PENALTY = 8;
 const TILE_EMPTY = 0;
 const TILE_DIRT = 1;
 const TILE_STONE = 2;
-const TILE_LAVA = 3;
+const TILE_CHEST = 3;
 const TILE_LADDER = 4;
 const TILE_RESOURCE_SCRST = 10;
 const TILE_RESOURCE_BCRST = 11;
@@ -748,7 +748,7 @@ function tileAt(map: number[], x: number, y: number): number {
 }
 
 function isDrillable(tile: number): boolean {
-  return [TILE_DIRT, TILE_STONE, TILE_RESOURCE_SCRST, TILE_RESOURCE_BCRST, TILE_RESOURCE_HCRST].includes(tile);
+  return [TILE_DIRT, TILE_STONE, TILE_CHEST, TILE_RESOURCE_SCRST, TILE_RESOURCE_BCRST, TILE_RESOURCE_HCRST].includes(tile);
 }
 
 function isResourceTile(tile: number): boolean {
@@ -767,8 +767,8 @@ function tileName(tile: number): string {
       return "DIRT";
     case TILE_STONE:
       return "STONE";
-    case TILE_LAVA:
-      return "LAVA";
+    case TILE_CHEST:
+      return "CHEST";
     case TILE_LADDER:
       return "LADDER";
     case TILE_RESOURCE_SCRST:
@@ -824,7 +824,7 @@ function targetOf(agent: AgentView, direction: number): { x: number; y: number }
 function verticalPathCanBeOpened(agent: AgentView, map: number[], targetY: number): boolean {
   for (let y = agent.y + 1; y <= targetY; y += 1) {
     const tile = tileAt(map, agent.x, y);
-    if (tile === TILE_LAVA || tile < 0) return false;
+    if (tile < 0) return false;
     if (!isTraversable(tile) && !isDrillable(tile)) return false;
   }
   return true;
@@ -834,7 +834,7 @@ function horizontalPathCanBeOpened(map: number[], fromX: number, toX: number, y:
   const step = toX > fromX ? 1 : -1;
   for (let x = fromX + step; step > 0 ? x <= toX : x >= toX; x += step) {
     const tile = tileAt(map, x, y);
-    if (tile === TILE_LAVA || tile < 0) return false;
+    if (tile < 0) return false;
     if (!isTraversable(tile) && !isDrillable(tile)) return false;
   }
   return true;
@@ -987,7 +987,7 @@ function planNearestResourceAction(agent: AgentView, map: number[], allowedTiles
       if (seen.has(key)) continue;
 
       const tile = tileAt(map, next.x, next.y);
-      if (tile === TILE_LAVA || tile < 0) continue;
+      if (tile < 0) continue;
 
       const distance = current.distance + 1;
       const step: PathStep = {
@@ -1135,7 +1135,7 @@ function planGoldAction(agent: AgentView, map: number[]): GoldPlannedAction | nu
       if (seen.has(key)) continue;
 
       const tile = tileAt(map, next.x, next.y);
-      if (tile === TILE_LAVA || tile < 0) continue;
+      if (tile < 0) continue;
 
       seen.add(key);
       parents.set(key, {

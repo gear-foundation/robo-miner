@@ -21,7 +21,7 @@ import { setDims } from './dims.js';
 import { resolveSpec } from './spec.js';
 import { makeRng } from './rng.js';
 import { baseFill, baseFillDirt } from './steps/baseFill.js';
-import { placeCrystals, placeDeepLava, placeStones, validateDigger } from './steps/crystals.js';
+import { placeCrystals, placeDiggerChests, placeStones, validateDigger } from './steps/crystals.js';
 import { placeBarriers, carveFaultLine } from './steps/barriers.js';
 import { carveCaves } from './steps/caves.js';
 import { placeOreVeins } from './steps/veins.js';
@@ -56,10 +56,11 @@ export function generateWorld(seed = Date.now(), spec) {
   return world;
 }
 
-// Digger (agent-arena) generation pass — the brief's simple world: dirt +
-// caves + deep lava + 3 redeemable crystals. No 8-ore base fill, no diamond,
-// chests, POIs, water, or artifacts. The stone border is a renderer-only frame,
-// so the whole generated grid stays playable and contract-owned.
+// Digger (agent-arena) generation pass — the brief's compact world: dirt +
+// caves + stones + 3 redeemable crystals + contract-resolved chests. No 8-ore
+// base fill, no diamond, POIs, water, artifacts, or lava. The stone border is a
+// renderer-only frame, so the whole generated grid stays playable and
+// contract-owned.
 function generateDiggerPass(seed, dims) {
   const rnd = makeRng(seed);
   const grid = new Uint8Array(dims.W * dims.H);
@@ -67,14 +68,14 @@ function generateDiggerPass(seed, dims) {
   baseFillDirt(grid);                 // sky + solid dirt
   const pockets = carveCaves(grid, rnd, pickDiggerCaveProfile(rnd)); // navigable pockets / passages
   placeStones(grid, rnd);             // scattered rock obstacles (also fall when undermined)
-  placeDeepLava(grid, rnd);           // deep pools guarding the bottom band
   const crystals = placeCrystals(grid, rnd); // SCRST / BCRST / HCRST
+  const { chests, chestsAt } = placeDiggerChests(grid, rnd); // contract decides loot/trap on drill
 
   const world = {
     grid, seed, W: dims.W, H: dims.H, surface: dims.S, model: 'digger',
     crystals, pockets,
-    // Fields the runtime/renderer read on any world — empty for digger.
-    diamondPos: null, pois: [], chests: [], chestsAt: new Map(), signals: null,
+    // Fields the runtime/renderer read on any world.
+    diamondPos: null, pois: [], chests, chestsAt, signals: null,
   };
   world.validation = validateDigger(world);
   return world;

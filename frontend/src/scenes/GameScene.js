@@ -24,7 +24,7 @@ const TILE_TEXTURE = {
 };
 
 function sfxSources(name) {
-  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+  return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
 }
 
 // Depth-driven dirt tint. Used as a multiplicative Sprite.setTint so each
@@ -195,7 +195,7 @@ export default class GameScene extends Phaser.Scene {
     this.load.on('loaderror', () => {});
     const keys = ['dirt', 'coal', 'iron', 'copper', 'silver', 'gold', 'emerald', 'ruby', 'diamond', 'stone', 'grass', 'ladder', 'pillar'];
     for (const k of keys) {
-      this.load.image(k, `assets/tiles/${k}.png`);
+      this.load.image(k, `/assets/tiles/${k}.png`);
     }
     this.load.audio('rock-drill', sfxSources('rock-drill-generated'));
     this.load.audio('rock-break', sfxSources('rock-break'));

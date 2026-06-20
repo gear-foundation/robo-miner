@@ -15,7 +15,7 @@ export const CONTRACT_TILE = {
   EMPTY: 0,
   DIRT: 1,
   STONE: 2,
-  LAVA: 3,
+  CHEST: 3,
   LADDER: 4,
   SCRST: 10,
   BCRST: 11,
@@ -51,7 +51,7 @@ function encodeTile(renderTile, y, renderSurface, contractSurface) {
     case BLOCK.SKY: return CONTRACT_TILE.EMPTY;
     case BLOCK.DIRT: return CONTRACT_TILE.DIRT;
     case BLOCK.STONE: return CONTRACT_TILE.STONE;
-    case BLOCK.LAVA: return CONTRACT_TILE.LAVA;
+    case BLOCK.CHEST: return CONTRACT_TILE.CHEST;
     case BLOCK.LADDER: return CONTRACT_TILE.LADDER;
     case BLOCK.SCRST: return CONTRACT_TILE.SCRST;
     case BLOCK.BCRST: return CONTRACT_TILE.BCRST;
@@ -91,6 +91,10 @@ function validateContractMap(world, map, opts = {}) {
     const actual = counts[tile] || 0;
     if (actual !== expected) warnings.push(`tile ${tile} count ${actual} != ${expected}`);
   }
+  if (Array.isArray(world.chests)) {
+    const actual = counts[CONTRACT_TILE.CHEST] || 0;
+    if (actual !== world.chests.length) warnings.push(`chest count ${actual} != ${world.chests.length}`);
+  }
 
   for (let y = 0; y < contractSurface; y++) {
     for (let x = 0; x < world.W; x++) {
@@ -115,7 +119,7 @@ function validateContractMap(world, map, opts = {}) {
   return { counts, warnings };
 }
 
-// Generate one digger map (40×64, 3 crystals, lava, stones) for a seed and
+// Generate one digger map (40×64, 3 crystals, chests, stones) for a seed and
 // return everything the operator needs to upload + verify it.
 export function generateMap(seed = randomSeed(), opts = {}) {
   const s = seed >>> 0;

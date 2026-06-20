@@ -36,7 +36,7 @@ const TILE = {
   Empty: 0,
   Dirt: 1,
   Stone: 2,
-  Lava: 3,
+  Chest: 3,
   Ladder: 4,
   Scrst: 10,
   Bcrst: 11,
@@ -519,7 +519,7 @@ function findTargetResource(map, startX, maxDepth) {
       if (!isResource(tileAt(map, x, y))) {
         continue;
       }
-      if (!pathAvoidsLava(map, startX, x, y)) {
+      if (!pathAvoidsChest(map, startX, x, y)) {
         continue;
       }
       candidates.push({ x, y, distance: y + Math.abs(x - startX) });
@@ -530,16 +530,16 @@ function findTargetResource(map, startX, maxDepth) {
   return candidates[0] || null;
 }
 
-function pathAvoidsLava(map, startX, targetX, targetY) {
+function pathAvoidsChest(map, startX, targetX, targetY) {
   for (let y = 1; y <= targetY; y += 1) {
-    if (tileAt(map, startX, y) === TILE.Lava) {
+    if (tileAt(map, startX, y) === TILE.Chest) {
       return false;
     }
   }
 
   const step = targetX >= startX ? 1 : -1;
   for (let x = startX; x !== targetX + step; x += step) {
-    if (tileAt(map, x, targetY) === TILE.Lava) {
+    if (tileAt(map, x, targetY) === TILE.Chest) {
       return false;
     }
   }
@@ -795,8 +795,8 @@ async function main() {
 
   async function openAndMove(direction, x, y, label) {
     const tile = tileAt(map, x, y);
-    if (tile === TILE.Lava) {
-      throw new Error(`Path hit lava at (${x}, ${y})`);
+    if (tile === TILE.Chest) {
+      throw new Error(`Path hit chest at (${x}, ${y})`);
     }
     if (isMineable(tile)) {
       await drill(direction, `${label} drill (${x}, ${y})`);

@@ -62,6 +62,7 @@ export const CHAIN = {
 export const CHAIN_PLAYBACK = {
   moveMs: 120,
   digMs: 420,
+  chestFuseMs: 700,
   stoneShakeMs: 520,
   stoneStepMs: 90,
   eventGroupGraceMs: 35,

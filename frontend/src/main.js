@@ -26,7 +26,7 @@ const config = {
   backgroundColor: '#0a0a0a',
   pixelArt: true,
   audio: {
-    disableWebAudio: true,
+    disableWebAudio: false,
   },
   scale: {
     mode: Phaser.Scale.RESIZE,

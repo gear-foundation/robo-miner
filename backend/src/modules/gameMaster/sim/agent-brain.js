@@ -7,15 +7,15 @@
 // the driver feeds it state and executes the returned action. Agents do not
 // share plans or coordinate: each profile is an independent competing miner.
 //
-// STONE is treated as an obstacle for the test brain. The live contract may
-// accept drilling stone, but this bot intentionally focuses on dirt/resources
-// so generated runs stay legible and ladder-safe.
+// STONE is treated as an obstacle for the test brain. Chests are drillable, but
+// their outcome is contract-resolved (ladders or dynamite), so the planner only
+// treats them as optional route openings.
 
 export const MAP_WIDTH = 40;
 export const MAP_HEIGHT = 64;
 
 export const TILE = {
-  EMPTY: 0, DIRT: 1, STONE: 2, LAVA: 3, LADDER: 4,
+  EMPTY: 0, DIRT: 1, STONE: 2, CHEST: 3, LADDER: 4,
   SCRST: 10, BCRST: 11, HCRST: 12, SURFACE: 20,
 };
 
@@ -32,7 +32,7 @@ const inBounds = (x, y) => x >= 0 && y >= 0 && x < MAP_WIDTH && y < MAP_HEIGHT;
 const tileAt = (map, x, y) => map[idx(x, y)] ?? TILE.EMPTY;
 
 const isResource = (t) => t === TILE.SCRST || t === TILE.BCRST || t === TILE.HCRST;
-const isDrillable = (t) => t === TILE.DIRT || isResource(t); // NOT stone (undrillable)
+const isDrillable = (t) => t === TILE.DIRT || t === TILE.CHEST || isResource(t); // NOT stone (undrillable)
 const isTraversable = (t) => t === TILE.EMPTY || t === TILE.SURFACE || t === TILE.LADDER;
 
 const RESOURCE_VALUE = {
@@ -97,19 +97,20 @@ function targetPosition(x, y, dir) {
   return inBounds(t.x, t.y) ? t : null;
 }
 
-// Can the agent step from (x,y) in `dir`? Movement enters traversable tiles or
-// drills dirt; never stone/lava/resource. Up requires a ladder at current/target.
+// Can the agent advance from (x,y) in `dir`? Pathfinding may drill a soft tile
+// first, then move into it; never through stone/resource without an explicit
+// drill step. Up requires a ladder at current/target.
 function canMoveInto(map, x, y, dir) {
   const t = targetPosition(x, y, dir);
   if (!t) return false;
   const cur = tileAt(map, x, y);
   const tgt = tileAt(map, t.x, t.y);
-  if (tgt === TILE.LAVA || tgt === TILE.STONE || isResource(tgt)) return false;
+  if (tgt === TILE.STONE || isResource(tgt)) return false;
   if (dir.name === 'up' && cur !== TILE.LADDER && tgt !== TILE.LADDER) return false;
-  return isTraversable(tgt) || tgt === TILE.DIRT;
+  return isTraversable(tgt) || isDrillable(tgt);
 }
 
-const movementCost = (t) => (isTraversable(t) ? 1 : t === TILE.DIRT ? 2 : Number.POSITIVE_INFINITY);
+const movementCost = (t) => (isTraversable(t) ? 1 : isDrillable(t) ? 2 : Number.POSITIVE_INFINITY);
 
 function reconstructPath(previous, startIndex, endIndex) {
   const path = [];

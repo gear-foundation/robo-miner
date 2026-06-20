@@ -62,8 +62,8 @@ export function inferStoneMoves(beforeMap, afterMap, {
 
 export function inferDeathCause({ action, beforeMap, after, stoneMoves = [], width = DEFAULT_MAP_WIDTH, tiles = {} } = {}) {
   const stoneTile = tiles.STONE ?? 2;
-  const lavaTile = tiles.LAVA ?? 3;
+  const chestTile = tiles.CHEST ?? 3;
   if (stoneMoves.some((move) => move.x === after?.x && move.y === after?.y)) return stoneTile;
-  if (action?.target && tileAt(beforeMap, action.target.x, action.target.y, width) === lavaTile) return lavaTile;
+  if (action?.target && tileAt(beforeMap, action.target.x, action.target.y, width) === chestTile) return chestTile;
   return stoneTile;
 }

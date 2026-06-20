@@ -55,7 +55,7 @@ const MAP_HEIGHT = 64;
 const TILE_EMPTY = 0;
 const TILE_DIRT = 1;
 const TILE_STONE = 2;
-const TILE_LAVA = 3;
+const TILE_CHEST = 3;
 const TILE_LADDER = 4;
 const TILE_RESOURCE_SCRST = 10;
 const TILE_RESOURCE_BCRST = 11;
@@ -673,6 +673,7 @@ function isDrillable(tile: number): boolean {
   return (
     tile === TILE_DIRT ||
     tile === TILE_STONE ||
+    tile === TILE_CHEST ||
     tile === TILE_RESOURCE_SCRST ||
     tile === TILE_RESOURCE_BCRST ||
     tile === TILE_RESOURCE_HCRST

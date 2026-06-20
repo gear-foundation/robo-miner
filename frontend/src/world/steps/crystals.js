@@ -1,9 +1,9 @@
 // Digger-campaign resource placement (agent arena).
 //
-// Replaces the 8-ore base-fill + diamond + chests with the brief's 3-crystal
+// Replaces the 8-ore base-fill + diamond with the brief's 3-crystal
 // model: ~100 resources on the 40×64 map (77 SCRST / 19 BCRST / 4 HCRST),
-// deeper = rarer/more valuable, HCRST lava-adjacent. Counts scale with map
-// area so other sizes keep the same density.
+// deeper = rarer/more valuable. Counts scale with map area so other sizes keep
+// the same density. Digger hazards now come from contract-resolved chests.
 //
 // Economy (redeem VARA): SCRST 66 · BCRST 330 · HCRST 1650  (see config.js).
 
@@ -13,23 +13,30 @@ import { idx } from '../grid.js';
 
 const AREA_REF = 40 * 64;                       // brief reference map
 const BASE_COUNTS = { scrst: 77, bcrst: 19, hcrst: 4 };
+const CHEST_PROFILES = [
+  { shallow: 7, mid: 8, deep: 5 },  // 20
+  { shallow: 7, mid: 9, deep: 5 },  // 21
+  { shallow: 8, mid: 9, deep: 5 },  // 22
+  { shallow: 8, mid: 9, deep: 6 },  // 23
+  { shallow: 8, mid: 10, deep: 6 }, // 24
+];
+const CHEST_BANDS = {
+  shallow: { from: 0.10, to: 0.34, spacing: 4 },
+  mid: { from: 0.35, to: 0.68, spacing: 5 },
+  deep: { from: 0.69, to: 0.96, spacing: 6 },
+};
 const STONE_PROFILES = [
   { loose: 18, shallow: 14, boulders: 3, shelves: 2, columns: 1 },
   { loose: 24, shallow: 20, boulders: 4, shelves: 1, columns: 2 },
   { loose: 16, shallow: 10, boulders: 6, shelves: 3, columns: 2 },
   { loose: 12, shallow: 8, boulders: 2, shelves: 5, columns: 3 },
 ];
-const LAVA_PROFILES = [
-  { pools: 3, rxMin: 3, rxRange: 4, ryMin: 1, ryRange: 2, fill: 0.90 },
-  { pools: 5, rxMin: 2, rxRange: 3, ryMin: 1, ryRange: 2, fill: 0.82 },
-  { pools: 6, rxMin: 1, rxRange: 3, ryMin: 1, ryRange: 1, fill: 0.72 },
-];
 
 function playable() { return DIMS.H - DIMS.S; }
 function depthRow(frac) { return DIMS.S + Math.floor(frac * playable()); }
 
-// Only crystals/lava embed into solid dirt — never sky (caves), stone, or
-// existing lava — so we don't plug passages or overwrite hazards.
+// Crystals and chests embed into solid dirt only, so we do not plug cave
+// passages, overwrite stones, or disturb fixed resource counts.
 function isDirt(grid, x, y) {
   return x >= 1 && x < DIMS.W - 1 && y > DIMS.S && y < DIMS.H - 1 &&
     grid[idx(x, y)] === BLOCK.DIRT;
@@ -37,38 +44,6 @@ function isDirt(grid, x, y) {
 
 function canPlaceLooseStone(grid, x, y) {
   return isDirt(grid, x, y) && grid[idx(x, y + 1)] !== BLOCK.SKY;
-}
-
-function lavaNear(grid, x, y, r) {
-  for (let dy = -r; dy <= r; dy++) {
-    for (let dx = -r; dx <= r; dx++) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || nx >= DIMS.W || ny < 0 || ny >= DIMS.H) continue;
-      if (grid[idx(nx, ny)] === BLOCK.LAVA) return true;
-    }
-  }
-  return false;
-}
-
-// Deep lava pools that guard the bottom (HCRST) band. Tuned small for the
-// narrow digger map so lava clusters *guard*, not flood.
-export function placeDeepLava(grid, rnd) {
-  const scale = (DIMS.W * DIMS.H) / AREA_REF;
-  const profile = pick(LAVA_PROFILES, rnd);
-  const pools = Math.max(2, Math.round(profile.pools * scale));
-  for (let i = 0; i < pools; i++) {
-    const cy = depthRow(0.70 + rnd() * 0.28);
-    const cx = 3 + Math.floor(rnd() * Math.max(1, DIMS.W - 6));
-    const rx = profile.rxMin + Math.floor(rnd() * profile.rxRange);
-    const ry = profile.ryMin + Math.floor(rnd() * profile.ryRange);
-    for (let y = cy - ry; y <= cy + ry; y++) {
-      for (let x = cx - rx; x <= cx + rx; x++) {
-        const ux = (x - cx) / rx, uy = (y - cy) / ry;
-        if (ux * ux + uy * uy > 1) continue;
-        if (isDirt(grid, x, y) && rnd() < profile.fill) grid[idx(x, y)] = BLOCK.LAVA;
-      }
-    }
-  }
 }
 
 // Scattered stone clumps — obstacles to route around, and the falling-rock
@@ -155,23 +130,16 @@ export function placeStones(grid, rnd) {
   }
 }
 
-function scatter(grid, rnd, block, count, frac0, frac1, opts = {}) {
+function scatter(grid, rnd, block, count, frac0, frac1) {
   const placed = [];
-  const tryOnce = (requireLava) => {
-    let tries = count * 60;
-    while (placed.length < count && tries-- > 0) {
-      const x = 1 + Math.floor(rnd() * (DIMS.W - 2));
-      const y = depthRow(frac0 + rnd() * (frac1 - frac0));
-      if (!isDirt(grid, x, y)) continue;
-      if (requireLava && !lavaNear(grid, x, y, 3)) continue;
-      grid[idx(x, y)] = block;
-      placed.push({ x, y, type: block });
-    }
-  };
-  tryOnce(!!opts.nearLava);
-  // Fallback: if the lava-adjacency constraint starved placement, drop it so
-  // the rare crystals still appear (just not guaranteed lava-adjacent).
-  if (placed.length < count && opts.nearLava) tryOnce(false);
+  let tries = count * 80;
+  while (placed.length < count && tries-- > 0) {
+    const x = 1 + Math.floor(rnd() * (DIMS.W - 2));
+    const y = depthRow(frac0 + rnd() * (frac1 - frac0));
+    if (!isDirt(grid, x, y)) continue;
+    grid[idx(x, y)] = block;
+    placed.push({ x, y, type: block });
+  }
   return placed;
 }
 
@@ -183,8 +151,50 @@ export function placeCrystals(grid, rnd) {
   const crystals = [];
   crystals.push(...scatter(grid, rnd, BLOCK.SCRST, n('scrst'), 0.05, 0.55));
   crystals.push(...scatter(grid, rnd, BLOCK.BCRST, n('bcrst'), 0.35, 0.80));
-  crystals.push(...scatter(grid, rnd, BLOCK.HCRST, n('hcrst'), 0.72, 0.99, { nearLava: true }));
+  crystals.push(...scatter(grid, rnd, BLOCK.HCRST, n('hcrst'), 0.72, 0.99));
   return crystals;
+}
+
+function tooCloseToChest(x, y, spacing, chests) {
+  for (const chest of chests) {
+    if (Math.abs(chest.x - x) < spacing && Math.abs(chest.y - y) < spacing) return true;
+  }
+  return false;
+}
+
+function placeChest(grid, chests, chestsAt, x, y, tier) {
+  grid[idx(x, y)] = BLOCK.CHEST;
+  const chest = { id: chests.length, x, y, tier, opened: false };
+  chests.push(chest);
+  chestsAt.set(idx(x, y), chest);
+}
+
+function placeChestBand(grid, rnd, chests, chestsAt, tier, count) {
+  const band = CHEST_BANDS[tier];
+  let placed = 0;
+  let tries = count * 180;
+  while (placed < count && tries-- > 0) {
+    const x = 2 + Math.floor(rnd() * Math.max(1, DIMS.W - 4));
+    const y = depthRow(band.from + rnd() * (band.to - band.from));
+    if (!isDirt(grid, x, y)) continue;
+    if (tooCloseToChest(x, y, band.spacing, chests)) continue;
+    placeChest(grid, chests, chestsAt, x, y, tier);
+    placed += 1;
+  }
+}
+
+// Contract chests. The map only stores TILE_CHEST; when a miner drills it the
+// contract resolves the actual outcome (dynamite or extra ladders) and emits
+// ChestOpened. We keep tier only as renderer metadata for nicer colors.
+export function placeDiggerChests(grid, rnd) {
+  const scale = (DIMS.W * DIMS.H) / AREA_REF;
+  const profile = pick(CHEST_PROFILES, rnd);
+  const chests = [];
+  const chestsAt = new Map();
+  for (const [tier, count] of Object.entries(profile)) {
+    placeChestBand(grid, rnd, chests, chestsAt, tier, Math.max(1, Math.round(count * scale)));
+  }
+  return { chests, chestsAt };
 }
 
 function pick(items, rnd) {

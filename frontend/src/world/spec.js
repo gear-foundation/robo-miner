@@ -22,8 +22,8 @@ export const WORLD_PRESETS = {
   solo: SOLO,
   // 10-agent DIGGER world per the Vara.eth brief: narrow & deep 40×64 for
   // density + competition over a session. `model:'digger'` switches generation
-  // to dirt + caves + deep lava + 3 redeemable crystals (no 8-ore economy /
-  // diamond). The GameScene renderer is world-size aware → spectator is 1:1.
+  // to dirt + caves + stones + contract-resolved chests + 3 redeemable crystals
+  // (no 8-ore economy / diamond). The GameScene renderer is world-size aware.
   agents: { ...SOLO, name: 'agents', width: 40, height: 64, model: 'digger', regen: true },
   coop: { ...SOLO, name: 'coop', width: 200, height: 160, regen: true },
   arena: { ...SOLO, name: 'arena', width: 140, height: 110, regen: true },

@@ -43,7 +43,7 @@ The map generator uses the frontend world generator, then translates frontend
 | empty / drilled pocket | `0` | `0` |
 | dirt | `1` | `1` |
 | stone frame / obstacle | `9` | `2` |
-| lava | `13` | `3` |
+| chest | `12` | `3` |
 | ladder | `10` | `4` |
 | SCRST / BCRST / HCRST | `23` / `24` / `25` | `10` / `11` / `12` |
 | surface cap | top raw row | `20` |

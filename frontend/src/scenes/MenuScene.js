@@ -12,7 +12,7 @@ import { navigateTo } from '../router.js';
 const SINGLE_PLAYER_MENU_ENABLED = false;
 
 function sfxSources(name) {
-  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+  return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
 }
 
 // Title / splash scene. Shows the game logo, the robot, and the
@@ -29,9 +29,9 @@ export default class MenuScene extends Phaser.Scene {
     // Optional art drop-in: if these files exist, we'll use them. If not,
     // we fall back to procedural shapes. Silently swallow 404s.
     this.load.on('loaderror', () => {});
-    this.load.image('menu-bg',    'assets/menu/bg.png');
-    this.load.image('menu-logo',  'assets/menu/logo.png');
-    this.load.image('menu-robot', 'assets/menu/robot.png');
+    this.load.image('menu-bg',    '/assets/menu/bg.png');
+    this.load.image('menu-logo',  '/assets/menu/logo.png');
+    this.load.image('menu-robot', '/assets/menu/robot.png');
     this.load.audio('menu-rock-drill', sfxSources('rock-drill-generated'));
     this.load.audio('menu-music', sfxSources('menu-music'));
     this.load.audio('robot-chirp', sfxSources('robot-chirp'));

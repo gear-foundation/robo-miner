@@ -25,7 +25,7 @@ const GLYPH = {
   0: '.',  // empty/drilled
   1: '#',  // dirt
   2: 'X',  // stone
-  3: '!',  // lava
+  3: 'C',  // chest
   4: 'H',  // ladder
   10: 's', // SCRST
   11: 'b', // BCRST

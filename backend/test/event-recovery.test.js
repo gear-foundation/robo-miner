@@ -5,7 +5,7 @@ import { inferDeathCause, inferStoneMoves, isAgentDead } from '../src/modules/ga
 
 const W = 40;
 const H = 8;
-const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, LAVA: 3 };
+const TILE = { EMPTY: 0, DIRT: 1, STONE: 2, CHEST: 3 };
 const idx = (x, y) => y * W + x;
 
 function mapWith(updates = []) {
@@ -70,18 +70,18 @@ test('does not turn the drilled stone itself into a StoneMoved event', () => {
   }), []);
 });
 
-test('detects dead agents and infers lava or stone death cause', () => {
+test('detects dead agents and infers chest-dynamite or stone death cause', () => {
   assert.equal(isAgentDead({ status: 1, hp: 1 }), false);
   assert.equal(isAgentDead({ status: 3, hp: 0 }), true);
 
-  const before = mapWith([[4, 2, TILE.LAVA]]);
+  const before = mapWith([[4, 2, TILE.CHEST]]);
   assert.equal(inferDeathCause({
-    action: { fn: 'move', target: { x: 4, y: 2 } },
+    action: { fn: 'drill', target: { x: 4, y: 2 } },
     beforeMap: before,
     after: { x: 4, y: 2 },
     width: W,
     tiles: TILE,
-  }), TILE.LAVA);
+  }), TILE.CHEST);
 
   assert.equal(inferDeathCause({
     action: { fn: 'drill', target: { x: 3, y: 2 } },

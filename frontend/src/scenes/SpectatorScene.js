@@ -18,9 +18,10 @@ import { navigateBack } from '../router.js';
 const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse animation)
 const CHUNK_TILES = 8;
 const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
+const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
 
 function sfxSources(name) {
-  return [`assets/sfx/${name}.mp3`, `assets/sfx/${name}.ogg`, `assets/sfx/${name}.wav`];
+  return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
 }
 
 const SFX = {
@@ -255,12 +256,12 @@ export default class SpectatorScene extends GameScene {
     this._lastChunkGrid = null;
     this._frameDrawSignature = null;
 
+    this.setupSpectatorSounds();
     this.setupCameraControls();
     this.statsTimer = 0;
     this.worldDirty = true;
     this.buildHUD();
     this.refreshWorldMeta();
-    this.setupSpectatorSounds();
     this.scale.on('resize', this.onSpecResize, this);
   }
 
@@ -278,6 +279,8 @@ export default class SpectatorScene extends GameScene {
   }
 
   setupSpectatorSounds() {
+    this.applySpectatorVolume(this.readStoredVolume(), { persist: false });
+    this.installSpectatorAudioUnlock();
     this.drillLoop = this.makeSound(SFX.DRILL, { loop: true, volume: 0 });
     this.fuseLoop = this.makeSound(SFX.FUSE, { loop: true, volume: 0 });
     this.shakeLoop = this.makeSound(SFX.SHAKE, { loop: true, volume: 0 });
@@ -308,6 +311,78 @@ export default class SpectatorScene extends GameScene {
     this._drillLevel = 0;
     this._fuseLevel = 0;
     this._shakeLevel = 0;
+  }
+
+  installSpectatorAudioUnlock() {
+    if (this._audioUnlockHandler) return;
+    this._audioUnlockHandler = () => this.unlockSpectatorAudio();
+    for (const eventName of ['pointerdown', 'click', 'touchstart', 'keydown', 'focus']) {
+      window.addEventListener(eventName, this._audioUnlockHandler, { passive: true });
+    }
+    this.input?.on?.('pointerdown', this._audioUnlockHandler);
+  }
+
+  unlockSpectatorAudio() {
+    const manager = this.game?.sound || this.sound;
+    if (!manager) return;
+    try { manager.unlock?.(); } catch { /* Phaser sound manager differs by backend. */ }
+    const context = manager.context || this.sound?.context;
+    if (context?.state === 'suspended') {
+      context.resume?.().catch?.(() => {});
+    }
+    if ((this._volume ?? 1) > 0) manager.mute = false;
+  }
+
+  readStoredVolume() {
+    try {
+      const value = Number.parseFloat(localStorage.getItem('robo.volume'));
+      return Number.isFinite(value) ? Phaser.Math.Clamp(value, 0, 1) : 1;
+    } catch {
+      return 1;
+    }
+  }
+
+  applySpectatorVolume(volume, options = {}) {
+    const next = Phaser.Math.Clamp(Number(volume) || 0, 0, 1);
+    this._volume = next;
+    this.game.sound.volume = next;
+    this.game.sound.mute = next === 0;
+    if (options.persist !== false) {
+      try { localStorage.setItem('robo.volume', String(next)); } catch { /* noop */ }
+    }
+    this.refreshSoundButton();
+  }
+
+  cycleSpectatorVolume() {
+    const current = this._volume ?? this.game.sound.volume ?? 1;
+    let next;
+    if (current > 0.85) next = 0.66;
+    else if (current > 0.5) next = 0.33;
+    else if (current > 0) next = 0;
+    else next = 1;
+    this.applySpectatorVolume(next);
+    this.unlockSpectatorAudio();
+    if (next > 0) this.playAgentChirp();
+  }
+
+  refreshSoundButton() {
+    if (!this.soundBtn) return;
+    const volume = this._volume ?? this.game.sound.volume ?? 1;
+    const bars = volume === 0 ? 0 : (volume <= 0.4 ? 1 : volume <= 0.75 ? 2 : 3);
+    const muted = volume === 0;
+    this.soundBtn.title = muted ? 'Sound: muted' : `Sound: ${bars}/3`;
+    this.soundBtn.setAttribute('aria-label', this.soundBtn.title);
+    this.soundBtn.style.filter = muted ? 'grayscale(1) brightness(.86)' : '';
+    this.soundBtn.innerHTML = `
+      <svg viewBox="0 0 32 32" width="26" height="26" style="display:block" aria-hidden="true">
+        <path d="M5,12 L11,12 L18,7 L18,25 L11,20 L5,20 Z"
+          fill="#222" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/>
+        ${bars >= 1 ? '<path d="M21,13 Q23,16 21,19" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"/>' : ''}
+        ${bars >= 2 ? '<path d="M24,11 Q27,16 24,21" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"/>' : ''}
+        ${bars >= 3 ? '<path d="M27,9  Q31,16 27,23" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round"/>' : ''}
+        ${muted ? '<line x1="6" y1="26" x2="28" y2="6" stroke="#e23a4f" stroke-width="3" stroke-linecap="round"/>' : ''}
+      </svg>
+    `;
   }
 
   drawVisualFrame() {
@@ -639,6 +714,11 @@ export default class SpectatorScene extends GameScene {
       case 'resource_extracted':
         this.queueSpatialSound(SFX.ORE_CASH, e.x, e.y, { base: 0.55, nearTiles: 7, maxTiles: 36 });
         break;
+      case 'chest_opened':
+        if (e.outcome === CHEST_OUTCOME.LADDERS) {
+          this.queueSpatialSound(SFX.LADDER, e.x, e.y, { base: 0.48, nearTiles: 7, maxTiles: 34 });
+        }
+        break;
       case 'ladder_placed':
         this.queueSpatialSound(SFX.LADDER, e.x, e.y, { base: 0.55 });
         break;
@@ -652,14 +732,15 @@ export default class SpectatorScene extends GameScene {
         });
         break;
       case 'death':
-        this.stopDrillSound();
         this.queueSpatialSound(SFX.ROBOT_SAD, e.x, e.y, { base: 0.46, nearTiles: 7, maxTiles: 34, priority: 1 });
         break;
       case 'exited':
         this.queueSpatialSound(SFX.ROBOT_SAD, ...this.eventSoundTile(e), { base: 0.34, nearTiles: 7, maxTiles: 28 });
         break;
       case 'stone_moved':
-        this.queueSpatialSound(SFX.IMPACT, e.x, e.y, { base: 0.46, nearTiles: 6, maxTiles: 30 });
+        break;
+      case 'stone_impact':
+        this.queueSpatialSound(SFX.IMPACT, e.x, e.y, { base: 0.52, nearTiles: 6, maxTiles: 32, priority: 1 });
         break;
       default:
         break;
@@ -754,8 +835,9 @@ export default class SpectatorScene extends GameScene {
   playPooledSound(key, config = {}) {
     const pool = this.soundPools?.[key] || [];
     if (!pool.length) return false;
-    const sound = pool.find((s) => !s.isPlaying) || pool[0];
-    if (sound.isPlaying) sound.stop();
+    this.unlockSpectatorAudio();
+    const sound = pool.find((s) => !s.isPlaying);
+    if (!sound) return false;
     sound.play({
       volume: Number.isFinite(config.volume) ? config.volume : 1,
       rate: config.rate || 1,
@@ -794,10 +876,6 @@ export default class SpectatorScene extends GameScene {
     });
     this.updateLoopSound(this.shakeLoop, '_shakeLevel', shakeVolume, dt);
 
-    if ((this._lastStoneSoundCount || 0) > stoneCount) {
-      this.queueSpatialSound(SFX.IMPACT, ...this.nearestCameraTile(), { base: 0.5, nearTiles: 100, maxTiles: 120 });
-      this.flushQueuedSounds();
-    }
     this._lastStoneSoundCount = stoneCount;
   }
 
@@ -817,6 +895,7 @@ export default class SpectatorScene extends GameScene {
     this[field] = next;
 
     if (next > 0.035) {
+      this.unlockSpectatorAudio();
       if (!sound.isPlaying) sound.play({ volume: next });
       else sound.setVolume(next);
     } else if (sound.isPlaying) {
@@ -826,6 +905,7 @@ export default class SpectatorScene extends GameScene {
 
   startDrillSound(volume = 0.42) {
     if (!this.drillLoop) return;
+    this.unlockSpectatorAudio();
     this.drillLoop.setVolume?.(volume);
     if (!this.drillLoop.isPlaying) this.drillLoop.play({ volume });
   }
@@ -863,6 +943,13 @@ export default class SpectatorScene extends GameScene {
   }
 
   teardownSpectatorSounds() {
+    if (this._audioUnlockHandler) {
+      for (const eventName of ['pointerdown', 'click', 'touchstart', 'keydown', 'focus']) {
+        window.removeEventListener(eventName, this._audioUnlockHandler);
+      }
+      this.input?.off?.('pointerdown', this._audioUnlockHandler);
+      this._audioUnlockHandler = null;
+    }
     for (const sound of this.spectatorSounds || []) {
       if (sound.isPlaying) sound.stop();
       sound.destroy?.();
@@ -934,6 +1021,7 @@ export default class SpectatorScene extends GameScene {
   playAgentChirp() {
     const sounds = this.robotTouchSounds?.filter(Boolean) || [];
     if (!sounds.length) return;
+    this.unlockSpectatorAudio();
     for (const sound of sounds) sound.stop();
     sounds[Math.floor(Math.random() * sounds.length)].play();
   }
@@ -1115,11 +1203,20 @@ export default class SpectatorScene extends GameScene {
     stats.style.cssText = 'margin-left:auto;font-size:14px';
     bar.appendChild(stats);
 
+    const soundBtn = wireBtn(document.createElement('button'));
+    soundBtn.id = 'spec-soundbtn';
+    soundBtn.title = 'Sound';
+    soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;margin-left:14px;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    soundBtn.onclick = () => this.cycleSpectatorVolume();
+    bar.appendChild(soundBtn);
+    this.soundBtn = soundBtn;
+    this.refreshSoundButton();
+
     // On-chain TX-log toggle (terminal-style side console).
     const logBtn = wireBtn(document.createElement('button'));
     logBtn.id = 'spec-logbtn';
     logBtn.textContent = '⛓ TX LOG';
-    logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;margin-left:14px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     logBtn.onclick = () => this.toggleConsole();
     bar.appendChild(logBtn);
     this.logBtn = logBtn;
@@ -1222,7 +1319,20 @@ export default class SpectatorScene extends GameScene {
         color = e.block === BLOCK.HCRST ? '#ff8fdc' : e.block === BLOCK.BCRST ? '#9bffbf' : '#8fe9ff';
         msg = `⛏ EXTRACT ${nm} −${depth}m +${v}`; break;
       }
+      case 'chest_opened':
+        if (e.outcome === CHEST_OUTCOME.DYNAMITE) {
+          msg = `CHEST · DYNAMITE −${depth}m`;
+          color = '#ff7a1f';
+        } else {
+          msg = `CHEST · ladders ${e.laddersRemaining ?? '?'}`;
+          color = '#ffdd55';
+        }
+        break;
       case 'ladder_placed': msg = `place_ladder −${depth}m`; color = '#b9823c'; break;
+      case 'resources_traded_for_ladders':
+        msg = `TRADE → +${e.laddersAdded || 0} ladders`;
+        color = '#ffdd55';
+        break;
       case 'stone_moved': msg = `stone ${e.fromX},${e.fromY} → ${e.x},${e.y}`; color = '#a9a9a9'; break;
       case 'sold': msg = `◆ BANK +${e.amount} VARA`; color = '#ffec6e'; break;
       case 'refueled': msg = `⛽ REFUEL −${e.cost}`; color = '#9bd0ff'; break;

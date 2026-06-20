@@ -41,7 +41,7 @@ const TILE = {
   Empty: 0,
   Dirt: 1,
   Stone: 2,
-  Lava: 3,
+  Chest: 3,
   Ladder: 4,
   Scrst: 10,
   Bcrst: 11,
@@ -623,7 +623,7 @@ function validateMap(tiles) {
     throw new Error(`resource count must be ${EXPECTED_RESOURCES.total}, got ${total}`);
   }
 
-  return { counts, scrst, bcrst, hcrst, total };
+  return { counts, scrst, bcrst, hcrst, total, chest: counts.get(TILE.Chest) ?? 0 };
 }
 
 function sameMap(a, b) {
@@ -972,7 +972,7 @@ async function main() {
 
   console.log(`[map] file=${mapInput.path}`);
   console.log(
-    `[map] cells=${mapInput.tiles.length} resources=${stats.total} SCRST=${stats.scrst} BCRST=${stats.bcrst} HCRST=${stats.hcrst}`,
+    `[map] cells=${mapInput.tiles.length} resources=${stats.total} SCRST=${stats.scrst} BCRST=${stats.bcrst} HCRST=${stats.hcrst} chests=${stats.chest}`,
   );
   console.log(`[map] seed=${seed.toString()} program=${programId}`);
   console.log(`[payload] bytes=${(payload.length - 2) / 2}`);

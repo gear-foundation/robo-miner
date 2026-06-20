@@ -48,19 +48,34 @@ const AGENT_STATUS = {
   DEAD: 3,
   EXITED: 4,
 };
+const CONTRACT_TILE = {
+  EMPTY: 0,
+  DIRT: 1,
+  STONE: 2,
+  CHEST: 3,
+  LADDER: 4,
+  SCRST: 10,
+  BCRST: 11,
+  HCRST: 12,
+  SURFACE: 20,
+};
+const CHEST_OUTCOME = {
+  DYNAMITE: 1,
+  LADDERS: 2,
+};
 
 // Current live DiggerWorld testnet tile ids differ from the older frontend
 // constants. Keep the renderer stable by translating contract cells at the edge.
 const CONTRACT_TO_RENDER_TILE = {
-  0: BLOCK.SKY,   // empty/drilled
-  1: BLOCK.DIRT,
-  2: BLOCK.STONE,
-  3: BLOCK.LAVA,
-  4: BLOCK.LADDER,
-  10: BLOCK.SCRST,
-  11: BLOCK.BCRST,
-  12: BLOCK.HCRST,
-  20: BLOCK.SKY,  // sky/surface cap in the live testnet map
+  [CONTRACT_TILE.EMPTY]: BLOCK.SKY,   // empty/drilled
+  [CONTRACT_TILE.DIRT]: BLOCK.DIRT,
+  [CONTRACT_TILE.STONE]: BLOCK.STONE,
+  [CONTRACT_TILE.CHEST]: BLOCK.CHEST,
+  [CONTRACT_TILE.LADDER]: BLOCK.LADDER,
+  [CONTRACT_TILE.SCRST]: BLOCK.SCRST,
+  [CONTRACT_TILE.BCRST]: BLOCK.BCRST,
+  [CONTRACT_TILE.HCRST]: BLOCK.HCRST,
+  [CONTRACT_TILE.SURFACE]: BLOCK.SKY,  // sky/surface cap in the live testnet map
 };
 
 function renderTile(contractTile) {
@@ -111,6 +126,7 @@ function playbackEventPriority(event) {
   switch (event?.type) {
     case 'dug': return 10;
     case 'resource_extracted': return 20;
+    case 'chest_opened': return 20;
     case 'ladder_placed': return 10;
     case 'surfaced': return 20;
     case 'stone_moved': return 25;
@@ -142,6 +158,36 @@ function decorateDiggerGrid(rawGrid, W, rawH, rawSurface, surface) {
   // Render the contract tiles as-is. The spectator draws its decorative stone
   // frame outside the contract grid, so it never hides live dug cells.
   return { grid, H, yOffset };
+}
+
+function chestTierForVisualY(y, surface, H) {
+  const depth = Math.max(0, y - surface);
+  const playable = Math.max(1, H - surface);
+  const ratio = depth / playable;
+  if (ratio < 0.35) return 'shallow';
+  if (ratio < 0.69) return 'mid';
+  return 'deep';
+}
+
+function buildDiggerChests(rawGrid, W, rawH, rawSurface, surface, yOffset, H) {
+  const chests = [];
+  const chestsAt = new Map();
+  for (let rawY = rawSurface; rawY < rawH; rawY += 1) {
+    const y = rawY + yOffset;
+    for (let x = 0; x < W; x += 1) {
+      if (Number(rawGrid[rawY * W + x]) !== CONTRACT_TILE.CHEST) continue;
+      const chest = {
+        id: chests.length,
+        x,
+        y,
+        tier: chestTierForVisualY(y, surface, H),
+        opened: false,
+      };
+      chests.push(chest);
+      chestsAt.set(y * W + x, chest);
+    }
+  }
+  return { chests, chestsAt };
 }
 
 function shortId(id) {
@@ -244,6 +290,7 @@ export class ArchivedSource {
     const rawSurface = DEFAULT_RAW_SURFACE;
     const surface = 4;
     const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid || [], W, rawH, rawSurface, surface);
+    const { chests, chestsAt } = buildDiggerChests(snap.rawGrid || [], W, rawH, rawSurface, surface, yOffset, H);
     this.archive = archive;
     this.world = {
       grid,
@@ -260,8 +307,8 @@ export class ArchivedSource {
       pockets: [],
       diamondPos: null,
       pois: [],
-      chests: [],
-      chestsAt: new Map(),
+      chests,
+      chestsAt,
       signals: null,
       validation: { ok: true, warnings: [] },
     };
@@ -396,11 +443,15 @@ export class ChainSource {
     if (!this._playbackGroups.length) return;
     const ts = nowMs();
     let released = 0;
-    while (this._playbackGroups.length && released < CHAIN_PLAYBACK.maxGroupsPerFrame) {
-      const group = this._playbackGroups[0];
+    let index = 0;
+    while (index < this._playbackGroups.length && released < CHAIN_PLAYBACK.maxGroupsPerFrame) {
+      const group = this._playbackGroups[index];
       if (ts - group.lastAt < CHAIN_PLAYBACK.eventGroupGraceMs) break;
-      if (!this._canReleasePlaybackGroup(group)) break;
-      this._playbackGroups.shift();
+      if (!this._canReleasePlaybackGroup(group)) {
+        index += 1;
+        continue;
+      }
+      this._playbackGroups.splice(index, 1);
       this._playbackOpenGroups.delete(group.key);
       const events = group.events
         .slice()
@@ -430,7 +481,7 @@ export class ChainSource {
 
     this._eventListener?.tick(dtMs);
     this.events = this._pending.splice(0);
-    if (this.events.some((e) => ['dug', 'resource_extracted', 'ladder_placed', 'stone_moved', 'death', 'map_generated'].includes(e.type))) {
+    if (this.events.some((e) => ['dug', 'resource_extracted', 'chest_opened', 'ladder_placed', 'stone_moved', 'stone_impact', 'death', 'map_generated'].includes(e.type))) {
       this.worldDirty = true;
     }
   }
@@ -511,6 +562,13 @@ export class ChainSource {
           return;
         }
         break;
+      case 'chest_opened':
+        if (miner) {
+          this._enqueueAct(miner, { kind: 'chest', event });
+          return;
+        }
+        this._applyChestOpened(event, null);
+        break;
       case 'ladder_placed':
         if (miner) {
           this._enqueueAct(miner, { kind: 'ladder', event });
@@ -529,14 +587,27 @@ export class ChainSource {
           miner.mintedResources = normalizeResourceTotals(event.minted);
         }
         break;
+      case 'resources_traded_for_ladders':
+        if (miner) {
+          if (Number.isFinite(event.laddersRemaining)) miner.items.ladder = event.laddersRemaining;
+          if (event.spent) {
+            const spent = normalizeResourceTotals(event.spent);
+            miner.bankedResources = normalizeResourceTotals({
+              scrst: Math.max(0, Number(miner.bankedResources?.scrst || 0) - spent.scrst),
+              bcrst: Math.max(0, Number(miner.bankedResources?.bcrst || 0) - spent.bcrst),
+              hcrst: Math.max(0, Number(miner.bankedResources?.hcrst || 0) - spent.hcrst),
+            });
+            miner.banked = resourceTotal(miner.bankedResources);
+          }
+        }
+        break;
       case 'stone_moved':
         this._moveRawStone(event);
         break;
       case 'death':
         if (miner) {
-          this._placeMiner(miner, event.x, event.y, { alive: false });
-          miner.stats.deaths += 1;
-          miner.respawnAtMs = this.timeMs + 1400;
+          this._enqueueAct(miner, { kind: 'death', event });
+          return;
         }
         break;
       case 'exited':
@@ -587,9 +658,16 @@ export class ChainSource {
       event.newBlock = renderTile(event.rawNewBlock);
     }
     if ('amount' in event) event.amount = normalizeEventNumber(event.amount);
+    if ('outcome' in event) event.outcome = normalizeEventNumber(event.outcome);
+    if ('cause' in event) {
+      event.rawCause = normalizeEventNumber(event.cause);
+      event.cause = renderTile(event.rawCause);
+    }
     if ('laddersRemaining' in event) event.laddersRemaining = normalizeEventNumber(event.laddersRemaining);
+    if ('laddersAdded' in event) event.laddersAdded = normalizeEventNumber(event.laddersAdded);
     if (event.banked) event.banked = normalizeResourceTotals(event.banked);
     if (event.minted) event.minted = normalizeResourceTotals(event.minted);
+    if (event.spent) event.spent = normalizeResourceTotals(event.spent);
     return event;
   }
 
@@ -722,8 +800,6 @@ export class ChainSource {
 
   _startAct(miner, act) {
     if (!miner || !act) return false;
-    const queueDepth = miner.actQueue?.length || 0;
-    const speedScale = queueDepth > 5 ? 0.55 : queueDepth > 2 ? 0.75 : 1;
     if (act.kind === 'move') {
       const fromX = Number.isFinite(act.fromX) ? act.fromX : miner.tx;
       const fromY = Number.isFinite(act.fromY) ? act.fromY : miner.ty;
@@ -737,13 +813,30 @@ export class ChainSource {
       miner.alive = true;
       miner.exited = false;
       miner.respawnAtMs = null;
-      miner.act = { ...act, kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_PLAYBACK.moveMs * speedScale };
+      miner.act = { ...act, kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_PLAYBACK.moveMs };
       if (act.event) this._emitVisualEvent(act.event);
       return true;
     } else if (act.kind === 'dig') {
       miner.facing = facingToTarget(miner.tx, miner.ty, act.tx, act.ty, miner.facing);
-      miner.act = { ...act, kind: 'dig', t: 0, dur: CHAIN_PLAYBACK.digMs * speedScale };
+      miner.act = { ...act, kind: 'dig', t: 0, dur: CHAIN_PLAYBACK.digMs };
       return true;
+    } else if (act.kind === 'chest') {
+      this._applyChestOpened(act.event, miner);
+      this._emitVisualEvent(act.event);
+      if (act.event?.outcome === CHEST_OUTCOME.DYNAMITE) {
+        const bombId = `${act.event.id || act.event.messageId || 'chest'}:${act.event.x}:${act.event.y}`;
+        this.bombs = (this.bombs || []).filter((bomb) => bomb.id !== bombId);
+        this.bombs.push({
+          id: bombId,
+          x: act.event.x,
+          y: act.event.y,
+          radius: 0,
+          fuseAt: this.timeMs + CHAIN_PLAYBACK.chestFuseMs,
+        });
+        miner.act = { ...act, kind: 'chest', t: 0, dur: CHAIN_PLAYBACK.chestFuseMs, bombId };
+        return true;
+      }
+      return false;
     }
     this._commitQueuedAct(miner, act);
     return false;
@@ -760,6 +853,20 @@ export class ChainSource {
       this._setRawTile(act.tx, act.rawY, act.rawNewBlock ?? 0);
       miner.stats.tilesDug += 1;
       this._emitVisualEvent(act.event);
+      return;
+    }
+    if (act.kind === 'chest') {
+      this.bombs = (this.bombs || []).filter((bomb) => bomb.id !== act.bombId);
+      this._emitVisualEvent({
+        type: 'detonation',
+        owner: act.event?.owner,
+        sessionId: act.event?.sessionId,
+        x: act.event?.x,
+        y: act.event?.y,
+        radius: 0,
+        source: act.event?.source,
+        messageId: act.event?.messageId,
+      });
     }
   }
 
@@ -803,6 +910,21 @@ export class ChainSource {
       miner.stats.sold = amount;
       this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
       this._emitVisualEvent(event);
+      return;
+    }
+    if (act.kind === 'death') {
+      this._placeMiner(miner, event.x, event.y, { alive: false });
+      miner.stats.deaths += 1;
+      miner.respawnAtMs = this.timeMs + 1400;
+      this._emitVisualEvent(event);
+    }
+  }
+
+  _applyChestOpened(event, miner) {
+    if (!event) return;
+    this._setRawTile(event.x, event.rawY, CONTRACT_TILE.EMPTY);
+    if (miner && Number.isFinite(event.laddersRemaining)) {
+      miner.items.ladder = event.laddersRemaining;
     }
   }
 
@@ -832,6 +954,33 @@ export class ChainSource {
       this.world.grid[i] = next;
       this.worldDirty = true;
     }
+    this._syncChestTile(x, y, rawTile, next);
+  }
+
+  _syncChestTile(x, y, rawTile, renderTileValue) {
+    if (!this.world || !Number.isFinite(x) || !Number.isFinite(y)) return;
+    const key = y * this.world.W + x;
+    const isChest = Number(rawTile) === CONTRACT_TILE.CHEST && renderTileValue === BLOCK.CHEST && y >= this.world.surface;
+    const existing = this.world.chestsAt?.get(key);
+    if (isChest) {
+      if (existing) return;
+      const chest = {
+        id: this.world.chests?.length || 0,
+        x,
+        y,
+        tier: chestTierForVisualY(y, this.world.surface, this.world.H),
+        opened: false,
+      };
+      this.world.chests ||= [];
+      this.world.chestsAt ||= new Map();
+      this.world.chests.push(chest);
+      this.world.chestsAt.set(key, chest);
+      return;
+    }
+    if (!existing) return;
+    existing.opened = true;
+    this.world.chestsAt.delete(key);
+    this.world.chests = (this.world.chests || []).filter((chest) => !(chest.x === x && chest.y === y));
   }
 
   _moveRawStone(event) {
@@ -909,6 +1058,7 @@ export class ChainSource {
         stone.stepElapsed -= CHAIN_PLAYBACK.stoneStepMs;
         if (stone.y >= stone.toY) {
           this._setVisualTile(stone.x, stone.toY, 2);
+          this._emitVisualEvent({ type: 'stone_impact', x: stone.x, y: stone.toY });
           this.stones.splice(i, 1);
           this.worldDirty = true;
           break;
@@ -927,6 +1077,7 @@ export class ChainSource {
     const rawSurface = DEFAULT_RAW_SURFACE;
     const surface = 4;
     const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid, W, rawH, rawSurface, surface);
+    const { chests, chestsAt } = buildDiggerChests(snap.rawGrid, W, rawH, rawSurface, surface, yOffset, H);
 
     if (!this.world) {
       this.world = {
@@ -944,8 +1095,8 @@ export class ChainSource {
         pockets: [],
         diamondPos: null,
         pois: [],
-        chests: [],
-        chestsAt: new Map(),
+        chests,
+        chestsAt,
         signals: null,
         validation: { ok: true, warnings: [] },
       };
@@ -970,6 +1121,8 @@ export class ChainSource {
       this.world.rawSurface = rawSurface;
       this.world.yOffset = yOffset;
       this.world.seed = Number(snap.session?.[1] || this.world.seed || 0);
+      this.world.chests = chests;
+      this.world.chestsAt = chestsAt;
     }
 
     this.session = snap.session;

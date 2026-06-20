@@ -43,7 +43,7 @@ export const BLOCK = {
   // economy in that mode. Redeemable in VARA: SCRST 66 / BCRST 330 / HCRST 1650.
   SCRST: 23,       // small crystal — common, shallow
   BCRST: 24,       // big crystal — mid depth
-  HCRST: 25,       // huge crystal — rare, deep, lava-adjacent
+  HCRST: 25,       // huge crystal — rare, deep
 };
 
 // Ore data: color, price, hardness (dig time multiplier), min/max depth (tile rows below surface).

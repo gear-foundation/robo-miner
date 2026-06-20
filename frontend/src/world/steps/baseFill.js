@@ -25,7 +25,7 @@ export function baseFill(grid, rnd) {
 }
 
 // Dirt-only fill for the digger (agent-arena) model: sky above surface,
-// solid dirt below. Crystals / lava / caves are carved by their own steps —
+// solid dirt below. Crystals / chests / caves are carved by their own steps —
 // no per-tile ore rolls here (the 8-ore economy is single-player only).
 export function baseFillDirt(grid) {
   for (let y = 0; y < DIMS.H; y++) {

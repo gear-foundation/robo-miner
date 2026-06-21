@@ -495,6 +495,27 @@ export class ChainSource {
     return reply.payload;
   }
 
+  async inspectAgent(owner) {
+    if (!owner || !this._program || !this._q) return null;
+    const Wq = this._program.services.World.queries;
+    const [stateResult, inventoryResult, ownerResult] = await Promise.allSettled([
+      this._call(this._q.agentOf(owner)),
+      this._call(this._q.inventoryOf(owner)),
+      this._call(this._q.ownerOf(owner)),
+    ]);
+    const detail = { owner };
+    if (stateResult.status === 'fulfilled') {
+      detail.state = Wq.AgentOf.decodeResult(stateResult.value).map((v) => Number(v));
+    }
+    if (inventoryResult.status === 'fulfilled') {
+      detail.inventory = Wq.InventoryOf.decodeResult(inventoryResult.value).map(Number);
+    }
+    if (ownerResult.status === 'fulfilled') {
+      detail.walletOwner = String(Wq.OwnerOf.decodeResult(ownerResult.value));
+    }
+    return detail;
+  }
+
   async _readSnapshot() {
     const Wq = this._program.services.World.queries;
     const [cfgPayload, sessionPayload, mapPayload, agentsPayload] = await Promise.all([

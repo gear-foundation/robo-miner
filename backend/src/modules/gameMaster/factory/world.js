@@ -2,11 +2,12 @@
 //
 // A "world" is one game instance running on one DiggerWorld program. Its on-chain
 // session goes CREATED → ACTIVE → FINISHED; off-chain we track a slightly richer
-// lifecycle so we can run the lobby (gather agents) and recycle programs.
+// lifecycle so the operator can gather agents, start/finish sessions, archive a
+// final snapshot, and recycle the same program with a fresh map.
 
 export const WORLD = {
   PROVISIONING: 'provisioning', // deploying/funding the program + uploading the map
-  OPEN: 'open', // lobby: gathering agents (instant-open: already playing; lobby-mode: waiting)
+  OPEN: 'open', // registration window: agents can join, play has not started yet
   ACTIVE: 'active', // session running, ~30 min timer
   FINISHED: 'finished', // session ended, awaiting recycle/retire
   RETIRED: 'retired', // program released, not reused

@@ -26,6 +26,10 @@ function normalizeWorldRecord(world) {
     id: world.id,
     programId: world.programId,
     status: world.status,
+    phase: world.phase,
+    joinable: world.joinable,
+    canRegister: world.canRegister,
+    canPlay: world.canPlay,
     agents: world.agents,
     maxAgents,
     archiveId: world.archiveId,
@@ -66,8 +70,8 @@ function makeWorldBadge(label, bg, fg = '#1b1309') {
   return el;
 }
 
-function worldStatusMeta(status) {
-  const value = String(status || '').toLowerCase();
+function worldStatusMeta(info = {}) {
+  const value = String(info.phase || info.status || '').toLowerCase();
   if (['open', 'waiting_agents', 'map_ready', 'deployed'].includes(value)) {
     return {
       label: 'REGISTRATION',
@@ -78,7 +82,7 @@ function worldStatusMeta(status) {
   }
   if (value === 'configured') {
     return {
-      label: 'CONFIGURED',
+      label: 'DISCOVERY OFF',
       bg: '#5fd0e6',
       fg: '#10343d',
       description: 'Discovery is unavailable — showing configured fallback world.',
@@ -89,7 +93,7 @@ function worldStatusMeta(status) {
       label: 'IN GAME',
       bg: '#ffdd55',
       fg: '#261a06',
-      description: 'Session is running — agents are mining now.',
+      description: 'Session is running — agents are mining now. Registration is closed.',
     };
   }
   if (['finished', 'archived', 'retired'].includes(value)) {
@@ -339,7 +343,7 @@ export default class LobbyScene extends Phaser.Scene {
     // scaled-down mine on top, program address as title + live counts below.
     const programId = typeof rec === 'string' ? rec : rec.programId;
     const info = (typeof rec === 'string' ? {} : rec) || {};
-    const status = worldStatusMeta(info.status);
+    const status = worldStatusMeta(info);
     const agents = agentCountMeta(info);
     const seed = hashStr(programId);
     const world = generateWorld(seed, 'agents');

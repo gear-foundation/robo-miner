@@ -59,7 +59,10 @@ test('world registry manifest becomes agent match discovery feed', () => {
     sessionKey: 'w001-s3',
     programId: '0x1111111111111111111111111111111111111111',
     status: 'open',
+    phase: 'open',
     joinable: true,
+    canRegister: true,
+    canPlay: false,
     agents: 2,
     minAgents: 8,
     maxAgents: 10,
@@ -76,7 +79,10 @@ test('world registry manifest becomes agent match discovery feed', () => {
     archiveUrl: null,
   });
   assert.equal(discovery.sessions[1].status, 'active');
+  assert.equal(discovery.sessions[1].phase, 'active');
   assert.equal(discovery.sessions[1].joinable, false);
+  assert.equal(discovery.sessions[1].canRegister, false);
+  assert.equal(discovery.sessions[1].canPlay, true);
   assert.equal(discovery.sessions[2].status, 'archived');
   assert.equal(discovery.sessions[2].joinable, false);
 });

@@ -80,11 +80,11 @@ export function loadConfig(overrides = {}) {
     sessionMs: num('SESSION_MS', 30 * 60 * 1000), // play length once started
 
     // ── lifecycle mode ───────────────────────────────────────────────────────
-    // instant-open (false): current contract — StartSession right after UploadMap,
-    //   agents join an already-active world.
-    // lobby (true): new contract — register allowed in CREATED; we gather agents,
-    //   then StartSession opens play. Flip this when the lobby contract lands.
-    lobbyMode: bool('FACTORY_LOBBY_MODE', false),
+    // lobby (true): current contract — UploadMap/ResetMap creates a registration
+    // window (SESSION_CREATED); agents join there, then StartSession opens play.
+    // prestarted (false): only for future/legacy contracts that allow late join
+    // into SESSION_ACTIVE.
+    lobbyMode: bool('FACTORY_LOBBY_MODE', true),
     recycle: bool('FACTORY_RECYCLE', true), // reuse a program via reset_map after finish
     pastLimit: num('FACTORY_PAST_LIMIT', 50), // how many retired worlds to keep for the PAST tab
     contractSurface: num('CONTRACT_SURFACE_Y', 1),

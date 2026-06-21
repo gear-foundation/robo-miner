@@ -3,12 +3,12 @@
 // always fresh from memory). Works identically in dry-run and battle mode, so the
 // agent integration is the same whether we're testing or live.
 //
-//   GET /matches  → open, joinable matches + how-to-register block (the main feed)
+//   GET /matches  → registration-open, joinable matches + how-to-register block
 //   GET /sessions → every live/archive session (CURRENT + PAST)
 //   GET /health   → liveness + counts
 //
 // An agent: poll /matches → pick one with slotsFree > 0 → send an injected
-// World.Register(owner) to its `programId` with its own key (gasless) → play.
+// World.Register(owner) while status=open → wait for active → play.
 
 import http from 'node:http';
 
@@ -16,27 +16,36 @@ const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
 
 export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
-  const sessionRecord = (w) => ({
-    id: w.id,
-    sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
-    programId: w.programId,
-    status: publicStatus(w.status), // open | active | archived | …
-    joinable: w.status === 'open' && (w.agents ?? 0) < (w.capAgents ?? 0),
-    agents: w.agents ?? 0,
-    minAgents: w.minAgents,
-    maxAgents: w.capAgents,
-    slotsFree: Math.max(0, (w.capAgents ?? 0) - (w.agents ?? 0)),
-    owners: w.owners || [], // real participants already registered
-    seed: w.seed,
-    mapHash: w.mapHash || null,
-    sessionId: w.sessionId,
-    startsAt: w.startedAt || null,
-    endsAt: w.startedAt ? w.startedAt + cfg.sessionMs : null,
-    finishedAt: w.finishedAt || null,
-    archivedAt: w.archivedAt || null,
-    archiveId: w.archiveId || null,
-    archiveUrl: w.archiveUrl || (w.archiveId ? `/archives/${encodeURIComponent(w.archiveId)}` : null),
-  });
+  const sessionRecord = (w) => {
+    const status = publicStatus(w.status);
+    const agents = w.agents ?? 0;
+    const maxAgents = w.capAgents ?? 0;
+    const canRegister = status === 'open' && agents < maxAgents;
+    return {
+      id: w.id,
+      sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
+      programId: w.programId,
+      status, // open | active | archived
+      phase: status,
+      joinable: canRegister,
+      canRegister,
+      canPlay: status === 'active',
+      agents,
+      minAgents: w.minAgents,
+      maxAgents,
+      slotsFree: Math.max(0, maxAgents - agents),
+      owners: w.owners || [], // real participants already registered
+      seed: w.seed,
+      mapHash: w.mapHash || null,
+      sessionId: w.sessionId,
+      startsAt: w.startedAt || null,
+      endsAt: w.startedAt ? w.startedAt + cfg.sessionMs : null,
+      finishedAt: w.finishedAt || null,
+      archivedAt: w.archivedAt || null,
+      archiveId: w.archiveId || null,
+      archiveUrl: w.archiveUrl || (w.archiveId ? `/archives/${encodeURIComponent(w.archiveId)}` : null),
+    };
+  };
 
   const registerInfo = () => ({
     network: env.network || 'hoodi',
@@ -46,9 +55,9 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     gasless: true, // the match's executable balance pays — your EOA needs no funds
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
-      'Wait until the session is ACTIVE (auto-starts at maxAgents; or backend starts from minAgents)',
+      'Wait until the session is active (auto-starts at maxAgents, or the operator starts it)',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },
@@ -73,8 +82,8 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     }
     const all = factory.snapshot();
     if (url === '/matches' || url === '/') {
-      const open = all.filter((w) => w.status === 'open');
-      json(res, 200, { updatedAt: new Date().toISOString(), register: registerInfo(), matches: open.map(sessionRecord) });
+      const open = all.map(sessionRecord).filter((w) => w.joinable);
+      json(res, 200, { updatedAt: new Date().toISOString(), register: registerInfo(), matches: open });
     } else if (url === '/sessions') {
       const sessions = all.map(sessionRecord);
       json(res, 200, { updatedAt: new Date().toISOString(), sessions });

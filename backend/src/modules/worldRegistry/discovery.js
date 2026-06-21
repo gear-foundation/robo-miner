@@ -21,14 +21,17 @@ export function sessionRecord(world, config) {
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
   const agents = numberOr(world.agents, 0);
   const status = discoveryStatus(world.status);
-  const joinable = status === 'open' && agents < maxAgents;
+  const canRegister = status === 'open' && agents < maxAgents;
   const sessionId = world.sessionId ?? world.session ?? null;
   return {
     id: world.id,
     sessionKey: world.archiveId || `${world.id}-s${sessionId ?? world.seed ?? 0}`,
     programId: world.programId,
     status,
-    joinable,
+    phase: status,
+    joinable: canRegister,
+    canRegister,
+    canPlay: status === 'active',
     agents,
     minAgents,
     maxAgents,
@@ -55,9 +58,9 @@ export function registerInfo(config) {
     gasless: true,
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
-      'Wait until the session is ACTIVE (auto-starts at maxAgents; or backend starts from minAgents)',
+      'Wait until the session is active (auto-starts at maxAgents, or the operator starts it)',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

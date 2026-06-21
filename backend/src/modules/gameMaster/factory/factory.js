@@ -89,16 +89,16 @@ export function createFactory({
       world.mapHash = map.mapHash;
       world.sessionId = map.sessionId ?? world.sessionId;
       if (!cfg.lobbyMode) {
-        await driver.start(world); // instant-open: StartSession now so register() works
+        await driver.start(world); // prestarted mode: only valid for contracts that allow late join
       } else {
-        await driver.openLobby?.(world); // lobby-mode: register works in CREATED, nothing to do
+        await driver.openLobby?.(world); // current contract: Register works only in CREATED
       }
       world.status = WORLD.OPEN;
       world.openedAt = clock();
       world.lastJoinAt = world.openedAt;
       log(
         `[factory]   ${world.id} OPEN program=${world.programId} seed=${world.seed} ` +
-          `(${cfg.lobbyMode ? 'lobby' : 'instant-open'})`,
+          `(${cfg.lobbyMode ? 'registration' : 'prestarted'})`,
       );
       await persistLive();
     } catch (error) {
@@ -136,7 +136,7 @@ export function createFactory({
     if (world.agents < cfg.lobbyMin) {
       log(`[factory]   ${world.id} starting below min (${world.agents} < ${cfg.lobbyMin}) — reason=${reason}`);
     }
-    if (cfg.lobbyMode) await driver.start(world); // instant-open already started at provision
+    if (cfg.lobbyMode) await driver.start(world); // registration mode: StartSession moves CREATED → ACTIVE
     world.status = WORLD.ACTIVE;
     world.startedAt = clock();
     world.startReason = reason;
@@ -240,7 +240,7 @@ export function createFactory({
       log(
         `[factory] starting · pool=${cfg.poolSize === 0 ? 'elastic' : cfg.poolSize} minOpen=${cfg.minOpenWorlds} ` +
           `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} timeout=${cfg.lobbyTimeoutMs}ms ` +
-          `session=${cfg.sessionMs}ms mode=${cfg.lobbyMode ? 'lobby' : 'instant-open'}`,
+          `session=${cfg.sessionMs}ms mode=${cfg.lobbyMode ? 'registration' : 'prestarted'}`,
       );
       if (initialLive.length) {
         log(`[factory] restored ${initialLive.length} live world(s) from disk`);

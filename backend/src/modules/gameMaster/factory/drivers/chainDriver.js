@@ -6,7 +6,7 @@
 //                createProgram + executable balance + Create()
 //   loadMap    → generateMap + Admin.UploadMap   (→ CREATED, registration open;
 //                also reopens a reused program by clearing agents)
-//   start      → Admin.StartSession (idempotent: contract auto-starts at cap=10)
+//   start      → Admin.StartSession (contract can also auto-start at cap=10)
 //   finish     → Admin.FinishSession
 //   recycle    → Admin.UploadMap again (clears agents, bumps session, → CREATED)
 //   pollAgents → World.Agents() length

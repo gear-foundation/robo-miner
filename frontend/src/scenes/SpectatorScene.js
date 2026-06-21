@@ -122,10 +122,28 @@ function displayAddress(address) {
     : address;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function sameDisplayAddress(a, b) {
   const left = displayAddress(a).toLowerCase();
   const right = displayAddress(b).toLowerCase();
   return Boolean(left && right && left === right);
+}
+
+function agentStatusMeta(status) {
+  switch (Number(status)) {
+    case 1: return { color: '#36c96c', label: 'alive' };
+    case 2: return { color: '#58a6ff', label: 'surfaced' };
+    case 3: return { color: '#d13c3c', label: 'dead' };
+    case 4: return { color: '#9aa1aa', label: 'exited' };
+    default: return { color: '#9aa1aa', label: 'unknown' };
+  }
 }
 
 function addressScanUrl(address) {
@@ -1002,7 +1020,8 @@ export default class SpectatorScene extends GameScene {
       return;
     }
     this.playAgentChirp();
-    this.sayAgentBubble(agent, 2600);
+    this.sayAgentBubble(agent, 6200);
+    this.refreshAgentBubbleDetails(agent);
   }
 
   findAgentAtPointer(pointer) {
@@ -1029,16 +1048,95 @@ export default class SpectatorScene extends GameScene {
   sayAgentBubble(agent, ms = 2200) {
     if (!this.agentBubbleEl || !agent) return;
     const address = displayAddress(agent.owner);
-    this.agentBubblePrefixEl.textContent = 'I am ';
-    this.agentBubbleLinkEl.textContent = shortAddress(agent.owner);
-    this.agentBubbleLinkEl.href = addressScanUrl(agent.owner);
-    this.agentBubbleLinkEl.title = address;
+    if (this.agentBubbleContentEl) {
+      this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(agent, null);
+    }
     this.agentBubbleEl.title = address;
     this.agentBubbleEl.style.display = 'block';
     this.agentBubbleMiner = agent;
     this.positionAgentBubble();
     clearTimeout(this._agentBubbleTimer);
     this._agentBubbleTimer = setTimeout(() => this.hideAgentBubble(), ms);
+  }
+
+  async refreshAgentBubbleDetails(agent) {
+    if (!agent?.owner || typeof this.rt?.inspectAgent !== 'function') return;
+    const requestId = (this._agentInspectRequestId || 0) + 1;
+    this._agentInspectRequestId = requestId;
+    try {
+      const detail = await this.rt.inspectAgent(agent.owner);
+      if (this._agentInspectRequestId !== requestId) return;
+      if (!this.agentBubbleMiner || !sameDisplayAddress(this.agentBubbleMiner.owner, agent.owner)) return;
+      if (this.agentBubbleContentEl) {
+        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
+      }
+      this.positionAgentBubble();
+    } catch {
+      // Snapshot data is enough for the bubble; a missed query should not make
+      // the click feel broken.
+    }
+  }
+
+  agentBubbleHtml(agent, detail = null) {
+    const state = Array.isArray(detail?.state) ? detail.state : [];
+    const inv = Array.isArray(detail?.inventory) ? detail.inventory : agent.inventory || [];
+    const statusCode = Number(state[0] ?? agent.status ?? 1);
+    const status = agentStatusMeta(statusCode);
+    const x = Number(state[1] ?? agent.tx ?? 0);
+    const y = Number(state[2] ?? agent.ty ?? 0);
+    const ladders = Number(state[4] ?? agent.items?.ladder ?? 0);
+    const capacity = Number(state[11] ?? agent.backpackCapacity ?? agent.maxCargo ?? 0);
+    const carried = {
+      scrst: Number(inv[0] ?? state[5] ?? 0),
+      bcrst: Number(inv[1] ?? state[6] ?? 0),
+      hcrst: Number(inv[2] ?? state[7] ?? 0),
+    };
+    const cargo = carried.scrst + carried.bcrst + carried.hcrst;
+    const address = displayAddress(agent.owner);
+    const wallet = detail?.walletOwner ? displayAddress(detail.walletOwner) : '';
+    const walletRow = wallet && wallet.toLowerCase() !== address.toLowerCase()
+      ? `<div style="opacity:.72;overflow:hidden;text-overflow:ellipsis">${miniIcon('owner')} ${escapeHtml(shortAddress(wallet))}</div>`
+      : '';
+    function miniIcon(kind, color = '#333') {
+      const base = 'display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;vertical-align:-2px;margin-right:3px;position:relative;box-sizing:border-box';
+      if (kind === 'status') {
+        return `<span style="${base}"><span style="width:9px;height:9px;border:1px solid #17313a;border-radius:50%;background:${color};display:block"></span></span>`;
+      }
+      if (kind === 'pos') {
+        return `<span style="${base}"><span style="position:absolute;left:7px;top:2px;width:2px;height:10px;background:#5b4127"></span><span style="position:absolute;left:3px;top:6px;width:10px;height:2px;background:#5b4127"></span></span>`;
+      }
+      if (kind === 'ladder') {
+        return `<span style="${base}"><span style="position:absolute;left:4px;top:1px;width:2px;height:12px;background:#9a6229"></span><span style="position:absolute;right:4px;top:1px;width:2px;height:12px;background:#9a6229"></span><span style="position:absolute;left:4px;top:3px;width:8px;height:2px;background:#d59a48"></span><span style="position:absolute;left:4px;top:7px;width:8px;height:2px;background:#d59a48"></span><span style="position:absolute;left:4px;top:11px;width:8px;height:2px;background:#d59a48"></span></span>`;
+      }
+      if (kind === 'bag') {
+        return `<span style="${base}"><span style="position:absolute;left:4px;top:5px;width:9px;height:7px;border:1px solid #3b2a18;background:#b9823a"></span><span style="position:absolute;left:6px;top:2px;width:5px;height:4px;border:1px solid #3b2a18;border-bottom:0;border-radius:4px 4px 0 0"></span></span>`;
+      }
+      if (kind === 'mine') {
+        return `<span style="${base}"><span style="position:absolute;left:4px;top:3px;width:9px;height:2px;background:#4a3624;transform:rotate(-35deg)"></span><span style="position:absolute;left:8px;top:4px;width:2px;height:9px;background:#7a5731;transform:rotate(25deg)"></span></span>`;
+      }
+      if (kind === 'owner') {
+        return `<span style="${base};margin-right:2px"><span style="position:absolute;left:5px;top:1px;width:6px;height:6px;border:1px solid #444;border-radius:50%;background:#ddd"></span><span style="position:absolute;left:3px;top:8px;width:10px;height:5px;border:1px solid #444;background:#ddd"></span></span>`;
+      }
+      return '';
+    }
+    const crystal = (color, title, value) =>
+      `<span title="${title}" style="display:inline-flex;align-items:center;gap:4px;margin-right:7px">` +
+      `<span style="width:8px;height:8px;background:${color};border:1px solid #17313a;transform:rotate(45deg);display:inline-block"></span>${value}</span>`;
+    const crystalRow = (resources) =>
+      `${crystal('#47d7ff', 'blue crystal', resources.scrst)} ` +
+      `${crystal('#61e889', 'green crystal', resources.bcrst)} ` +
+      `${crystal('#c06bff', 'purple crystal', resources.hcrst)}`;
+    return `
+      <div style="line-height:1.2">
+        <span>I am </span><a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
+          title="${escapeHtml(address)}" style="color:#0b57d0;text-decoration:none;font-weight:bold">${escapeHtml(shortAddress(agent.owner))}</a>
+      </div>
+      <div style="margin-top:6px;font-size:12px;line-height:1.45;color:#333">
+        <div><b>${miniIcon('status', status.color)}${escapeHtml(status.label)}</b> · ${miniIcon('pos')}${x},${y}</div>
+        <div>${miniIcon('ladder')}<b>${ladders}</b> · ${miniIcon('bag')}<b>${cargo}/${capacity}</b></div>
+        <div title="carried crystals">${miniIcon('mine')}${crystalRow(carried)}</div>
+        ${walletRow}
+      </div>`;
   }
 
   hideAgentBubble() {
@@ -1236,12 +1334,10 @@ export default class SpectatorScene extends GameScene {
       background: #fff; color: #222; font-family: 'Courier New', monospace;
       font-size: 14px; padding: 6px 10px; border-radius: 10px;
       border: 2px solid #222; box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
-      white-space: nowrap; pointer-events: auto; z-index: 18;
-      display: none; max-width: 260px;
+      white-space: normal; pointer-events: auto; z-index: 18;
+      display: none; min-width: 210px; max-width: 280px;
     `;
-    bubble.innerHTML = `<span id="spec-agent-bubble-prefix"></span><a id="spec-agent-bubble-link"
-        target="_blank" rel="noreferrer"
-        style="color:#0b57d0;text-decoration:none;font-weight:bold"></a>
+    bubble.innerHTML = `<div id="spec-agent-bubble-content"></div>
       <div style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
         width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
         border-top:8px solid #222;pointer-events:none"></div>
@@ -1250,8 +1346,7 @@ export default class SpectatorScene extends GameScene {
         border-top:6px solid #fff;pointer-events:none"></div>`;
     document.body.appendChild(bubble);
     this.agentBubbleEl = bubble;
-    this.agentBubblePrefixEl = bubble.querySelector('#spec-agent-bubble-prefix');
-    this.agentBubbleLinkEl = bubble.querySelector('#spec-agent-bubble-link');
+    this.agentBubbleContentEl = bubble.querySelector('#spec-agent-bubble-content');
   }
 
   // Slide-out terminal that streams agent actions as if they were on-chain txs.

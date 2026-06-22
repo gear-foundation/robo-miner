@@ -17,13 +17,38 @@ function bool(name, fallback) {
   return value === '1' || value.toLowerCase() === 'true';
 }
 
+const NETWORKS = {
+  hoodi: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    router: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    router: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
+  mainnet: {
+    ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
+    varaWs: 'wss://validator-1-eth.vara.network',
+    router: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
+  },
+};
+
+function networkConfig(name) {
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.hoodi;
+}
+
 // Chain connection + deploy settings (only needed in --chain mode).
 export function loadChainEnv(overrides = {}) {
+  const network = process.env.CHAIN_NETWORK || 'hoodi';
+  const defaults = networkConfig(network);
   return {
+    network,
     adminKey: process.env.DIGGER_ADMIN_KEY || '',
-    ethRpc: process.env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
-    varaWs: process.env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
-    router: process.env.ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    ethRpc: process.env.ETH_RPC || defaults.ethRpc,
+    varaWs: process.env.VARA_ETH_WS || defaults.varaWs,
+    router: process.env.ROUTER_ADDRESS || defaults.router,
     topUp: process.env.DIGGER_TOP_UP || '1000000000000000', // 1000 VARA initial executable balance
     codeId: process.env.DIGGER_CODE_ID || '',
     wasmPath: process.env.DIGGER_WASM_PATH || '',

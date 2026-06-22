@@ -15,8 +15,28 @@ export const DEFAULT_SOCIAL_QUOTE_FUEL_GRANT = 120n * VARA;
 export const DEFAULT_WORLD_BALANCE_MIN = 700n * VARA;
 export const DEFAULT_WORLD_BALANCE_TOP_UP = 1200n * VARA;
 
+const NETWORKS = {
+  hoodi: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
+  mainnet: {
+    ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://validator-1-eth.vara.network',
+    routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
+  },
+};
+
 export function loadConfig(env = process.env) {
   const storeBackend = (env.BACKEND_STORE || (env.DATABASE_URL ? 'postgres' : 'json')).toLowerCase();
+  const network = env.CHAIN_NETWORK || 'hoodi';
+  const networkDefaults = networkConfig(network);
   return {
     rootDir: BACKEND_ROOT,
     stateDir: path.resolve(BACKEND_ROOT, env.BACKEND_STATE_DIR || env.GAMEMASTER_STATE_DIR || 'state'),
@@ -26,9 +46,9 @@ export function loadConfig(env = process.env) {
     databaseSchema: env.DATABASE_SCHEMA || 'public',
     databaseDocumentId: env.DATABASE_DOCUMENT_ID || 'main',
     backendPublicUrl: env.DIGGER_BACKEND_URL || env.BACKEND_URL || '',
-    network: env.CHAIN_NETWORK || 'hoodi',
-    ethRpc: env.ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
-    varaEthWs: env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
+    network,
+    ethRpc: env.ETH_RPC || networkDefaults.ethRpc,
+    varaEthWs: env.VARA_ETH_WS || networkDefaults.varaEthWs,
     indexerPollMs: Number(env.INDEXER_POLL_MS || 3000),
     indexerTimeoutMs: Number(env.INDEXER_TIMEOUT_MS || env.DIGGER_QUERY_TIMEOUT_MS || 180000),
     schedulerRegistryMs: Number(env.SCHEDULER_REGISTRY_MS || 60_000),
@@ -38,7 +58,7 @@ export function loadConfig(env = process.env) {
     balanceCooldownMs: Number(env.BALANCE_COOLDOWN_MS || 120_000),
     worldBalanceMin: parseVaraEnv(env.BALANCE_MIN_VARA || '', DEFAULT_WORLD_BALANCE_MIN),
     worldBalanceTopUp: parseVaraEnv(env.BALANCE_TOPUP_VARA || env.BALANCE_TOP_UP_VARA || '', DEFAULT_WORLD_BALANCE_TOP_UP),
-    routerAddress: env.ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    routerAddress: env.ROUTER_ADDRESS || networkDefaults.routerAddress,
     adminKey: env.DIGGER_ADMIN_KEY || '',
     adminApiToken: env.ADMIN_API_TOKEN || '',
     worldProgramIds: splitList(env.INDEXER_WORLD_PROGRAM_IDS || env.WORLD_PROGRAM_IDS || env.WORLD_PROGRAM_ID || ''),
@@ -72,6 +92,10 @@ export function loadConfig(env = process.env) {
       quote: parseBigIntEnv(env.SOCIAL_QUOTE_FUEL_GRANT || '', DEFAULT_SOCIAL_QUOTE_FUEL_GRANT),
     },
   };
+}
+
+function networkConfig(name) {
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.hoodi;
 }
 
 function parseBool(value, fallback) {

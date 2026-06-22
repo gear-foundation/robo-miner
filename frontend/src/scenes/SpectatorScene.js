@@ -4,7 +4,7 @@ import { getBlock } from '../world.js';
 import GameScene from './GameScene.js';
 import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
-import { CHAIN, discoveryBaseUrl } from '../chain/config.js';
+import { CHAIN, addressExplorerUrl, discoveryBaseUrl } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
@@ -150,7 +150,7 @@ function agentStatusMeta(status) {
 
 function addressScanUrl(address) {
   const addr = displayAddress(address);
-  return addr ? `https://hoodi.etherscan.io/address/${addr}` : '#';
+  return addressExplorerUrl(addr);
 }
 
 const BANK_RESOURCE_LABELS = {

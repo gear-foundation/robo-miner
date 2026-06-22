@@ -12,6 +12,27 @@
 
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
+const NETWORKS = {
+  hoodi: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    explorer: 'https://hoodi.etherscan.io',
+  },
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    explorer: 'https://hoodi.etherscan.io',
+  },
+  mainnet: {
+    ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://validator-1-eth.vara.network',
+    routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
+    explorer: 'https://etherscan.io',
+  },
+};
+
 function num(name, fallback) {
   const value = env[name];
   if (value == null || value === '') return fallback;
@@ -19,16 +40,24 @@ function num(name, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function networkConfig(name) {
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.testnet;
+}
+
+const network = env.VITE_CHAIN_NETWORK || 'testnet';
+const defaults = networkConfig(network);
+
 export const CHAIN = {
   // Master switch — flip to true (via VITE_CHAIN_ENABLED=true) once the World
   // contract is live and the ids below are filled.
   enabled: env.VITE_CHAIN_ENABLED === 'true',
-  network: env.VITE_CHAIN_NETWORK || 'testnet',
+  network,
 
   // @vara-eth/api connection inputs.
-  ethRpc: env.VITE_ETH_RPC || 'https://hoodi-reth-rpc.gear-tech.io',
-  varaEthWs: env.VITE_VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
-  routerAddress: env.VITE_ROUTER_ADDRESS || '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  ethRpc: env.VITE_ETH_RPC || defaults.ethRpc,
+  varaEthWs: env.VITE_VARA_ETH_WS || defaults.varaEthWs,
+  routerAddress: env.VITE_ROUTER_ADDRESS || defaults.routerAddress,
+  explorerUrl: defaults.explorer,
 
   // The World program (one per active map). Direct world routes pass the id in
   // the URL. Lobby discovery comes from the operator API; these ids are only a
@@ -78,6 +107,10 @@ export function chainReady(programId = CHAIN.worldProgramId) {
 
 export function discoveryBaseUrl() {
   return String(CHAIN.matchesUrl || CHAIN.backendUrl || '').replace(/\/+$/, '');
+}
+
+export function addressExplorerUrl(address) {
+  return address ? `${CHAIN.explorerUrl}/address/${address}` : '#';
 }
 
 export function redeemReady() {

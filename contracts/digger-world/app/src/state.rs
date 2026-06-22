@@ -5,7 +5,7 @@ use crate::{
     config::WorldConfig,
     constants::{
         AGENT_ACTIVE, AUTO_START_SESSION_PARTICIPANTS, MIN_SESSION_PARTICIPANTS, SESSION_ACTIVE,
-        SESSION_CREATED,
+        SESSION_CREATED, SESSION_FINISHED,
     },
 };
 
@@ -70,13 +70,13 @@ pub(crate) fn ensure_session_active(state: &WorldState) -> Result<(), String> {
 }
 
 pub(crate) fn ensure_registration_open(state: &WorldState) -> Result<(), String> {
-    if state.session.status == SESSION_ACTIVE {
-        return Err("session is already active".into());
+    if matches!(state.session.status, SESSION_CREATED | SESSION_ACTIVE) {
+        return Ok(());
     }
-    if state.session.status != SESSION_CREATED {
+    if state.session.status == SESSION_FINISHED {
         return Err("registration is closed".into());
     }
-    Ok(())
+    Err("registration is closed".into())
 }
 
 pub(crate) fn ensure_min_participants_to_start(state: &WorldState) -> Result<(), String> {
@@ -122,18 +122,15 @@ mod tests {
     }
 
     #[test]
-    fn registration_is_open_only_before_session_starts() {
+    fn registration_is_open_before_and_during_active_session() {
         let mut state = WorldState::new(ActorId::zero(), WorldConfig::default_40x64());
 
         assert_eq!(ensure_registration_open(&state), Ok(()));
 
         state.session.status = SESSION_ACTIVE;
-        assert_eq!(
-            ensure_registration_open(&state),
-            Err("session is already active".into())
-        );
+        assert_eq!(ensure_registration_open(&state), Ok(()));
 
-        state.session.status = crate::constants::SESSION_FINISHED;
+        state.session.status = SESSION_FINISHED;
         assert_eq!(
             ensure_registration_open(&state),
             Err("registration is closed".into())

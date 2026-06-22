@@ -6,7 +6,7 @@ import { discoveryFromManifest } from '../src/modules/worldRegistry/discovery.js
 import { WorldRegistryService } from '../src/modules/worldRegistry/service.js';
 
 const CONFIG = {
-  network: 'hoodi',
+  network: 'mainnet',
   routerAddress: '0xrouter',
   varaEthWs: 'wss://vara',
   ethRpc: 'https://eth',
@@ -51,7 +51,7 @@ test('world registry manifest becomes agent match discovery feed', () => {
   }, CONFIG, () => new Date('2026-06-15T00:00:00.000Z'));
 
   assert.equal(discovery.updatedAt, '2026-06-15T00:00:00.000Z');
-  assert.equal(discovery.register.network, 'hoodi');
+  assert.equal(discovery.register.network, 'mainnet');
   assert.equal(discovery.sessions.length, 3);
   assert.equal(discovery.matches.length, 1);
   assert.deepEqual(discovery.matches[0], {
@@ -73,6 +73,7 @@ test('world registry manifest becomes agent match discovery feed', () => {
     sessionId: 3,
     startsAt: null,
     endsAt: null,
+    sessionAutofinish: false,
     finishedAt: null,
     archivedAt: null,
     archiveId: null,
@@ -89,9 +90,9 @@ test('world registry manifest becomes agent match discovery feed', () => {
 
 test('world registry seeds configured program ids into discovery when store is empty', async () => {
   const ids = [
-    '0xdb0069475ed6d5fc3d9547e467de059a7cafc3ae',
-    '0x13bf8eb61a871b60d0d8cc1c3ad4ac8a7a58289d',
-    '0xc843a4bc6e64126079a956b4e166bed4ed52875f',
+    '0xb0860e1262e3677a65e24f821c8b6e4e5f5cd04b',
+    '0xcd8abd56353212b1c7b7107c150fbea366eb8663',
+    '0xe3edd24f8a5b123c390052c5177d15f2991db4af',
   ];
   const registry = new WorldRegistryService({
     store: new MemoryStore(),
@@ -101,6 +102,7 @@ test('world registry seeds configured program ids into discovery when store is e
       sessionMs: 1800000,
       factoryLobbyMin: 8,
       factoryLobbyCap: 10,
+      factorySessionAutofinish: false,
     },
     now: () => new Date('2026-06-15T00:00:00.000Z'),
   });

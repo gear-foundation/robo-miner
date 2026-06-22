@@ -16,16 +16,6 @@ export const DEFAULT_WORLD_BALANCE_MIN = 700n * VARA;
 export const DEFAULT_WORLD_BALANCE_TOP_UP = 1200n * VARA;
 
 const NETWORKS = {
-  hoodi: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-  },
-  testnet: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-  },
   mainnet: {
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://validator-1-eth.vara.network',
@@ -35,7 +25,7 @@ const NETWORKS = {
 
 export function loadConfig(env = process.env) {
   const storeBackend = (env.BACKEND_STORE || (env.DATABASE_URL ? 'postgres' : 'json')).toLowerCase();
-  const network = env.CHAIN_NETWORK || 'hoodi';
+  const network = env.CHAIN_NETWORK || 'mainnet';
   const networkDefaults = networkConfig(network);
   return {
     rootDir: BACKEND_ROOT,
@@ -74,9 +64,11 @@ export function loadConfig(env = process.env) {
     diggerRentalMode: env.DIGGER_RENTAL_MODE || env.BACKEND_DEPLOY_MODE || 'dry-run',
     diggerRentalSeason: env.DIGGER_RENTAL_SEASON || env.SEASON_ID || 'season-1',
     sessionMs: Number(env.SESSION_MS || 30 * 60 * 1000),
-    factoryLobbyMin: Number(env.FACTORY_LOBBY_MIN || 8),
+    factorySessionAutofinish: parseBool(env.FACTORY_SESSION_AUTOFINISH, false),
+    factoryLobbyMin: Number(env.FACTORY_LOBBY_MIN || 3),
     factoryLobbyCap: Number(env.FACTORY_LOBBY_CAP || 10),
-    factoryLobbyTimeoutMs: Number(env.FACTORY_LOBBY_TIMEOUT_MS || 5 * 60 * 1000),
+    factoryLobbyTimeoutMs: Number(env.FACTORY_LOBBY_TIMEOUT_MS || 0),
+    factoryAutoStartAtMin: parseBool(env.FACTORY_AUTOSTART_AT_MIN, true),
     factoryAutoStartOnTimeout: parseBool(env.FACTORY_AUTOSTART_ON_TIMEOUT, false),
     factoryRecycle: parseBool(env.FACTORY_RECYCLE, true),
     contractSurface: Number(env.CONTRACT_SURFACE_Y || 1),
@@ -95,7 +87,7 @@ export function loadConfig(env = process.env) {
 }
 
 function networkConfig(name) {
-  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.hoodi;
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.mainnet;
 }
 
 function parseBool(value, fallback) {

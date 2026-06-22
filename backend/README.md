@@ -75,7 +75,7 @@ Factory and agent simulation commands:
 cd backend
 npm run factory            # dry-run factory + discovery server
 npm run factory:forever    # dry-run forever
-npm run factory:chain      # live Hoodi factory; requires backend/.env
+npm run factory:chain      # live mainnet factory; requires backend/.env
 npm run sim:register -- <worldProgramId> 10
 npm run sim:play -- <worldProgramId> 10
 ```
@@ -130,7 +130,9 @@ memory-only factory discovery process.
 
 When the registry store is empty, the backend seeds open world records from
 `INDEXER_WORLD_PROGRAM_IDS` / `WORLD_PROGRAM_IDS` / `WORLD_PROGRAM_ID`. The
-snapshot and registry jobs then reconcile live session state from chain.
+snapshot and registry jobs then reconcile live session state from chain. In
+production with a seeded Postgres registry, keep those env vars empty so the DB
+remains the single source of truth for worlds.
 
 For MVP this registry is backend-first. A thin on-chain registry can be added
 later if frontend discovery needs to be independently verifiable on-chain.
@@ -430,7 +432,8 @@ programs with `INDEXER_WORLD_PROGRAM_IDS`, `INDEXER_PROXY_PROGRAM_IDS`,
 `INDEXER_RES_VMT_PROGRAM_IDS`, `INDEXER_REDEEM_PROGRAM_IDS`, or let synced
 `worldRegistry` records provide world program ids. `INDEXER_WORLD_PROGRAM_IDS`
 also acts as the fallback seed for `/matches`, `/sessions`, and `/api/manifest`
-when Postgres does not yet contain world records.
+when Postgres does not yet contain world records; it should stay empty after the
+production world registry has been seeded.
 
 If the current RPC does not expose `block_outcome`, use the snapshot fallback.
 It reads current state through Sails queries (`World.Session`, `World.Agents`,

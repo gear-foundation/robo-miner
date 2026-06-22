@@ -22,9 +22,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 const DEFAULTS = {
-  ETHEREUM_RPC: "wss://hoodi-reth-rpc.gear-tech.io/ws",
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
-  ROUTER_ADDRESS: "0xE549b0AfEdA978271FF7E712232B9F7f39A0b060",
+  ETHEREUM_RPC: "https://mainnet-reth-rpc.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
+  ROUTER_ADDRESS: "0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6",
   DIGGER_EVENT_TIMEOUT_MS: "180000",
 };
 
@@ -80,9 +80,9 @@ Inputs:
 
 Environment:
   PRIVATE_KEY      Admin private key. Required unless --dry-run is used.
-  ETHEREUM_RPC     Defaults to Hoodi websocket RPC.
+  ETHEREUM_RPC     Defaults to mainnet RPC.
   VARA_ETH_RPC     Defaults to Vara.eth validator websocket RPC.
-  ROUTER_ADDRESS   Defaults to current Hoodi Router.
+  ROUTER_ADDRESS   Defaults to current mainnet Router.
   DIGGER_MAP_FILE  Alternative to --file.
 `);
 }
@@ -989,11 +989,11 @@ async function main() {
   }
 
   const privateKey = normalizeHex(
-    requireValue(args.privateKey || process.env.PRIVATE_KEY || process.env.TESTNET_PRIVATE_KEY, "PRIVATE_KEY"),
+    requireValue(args.privateKey || process.env.PRIVATE_KEY, "PRIVATE_KEY"),
   );
-  const ethRpc = args.ethRpc || envAny(["ETHEREUM_RPC", "TESTNET_ETHEREUM_RPC"]);
-  const varaRpc = args.varaRpc || envAny(["VARA_ETH_RPC", "TESTNET_VARA_ETH_RPC"]);
-  const routerAddress = args.router || envAny(["ROUTER_ADDRESS", "TESTNET_ROUTER_ADDRESS"]);
+  const ethRpc = args.ethRpc || envAny(["ETHEREUM_RPC"]);
+  const varaRpc = args.varaRpc || envAny(["VARA_ETH_RPC"]);
+  const routerAddress = args.router || envAny(["ROUTER_ADDRESS"]);
   const timeoutMs = Number(args.timeoutMs || envAny(["DIGGER_EVENT_TIMEOUT_MS"]));
 
   const account = privateKeyToAccount(privateKey, { nonceManager });

@@ -34,16 +34,13 @@ const ROOT = path.resolve(__dirname, "..");
 loadEnv({ path: path.join(ROOT, ".env"), quiet: true });
 
 const DEFAULTS = {
-  ETHEREUM_RPC: "wss://hoodi-reth-rpc.gear-tech.io/ws",
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
-  ROUTER_ADDRESS: "0xE549b0AfEdA978271FF7E712232B9F7f39A0b060",
+  ETHEREUM_RPC: "https://mainnet-reth-rpc.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
+  ROUTER_ADDRESS: "0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6",
   DIGGER_PROMISE_TIMEOUT_MS: "90000",
   DIGGER_QUERY_TIMEOUT_MS: "60000",
   DIGGER_VALIDATOR_MODE: "default",
 } as const;
-
-const VMT_PROGRAM_ID = "0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240" as Address;
-const REDEEM_PROGRAM_ID = "0x9c5b14f959efa66d5015dd111912fc851232b787" as Address;
 
 const VMT_IDL = String.raw`
 !@sails: 1.0.0-beta.5
@@ -465,8 +462,14 @@ async function main() {
   const validatorMode = (args.validatorMode || envValue("DIGGER_VALIDATOR_MODE") || DEFAULTS.DIGGER_VALIDATOR_MODE) as ValidatorMode;
 
   const proxyProgramId = normalizeAddress(args.proxy || requireValue(envValue("DIGGER_PROXY_PROGRAM_ID"), "DIGGER_PROXY_PROGRAM_ID"), "proxy");
-  const vmtProgramId = normalizeAddress(args.vmt || envValue("DIGGER_RESOURCE_VMT") || VMT_PROGRAM_ID, "vmt");
-  const redeemProgramId = normalizeAddress(args.redeem || envValue("DIGGER_REDEEM_PROGRAM_ID") || REDEEM_PROGRAM_ID, "redeem");
+  const vmtProgramId = normalizeAddress(
+    requireValue(args.vmt || envValue("DIGGER_RESOURCE_VMT"), "DIGGER_RESOURCE_VMT"),
+    "vmt",
+  );
+  const redeemProgramId = normalizeAddress(
+    requireValue(args.redeem || envValue("DIGGER_REDEEM_PROGRAM_ID"), "DIGGER_REDEEM_PROGRAM_ID"),
+    "redeem",
+  );
   const proxyActor = actorIdFromAddress(proxyProgramId);
   const accountActor = actorIdFromAddress(normalizeAddress(envValue("ACCOUNT_ADDRESS") || "0xee98b6381b0a6a18a4a4e6d74355b015319a6809", "account"));
   const vmtActor = actorIdFromAddress(vmtProgramId);

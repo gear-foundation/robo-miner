@@ -4,18 +4,15 @@
 // vara-eth-skills ts-api playbook §9.
 //
 //   ROUTER_ADDRESS=0x... ETH_RPC=https://... node src/modules/gameMaster/query.js [programId]
-//
-// Defaults below are pre-filled with the gear-tech testnet WS + the program id
-// you gave; you still need ROUTER_ADDRESS + ETH_RPC for the testnet.
 
 import { readFile } from 'node:fs/promises';
 import { worldQueries } from '../../../../frontend/src/chain/world.js';
 
 const ENV = {
   ethRpc: process.env.ETH_RPC || '',
-  varaEthWs: process.env.VARA_ETH_WS || 'wss://vara-eth-validator-1.gear-tech.io',
+  varaEthWs: process.env.VARA_ETH_WS || 'wss://validator-1-eth.vara.network',
   router: process.env.ROUTER_ADDRESS || '',
-  programId: process.argv[2] || process.env.WORLD_PROGRAM_ID || '0x936b5395876648772d37e22da57ba37c4e586df2',
+  programId: process.argv[2] || process.env.WORLD_PROGRAM_ID || '',
 };
 
 const IDL_PATH = new URL('../../../../frontend/src/chain/world.idl', import.meta.url);

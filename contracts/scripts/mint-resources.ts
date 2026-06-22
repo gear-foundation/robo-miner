@@ -37,16 +37,15 @@ const ROOT = path.resolve(__dirname, "..");
 loadEnv({ path: path.join(ROOT, ".env"), quiet: true });
 
 const DEFAULTS = {
-  ETHEREUM_RPC: "wss://hoodi-reth-rpc.gear-tech.io/ws",
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
-  ROUTER_ADDRESS: "0xE549b0AfEdA978271FF7E712232B9F7f39A0b060",
+  ETHEREUM_RPC: "https://mainnet-reth-rpc.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
+  ROUTER_ADDRESS: "0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6",
   DIGGER_EVENT_TIMEOUT_MS: "180000",
   DIGGER_PROMISE_TIMEOUT_MS: "90000",
   DIGGER_QUERY_TIMEOUT_MS: "60000",
   DIGGER_VALIDATOR_MODE: "default",
 } as const;
 
-const VMT_PROGRAM_ID = "0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240" as Address;
 const WORLD_IDL_PATH = process.env.DIGGER_WORLD_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_world.idl");
 const PROXY_IDL_PATH = process.env.DIGGER_PROXY_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_proxy.idl");
 
@@ -454,7 +453,10 @@ async function main() {
 
   const worldProgramId = normalizeAddress(args.world || requireValue(envValue("DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID"), "world");
   const proxyProgramId = normalizeAddress(args.proxy || requireValue(envValue("DIGGER_PROXY_PROGRAM_ID"), "DIGGER_PROXY_PROGRAM_ID"), "proxy");
-  const vmtProgramId = normalizeAddress(args.vmt || envValue("DIGGER_RESOURCE_VMT") || VMT_PROGRAM_ID, "vmt");
+  const vmtProgramId = normalizeAddress(
+    requireValue(args.vmt || envValue("DIGGER_RESOURCE_VMT"), "DIGGER_RESOURCE_VMT"),
+    "vmt",
+  );
   const worldActor = actorIdFromAddress(worldProgramId);
   const proxyActor = actorIdFromAddress(proxyProgramId);
   const vmtActor = actorIdFromAddress(vmtProgramId);

@@ -38,9 +38,9 @@ const ROOT = path.resolve(__dirname, "..");
 loadEnv({ path: path.join(ROOT, ".env"), quiet: true });
 
 const DEFAULTS = {
-  ETHEREUM_RPC: "wss://hoodi-reth-rpc.gear-tech.io/ws",
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
-  ROUTER_ADDRESS: "0xE549b0AfEdA978271FF7E712232B9F7f39A0b060",
+  ETHEREUM_RPC: "https://mainnet-reth-rpc.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
+  ROUTER_ADDRESS: "0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6",
   DIGGER_EVENT_TIMEOUT_MS: "180000",
   DIGGER_PROMISE_TIMEOUT_MS: "60000",
   DIGGER_QUERY_TIMEOUT_MS: "30000",

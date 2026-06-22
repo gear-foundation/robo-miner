@@ -17,7 +17,7 @@ export function discoveryFromManifest(manifest, config, now = () => new Date()) 
 }
 
 export function sessionRecord(world, config) {
-  const minAgents = numberOr(world.minAgents, 8);
+  const minAgents = numberOr(world.minAgents, 3);
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
   const agents = numberOr(world.agents, 0);
   const status = discoveryStatus(world.status);
@@ -42,6 +42,7 @@ export function sessionRecord(world, config) {
     sessionId,
     startsAt: world.startsAt || null,
     endsAt: world.endsAt || null,
+    sessionAutofinish: Boolean(world.sessionAutofinish ?? config.factorySessionAutofinish ?? false),
     finishedAt: world.finishedAt || world.chain?.finishedAt || null,
     archivedAt: world.archivedAt || null,
     archiveId: world.archiveId || null,
@@ -51,7 +52,7 @@ export function sessionRecord(world, config) {
 
 export function registerInfo(config) {
   return {
-    network: config.network || 'hoodi',
+    network: config.network || 'mainnet',
     router: config.routerAddress || null,
     varaWs: config.varaEthWs || null,
     ethRpc: config.ethRpc || null,
@@ -60,7 +61,8 @@ export function registerInfo(config) {
     steps: [
       'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
-      'Wait until the session is active (auto-starts at maxAgents, or the operator starts it)',
+      'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
+      'Do not register into active sessions: the current contract accepts Register only during registration',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

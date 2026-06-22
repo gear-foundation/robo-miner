@@ -10,6 +10,7 @@ const CONFIG = {
   diggerRentalSeason: 'season-1',
   diggerDailyExecTarget: 120000000000000n,
   sessionMs: 1800000,
+  factorySessionAutofinish: false,
 };
 
 const WORLD_ID = '0x936b5395876648772d37e22da57ba37c4e586df2';
@@ -135,7 +136,7 @@ test('world snapshot updates public world session status and agent count', async
   assert.equal(db.worlds[0].agents, 1);
   assert.deepEqual(db.worlds[0].owners, [OWNER]);
   assert.equal(db.worlds[0].startsAt, '2026-06-11T00:00:10.000Z');
-  assert.equal(db.worlds[0].endsAt, '2026-06-11T00:30:10.000Z');
+  assert.equal(db.worlds[0].endsAt, null);
 });
 
 test('injected events without tx hash still receive unique ids', async () => {

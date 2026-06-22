@@ -1405,7 +1405,7 @@ async function main() {
   const privateKey = requireEnv("PRIVATE_KEY") as Hex;
   const ethRpc = requireEnv("ETHEREUM_RPC");
   const router = requireEnv("ROUTER_ADDRESS") as Hex;
-  const varaRpc = process.env.DIGGER_INJECTED_RPC || "wss://vara-eth-validator-2.gear-tech.io";
+  const varaRpc = process.env.DIGGER_INJECTED_RPC || "wss://validator-1-eth.vara.network";
 
   const provider = new WsVaraEthProvider(varaRpc, { requestTimeout: 60_000 });
   const account = privateKeyToAccount(privateKey, { nonceManager });

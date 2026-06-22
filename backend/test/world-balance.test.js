@@ -5,8 +5,8 @@ import { normalizeDb } from '../src/db/jsonStore.js';
 import { WorldBalanceService, selectWorldPrograms } from '../src/modules/gameMaster/worldBalance.js';
 
 const VARA = 1_000_000_000_000n;
-const WORLD_A = '0xdb0069475ed6d5fc3d9547e467de059a7cafc3ae';
-const WORLD_B = '0x13bf8eb61a871b60d0d8cc1c3ad4ac8a7a58289d';
+const WORLD_A = '0xb0860e1262e3677a65e24f821c8b6e4e5f5cd04b';
+const WORLD_B = '0xcd8abd56353212b1c7b7107c150fbea366eb8663';
 
 const CONFIG = {
   diggerRentalSeason: 'season-1',

@@ -140,14 +140,18 @@ export function createFactory({
     world.status = WORLD.ACTIVE;
     world.startedAt = clock();
     world.startReason = reason;
+    const runLabel = cfg.sessionAutofinish && cfg.sessionMs > 0
+      ? `running ~${Math.round(cfg.sessionMs / 1000)}s`
+      : 'running until admin/contract finish';
     log(
       `[factory] > ${world.id} START (${reason}) agents=${world.agents} → ` +
-        `running ~${Math.round(cfg.sessionMs / 1000)}s`,
+        runLabel,
     );
     await persistLive();
   }
 
   async function tickActive(world) {
+    if (!cfg.sessionAutofinish || Number(cfg.sessionMs) <= 0) return;
     if (clock() - world.startedAt >= cfg.sessionMs) {
       await driver.finish(world);
       world.status = WORLD.FINISHED;
@@ -239,8 +243,8 @@ export function createFactory({
       running = true;
       log(
         `[factory] starting · pool=${cfg.poolSize === 0 ? 'elastic' : cfg.poolSize} minOpen=${cfg.minOpenWorlds} ` +
-          `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} timeout=${cfg.lobbyTimeoutMs}ms ` +
-          `session=${cfg.sessionMs}ms mode=${cfg.lobbyMode ? 'registration' : 'prestarted'}`,
+          `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} startAtMin=${cfg.autoStartAtMin} timeout=${cfg.lobbyTimeoutMs}ms ` +
+          `session=${cfg.sessionAutofinish ? `${cfg.sessionMs}ms` : 'manual'} mode=${cfg.lobbyMode ? 'registration' : 'prestarted'}`,
       );
       if (initialLive.length) {
         log(`[factory] restored ${initialLive.length} live world(s) from disk`);

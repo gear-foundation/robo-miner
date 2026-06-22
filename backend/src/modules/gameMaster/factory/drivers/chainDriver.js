@@ -25,7 +25,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../../..'); // backend/src/modules/gameMaster/factory/drivers → repo root
 const SESSION_ACTIVE = 1;
 
-export async function createChainDriver({ env, log = console.log, reservedProgramIds = [], documentStore = null }) {
+export async function createChainDriver({
+  env,
+  log = console.log,
+  reservedProgramIds = [],
+  documentStore = null,
+  documentPrefix = '',
+}) {
   const { connectDiggerWorldChain } = await import('../../../../chain/diggerWorld.js');
   const chain = await connectDiggerWorldChain(env);
 
@@ -43,7 +49,7 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
   });
 
   const poolFile = path.resolve(ROOT, process.env.GAMEMASTER_STATE_DIR || 'state', 'factory-programs.json');
-  const poolDocumentId = 'factory:factory-programs';
+  const poolDocumentId = `${documentPrefix}factory:factory-programs`;
   const pool = await loadPool();
   let codeId = env.codeId || pool.codeId || null;
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
@@ -179,7 +185,8 @@ export async function createChainDriver({ env, log = console.log, reservedProgra
     async openLobby() {}, // lobby-mode: register() works in CREATED, nothing to do
     async start(world) {
       // Idempotent: the contract auto-starts when participants reach the cap (10).
-      // Only call StartSession if the session is still CREATED — it then requires >= 8.
+      // Only call StartSession if the session is still CREATED; the contract
+      // enforces its own minimum participant count.
       const session = await readSession(world.programId);
       if (session.status === SESSION_ACTIVE) return;
       await chain.sendAdmin(world.programId, chain.encode.startSession());

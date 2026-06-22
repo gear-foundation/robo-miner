@@ -24,7 +24,7 @@ const ROOT = path.resolve(__dirname, "..");
 loadEnv({ path: path.join(ROOT, ".env"), quiet: true });
 
 const DEFAULTS = {
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
   REQUEST_TIMEOUT_MS: "30000",
   POLL_MS: "3000",
 } as const;

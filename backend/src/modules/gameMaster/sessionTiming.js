@@ -7,13 +7,14 @@ export function applyWorldSessionTiming(world, { config = {}, timestamp, status 
   const ts = parseDate(timestamp) || new Date();
   if (status === 'active') {
     const ms = sessionMs(world, config);
-    const endsAt = new Date(ts.getTime() + ms).toISOString();
     world.session = { ...(world.session || {}), status: SESSION_ACTIVE };
     world.startsAt = ts.toISOString();
-    world.endsAt = endsAt;
     world.sessionMs = ms;
     world.chain = { ...(world.chain || {}), startedAt: ts.toISOString() };
     world.finishedAt = null;
+    world.endsAt = sessionAutofinishEnabled(config)
+      ? new Date(ts.getTime() + ms).toISOString()
+      : null;
   }
   if (status === 'finished') {
     world.status = 'finished';
@@ -37,6 +38,10 @@ export function applyWorldSessionTiming(world, { config = {}, timestamp, status 
 
 export function sessionMs(world, config = {}) {
   return Number(world.sessionMs || config.sessionMs || 30 * 60 * 1000);
+}
+
+export function sessionAutofinishEnabled(config = {}) {
+  return Boolean(config.sessionAutofinish ?? config.factorySessionAutofinish ?? false);
 }
 
 function parseDate(value) {

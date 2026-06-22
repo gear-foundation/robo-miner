@@ -64,7 +64,7 @@ const CHEST_OUTCOME = {
   LADDERS: 2,
 };
 
-// Current live DiggerWorld testnet tile ids differ from the older frontend
+// Current live DiggerWorld tile ids differ from the older frontend
 // constants. Keep the renderer stable by translating contract cells at the edge.
 const CONTRACT_TO_RENDER_TILE = {
   [CONTRACT_TILE.EMPTY]: BLOCK.SKY,   // empty/drilled
@@ -75,7 +75,7 @@ const CONTRACT_TO_RENDER_TILE = {
   [CONTRACT_TILE.SCRST]: BLOCK.SCRST,
   [CONTRACT_TILE.BCRST]: BLOCK.BCRST,
   [CONTRACT_TILE.HCRST]: BLOCK.HCRST,
-  [CONTRACT_TILE.SURFACE]: BLOCK.SKY,  // sky/surface cap in the live testnet map
+  [CONTRACT_TILE.SURFACE]: BLOCK.SKY,  // sky/surface cap in the live map
 };
 
 function renderTile(contractTile) {

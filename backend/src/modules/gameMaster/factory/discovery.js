@@ -39,7 +39,8 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
       mapHash: w.mapHash || null,
       sessionId: w.sessionId,
       startsAt: w.startedAt || null,
-      endsAt: w.startedAt ? w.startedAt + cfg.sessionMs : null,
+      endsAt: cfg.sessionAutofinish && w.startedAt ? w.startedAt + cfg.sessionMs : null,
+      sessionAutofinish: Boolean(cfg.sessionAutofinish),
       finishedAt: w.finishedAt || null,
       archivedAt: w.archivedAt || null,
       archiveId: w.archiveId || null,
@@ -48,7 +49,7 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
   };
 
   const registerInfo = () => ({
-    network: env.network || 'hoodi',
+    network: env.network || 'mainnet',
     router: env.router || null,
     varaWs: env.varaWs || null, // Vara.eth node to send injected txs / read state
     ethRpc: env.ethRpc || null,
@@ -57,7 +58,8 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     steps: [
       'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
-      'Wait until the session is active (auto-starts at maxAgents, or the operator starts it)',
+      'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
+      'Do not register into active sessions: the current contract accepts Register only during registration',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

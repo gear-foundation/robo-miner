@@ -4,6 +4,7 @@ import {
   SESSION_ACTIVE,
   SESSION_CREATED,
   SESSION_FINISHED,
+  sessionAutofinishEnabled,
   sessionMs,
 } from './sessionTiming.js';
 
@@ -103,7 +104,9 @@ export class GameMasterLifecycleService {
         await this.store.update((db) => {
           const world = findWorld(db, action.world);
           if (!world) return;
-          const endsAt = new Date(Date.parse(now) + sessionMs(world, this.config)).toISOString();
+          const endsAt = sessionAutofinishEnabled(this.config)
+            ? new Date(Date.parse(now) + sessionMs(world, this.config)).toISOString()
+            : null;
           applyPatch(world, {
             status: 'active',
             session: { ...(world.session || {}), status: SESSION_ACTIVE },
@@ -209,9 +212,16 @@ export function planWorldLifecycle(world, { config, now = new Date() }) {
   if (status === 'waiting_agents') {
     patch.endsAt = null;
     patch.finishedAt = null;
+    const agents = Number(world.agents || 0);
+    const minAgents = Number(world.minAgents || config.factoryLobbyMin || 0);
     if (
+      config.factoryAutoStartAtMin &&
+      agents >= minAgents
+    ) {
+      actions.push({ type: 'start', reason: 'lobby_min' });
+    } else if (
       config.factoryAutoStartOnTimeout &&
-      Number(world.agents || 0) >= Number(world.minAgents || config.factoryLobbyMin || 0) &&
+      agents >= minAgents &&
       lobbyExpired(world, config, nowMs)
     ) {
       actions.push({ type: 'start', reason: 'lobby_timeout' });
@@ -220,16 +230,17 @@ export function planWorldLifecycle(world, { config, now = new Date() }) {
 
   if (status === 'active') {
     const startedAt = activeStartedAt(world, now);
-    const endsAt = activeEndsAt(world, startedAt, ms);
+    const autofinish = sessionAutofinishEnabled(config);
+    const endsAt = autofinish ? activeEndsAt(world, startedAt, ms) : null;
     patch.status = 'active';
     patch.startsAt = startedAt.toISOString();
-    patch.endsAt = endsAt.toISOString();
+    patch.endsAt = endsAt ? endsAt.toISOString() : null;
     patch.sessionMs = ms;
     patch.chain = {
       ...(world.chain || {}),
       startedAt: world.chain?.startedAt || startedAt.toISOString(),
     };
-    if (nowMs >= endsAt.getTime()) {
+    if (endsAt && nowMs >= endsAt.getTime()) {
       actions.push({ type: 'finish', reason: 'session_expired' });
     }
   }
@@ -410,7 +421,7 @@ function normalizeWorldStatus(world) {
 }
 
 function activeStartedAt(world, now) {
-  return parseDate(world.chain?.startedAt) || (world.endsAt ? parseDate(world.startsAt) : null) || now;
+  return parseDate(world.chain?.startedAt) || parseDate(world.startsAt) || now;
 }
 
 function activeEndsAt(world, startedAt, ms) {

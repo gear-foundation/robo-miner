@@ -18,16 +18,6 @@ function bool(name, fallback) {
 }
 
 const NETWORKS = {
-  hoodi: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    router: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-  },
-  testnet: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    router: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-  },
   mainnet: {
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaWs: 'wss://validator-1-eth.vara.network',
@@ -36,12 +26,12 @@ const NETWORKS = {
 };
 
 function networkConfig(name) {
-  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.hoodi;
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.mainnet;
 }
 
 // Chain connection + deploy settings (only needed in --chain mode).
 export function loadChainEnv(overrides = {}) {
-  const network = process.env.CHAIN_NETWORK || 'hoodi';
+  const network = process.env.CHAIN_NETWORK || 'mainnet';
   const defaults = networkConfig(network);
   return {
     network,
@@ -96,13 +86,15 @@ export function loadConfig(overrides = {}) {
     minOpenWorlds: num('FACTORY_MIN_OPEN', 1), // invariant: always keep >= this many open lobbies
 
     // ── lobby admission rules ────────────────────────────────────────────────
-    lobbyMin: num('FACTORY_LOBBY_MIN', 8), // agents we want gathered before a (manual) start
+    lobbyMin: num('FACTORY_LOBBY_MIN', 3), // agents we want gathered before a start
     lobbyCap: num('FACTORY_LOBBY_CAP', 10), // hard cap → auto-start the instant it's reached
-    lobbyTimeoutMs: num('FACTORY_LOBBY_TIMEOUT_MS', 5 * 60 * 1000), // idle-since-last-join window
+    lobbyTimeoutMs: num('FACTORY_LOBBY_TIMEOUT_MS', 0), // legacy idle-since-last-join manual window
+    autoStartAtMin: bool('FACTORY_AUTOSTART_AT_MIN', true), // start as soon as lobbyMin is reached
     autoStartOnTimeout: bool('FACTORY_AUTOSTART_ON_TIMEOUT', false), // false ⇒ flag for manual start
 
     // ── session ──────────────────────────────────────────────────────────────
-    sessionMs: num('SESSION_MS', 30 * 60 * 1000), // play length once started
+    sessionMs: num('SESSION_MS', 30 * 60 * 1000), // optional play length metadata
+    sessionAutofinish: bool('FACTORY_SESSION_AUTOFINISH', false), // false ⇒ active sessions run until admin/contract finish
 
     // ── lifecycle mode ───────────────────────────────────────────────────────
     // lobby (true): current contract — UploadMap/ResetMap creates a registration

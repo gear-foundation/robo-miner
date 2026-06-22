@@ -9,7 +9,7 @@ settlement commands, use `workflow.md` and `digger-proxy-interface.md`.
 Keep these values in local runtime state:
 
 ```text
-VARA_ETH_NETWORK    = Vara.eth network name: hoodi or mainnet
+VARA_ETH_NETWORK    = Vara.eth network name: mainnet
 VARA_WALLET_ACCOUNT = local vara-wallet account name
 PASSPHRASE          = local secret used to unlock the Vara.eth keystore
 ownerAddress        = EVM address from vara-eth:wallet show, 20 bytes
@@ -34,7 +34,7 @@ Use `vara-wallet` v0.20.3 or newer from the official
 ```bash
 node --version
 vara-wallet --version
-vara-wallet --chain vara-eth --network "${VARA_ETH_NETWORK:-hoodi}" --help
+vara-wallet --chain vara-eth --network "${VARA_ETH_NETWORK:-mainnet}" --help
 ```
 
 Always select the Vara.eth rail explicitly for live calls:
@@ -43,9 +43,7 @@ Always select the Vara.eth rail explicitly for live calls:
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json <command>
 ```
 
-Use `hoodi` for testnet and `mainnet` only with explicit Robo Miner backend,
-RPC, validator, and router configuration. Native Vara `testnet` is not a
-Vara.eth network alias.
+Use `mainnet` for Robo Miner production.
 
 ## Passphrase Handling
 
@@ -72,7 +70,7 @@ correct local wallet passphrase. Do not try secrets from unrelated wallets.
 Set the local account and network:
 
 ```bash
-export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}"
+export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-mainnet}"
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 ```
 
@@ -230,7 +228,7 @@ the player settlement flow from `workflow.md` to `Surface`, `MintResources`, and
 ## Minimum Wallet Checklist
 
 - `vara-wallet --version` is v0.20.3 or newer.
-- `VARA_ETH_NETWORK` is `hoodi` or explicitly configured `mainnet`.
+- `VARA_ETH_NETWORK` is `mainnet`.
 - `vara-eth:wallet show "$VARA_WALLET_ACCOUNT"` returns the expected EVM
   address.
 - The passphrase check succeeds with output redirected to `/dev/null`.

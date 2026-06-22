@@ -4,7 +4,7 @@
 //   node src/modules/gameMaster/factory/index.js                 # fast dry-run demo
 //   node src/modules/gameMaster/factory/index.js --duration 0    # dry-run forever
 //   node src/modules/gameMaster/factory/index.js --real-timers   # real timers
-//   node src/modules/gameMaster/factory/index.js --chain         # live testnet
+//   node src/modules/gameMaster/factory/index.js --chain         # live mainnet
 //
 // Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in backend/.env.
 // The factory state machine is identical in both modes — only the driver differs.
@@ -27,6 +27,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..'); // backend/src/modules/gameMaster/factory → repo root
 const backendConfig = loadBackendConfig();
 const documentStore = createDocumentStore(backendConfig);
+const documentPrefix =
+  backendConfig.storeBackend === 'postgres' &&
+  backendConfig.databaseDocumentId &&
+  backendConfig.databaseDocumentId !== 'main'
+    ? `${backendConfig.databaseDocumentId}:`
+    : '';
 
 // Durable factory state: live worlds keep the same programId/session across
 // operator restarts; retired worlds survive for the lobby's PAST tab.
@@ -59,7 +65,7 @@ async function writeJson(file, payload) {
 }
 
 function documentIdFor(file) {
-  return `factory:${path.basename(file, '.json')}`;
+  return `${documentPrefix}factory:${path.basename(file, '.json')}`;
 }
 
 async function loadPast() {
@@ -172,11 +178,11 @@ const reservedProgramIds = initialLive.map((world) => world.programId).filter(Bo
 
 if (useChain) {
   // Live: the contract owns cap=10 auto-start; we own provisioning, the pool,
-  // the ≥1-open invariant, and the >=8 manual/idle start.
+  // the open-world invariant, and the operator start policy.
   config = loadConfig({ lobbyMode: true });
   chainEnv = loadChainEnv();
   const { createChainDriver } = await import('./drivers/chainDriver.js');
-  driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore });
+  driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore, documentPrefix });
 } else {
   config = loadConfig(
     realTimers
@@ -185,6 +191,7 @@ if (useChain) {
           // compressed demo timers so a full lobby→run→recycle cycle shows in seconds
           lobbyTimeoutMs: Number(process.env.FACTORY_LOBBY_TIMEOUT_MS) || 4000,
           sessionMs: Number(process.env.SESSION_MS) || 8000,
+          sessionAutofinish: true,
           tickMs: 400,
           poolSize: process.env.FACTORY_POOL_MAX != null
             ? Number(process.env.FACTORY_POOL_MAX)

@@ -13,18 +13,6 @@
 const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
 const NETWORKS = {
-  hoodi: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-    explorer: 'https://hoodi.etherscan.io',
-  },
-  testnet: {
-    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
-    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
-    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
-    explorer: 'https://hoodi.etherscan.io',
-  },
   mainnet: {
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://validator-1-eth.vara.network',
@@ -41,10 +29,10 @@ function num(name, fallback) {
 }
 
 function networkConfig(name) {
-  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.testnet;
+  return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.mainnet;
 }
 
-const network = env.VITE_CHAIN_NETWORK || 'testnet';
+const network = env.VITE_CHAIN_NETWORK || 'mainnet';
 const defaults = networkConfig(network);
 
 export const CHAIN = {

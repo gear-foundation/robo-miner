@@ -16,7 +16,7 @@ const DEFAULTS = {
   targetAgents: Number(process.env.GAMEMASTER_TARGET_AGENTS || 10),
   contractSurface: Number(process.env.CONTRACT_SURFACE_Y || 1),
   deployMode: process.env.GAMEMASTER_DEPLOY_MODE || 'dry-run',
-  network: process.env.CHAIN_NETWORK || 'hoodi',
+  network: process.env.CHAIN_NETWORK || 'mainnet',
   router: process.env.ROUTER_ADDRESS || '',
   programId: process.env.WORLD_PROGRAM_ID || '',
   topUp: process.env.DIGGER_TOP_UP || '100000000000000',

@@ -51,12 +51,13 @@ export function syncWorldCounter(worlds = []) {
 
 // Should this open lobby start now? Two automatic triggers, plus the manual path:
 //   • cap reached      → auto-start immediately.
-//   • >= min and idle  → either auto-start (if configured) or become eligible for
-//                        a manual start (operator decides).
+//   • >= min           → auto-start immediately when FACTORY_AUTOSTART_AT_MIN=true.
+//   • >= min and idle  → legacy timeout/manual path when min auto-start is disabled.
 export function decideStart(world, cfg, now) {
   const n = world.agents;
   if (n >= cfg.lobbyCap) return { start: true, reason: 'cap' };
   if (n >= cfg.lobbyMin) {
+    if (cfg.autoStartAtMin) return { start: true, reason: 'min' };
     const idle = now - (world.lastJoinAt ?? world.openedAt ?? now);
     if (idle >= cfg.lobbyTimeoutMs) {
       return cfg.autoStartOnTimeout
@@ -87,5 +88,6 @@ export function worldView(world, cfg) {
     archivedAt: world.archivedAt ?? null,
     archiveId: world.archiveId ?? null,
     archiveUrl: world.archiveUrl ?? null,
+    sessionAutofinish: Boolean(cfg.sessionAutofinish),
   };
 }

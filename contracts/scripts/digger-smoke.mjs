@@ -23,9 +23,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 
 const DEFAULTS = {
-  ETHEREUM_RPC: "wss://hoodi-reth-rpc.gear-tech.io/ws",
-  VARA_ETH_RPC: "wss://vara-eth-validator-1.gear-tech.io",
-  ROUTER_ADDRESS: "0xE549b0AfEdA978271FF7E712232B9F7f39A0b060",
+  ETHEREUM_RPC: "https://mainnet-reth-rpc.gear-tech.io",
+  VARA_ETH_RPC: "wss://validator-1-eth.vara.network",
+  ROUTER_ADDRESS: "0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6",
   DIGGER_SEED: "42",
   DIGGER_TOP_UP: "100000000000000",
   DIGGER_MAX_DEPTH: "10",
@@ -599,10 +599,10 @@ let activeProvider = null;
 async function main() {
   loadDotEnv(path.join(ROOT, ".env"));
 
-  const privateKey = requiredEnv("PRIVATE_KEY", ["TESTNET_PRIVATE_KEY"]);
-  const ethRpc = envAny(["ETHEREUM_RPC", "TESTNET_ETHEREUM_RPC"]);
-  const varaRpc = envAny(["VARA_ETH_RPC", "TESTNET_VARA_ETH_RPC"]);
-  const routerAddress = envAny(["ROUTER_ADDRESS", "TESTNET_ROUTER_ADDRESS"]);
+  const privateKey = requiredEnv("PRIVATE_KEY", []);
+  const ethRpc = envAny(["ETHEREUM_RPC"]);
+  const varaRpc = envAny(["VARA_ETH_RPC"]);
+  const routerAddress = envAny(["ROUTER_ADDRESS"]);
   const seed = BigInt(env("DIGGER_SEED"));
   const topUp = BigInt(env("DIGGER_TOP_UP"));
   const eventTimeoutMs = Number(env("DIGGER_EVENT_TIMEOUT_MS"));

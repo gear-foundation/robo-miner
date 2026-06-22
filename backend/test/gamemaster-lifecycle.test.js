@@ -4,7 +4,7 @@ import test from 'node:test';
 import { normalizeDb } from '../src/db/jsonStore.js';
 import { GameMasterLifecycleService, planWorldLifecycle } from '../src/modules/gameMaster/lifecycle.js';
 
-const PROGRAM_ID = '0xdb0069475ed6d5fc3d9547e467de059a7cafc3ae';
+const PROGRAM_ID = '0xb0860e1262e3677a65e24f821c8b6e4e5f5cd04b';
 
 const CONFIG = {
   adminKey: '0xadmin',
@@ -12,7 +12,9 @@ const CONFIG = {
   factoryLobbyMin: 8,
   factoryLobbyCap: 10,
   factoryLobbyTimeoutMs: 5 * 60 * 1000,
+  factoryAutoStartAtMin: false,
   factoryAutoStartOnTimeout: false,
+  factorySessionAutofinish: true,
   factoryRecycle: true,
   factoryRecycleGraceMs: 5000,
   contractSurface: 1,
@@ -68,6 +70,48 @@ test('expired active session is finished by the game master admin', async () => 
   assert.equal(db.worlds[0].status, 'finished');
   assert.equal(db.worlds[0].session.status, 2);
   assert.equal(db.worlds[0].finishedAt, '2026-06-16T10:31:00.000Z');
+});
+
+test('active session keeps running when backend auto-finish is disabled', () => {
+  const now = new Date('2026-06-16T10:31:00.000Z');
+  const world = {
+    id: 'world-1',
+    programId: PROGRAM_ID,
+    status: 'active',
+    sessionMs: CONFIG.sessionMs,
+    session: { id: '4', status: 1 },
+    chain: { startedAt: '2026-06-16T10:00:00.000Z' },
+    startsAt: '2026-06-16T10:00:00.000Z',
+    endsAt: '2026-06-16T10:30:00.000Z',
+  };
+
+  const plan = planWorldLifecycle(world, {
+    config: { ...CONFIG, factorySessionAutofinish: false },
+    now,
+  });
+
+  assert.equal(plan.actions.length, 0);
+  assert.equal(plan.patch.endsAt, null);
+});
+
+test('waiting session starts immediately when minimum auto-start is enabled', () => {
+  const now = new Date('2026-06-16T10:00:00.000Z');
+  const world = {
+    id: 'world-1',
+    programId: PROGRAM_ID,
+    status: 'waiting_agents',
+    session: { id: '4', status: 0 },
+    agents: 3,
+    minAgents: 3,
+    startsAt: '2026-06-16T09:59:00.000Z',
+  };
+
+  const plan = planWorldLifecycle(world, {
+    config: { ...CONFIG, factoryAutoStartAtMin: true, factoryLobbyMin: 3 },
+    now,
+  });
+
+  assert.deepEqual(plan.actions, [{ type: 'start', reason: 'lobby_min' }]);
 });
 
 test('finished session is recycled with a fresh uploaded map after the grace period', async () => {

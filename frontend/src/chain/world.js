@@ -22,7 +22,7 @@ export const DIR_TO_NAME = ['up', 'right', 'down', 'left'];
 export const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
 
 // ── Render tile bytes ────────────────────────────────────────────────────────
-// The live DiggerWorld testnet contract currently returns its own compact tile
+// The live DiggerWorld contract currently returns its own compact tile
 // ids (see chain/source.js CONTRACT_TO_RENDER_TILE). The renderer consumes the
 // frontend BLOCK ids below, so every chain snapshot is translated at the edge.
 export { BLOCK as TILE } from '../config.js';

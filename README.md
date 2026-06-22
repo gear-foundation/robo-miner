@@ -119,7 +119,7 @@ npm run api
 npm run factory
 ```
 
-Live Hoodi world factory:
+Live mainnet world factory:
 
 ```bash
 cd backend
@@ -127,7 +127,7 @@ npm run factory:chain
 ```
 
 `factory:chain` requires a funded `DIGGER_ADMIN_KEY`, DiggerWorld code id, and
-the Hoodi RPC/router env values in `backend/.env`.
+the mainnet RPC/router env values in `backend/.env`.
 
 Useful local checks:
 
@@ -173,7 +173,7 @@ The backend indexer reads release IDLs directly through
 `backend/src/modules/indexer/idlRegistry.js`. The backend factory also carries
 its own DiggerWorld IDL snapshot at `backend/src/chain/diggerWorld.idl`.
 
-## Live Testnet Configuration
+## Live Mainnet Configuration
 
 Frontend:
 
@@ -187,8 +187,8 @@ Set:
 ```txt
 VITE_CHAIN_ENABLED=true
 VITE_BACKEND_URL=https://api-digger-eth.vara.network
-VITE_RES_VMT_PROGRAM_ID=...
-VITE_REDEEM_PROGRAM_ID=...
+VITE_RES_VMT_PROGRAM_ID=
+VITE_REDEEM_PROGRAM_ID=
 VITE_MATCHES_URL=
 VITE_WORLD_PROGRAM_IDS=  # optional fallback only; lobby reads /sessions
 ```
@@ -197,6 +197,9 @@ The frontend lobby reads current and past worlds from the operator discovery API
 (`/sessions`). `VITE_MATCHES_URL` can override the discovery host; when it is
 empty, `VITE_BACKEND_URL` is used. Live world movement is read directly from
 Vara.eth, not from backend event streams.
+
+Leave `VITE_WORLD_PROGRAM_ID` and `VITE_WORLD_PROGRAM_IDS` empty in production
+when the backend/Postgres registry is seeded. They are only emergency fallbacks.
 
 Backend:
 
@@ -255,7 +258,7 @@ The MVP leaderboard uses this source order:
 See `backend/README.md` for API endpoints, rental, social verifier, indexer,
 and smoke check details.
 
-For the Hoodi deployment runbook with current program ids, code id, env files,
+For the mainnet deployment runbook with current program ids, code id, env files,
 factory commands, and smoke steps, see `DEPLOYMENT.md`.
 
 ## Campaign Economy

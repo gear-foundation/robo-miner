@@ -87,7 +87,7 @@ tooling issue before chain writes.
 Choose the Vara.eth network:
 
 ```bash
-export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-hoodi}" # hoodi or mainnet
+export VARA_ETH_NETWORK="${VARA_ETH_NETWORK:-mainnet}"
 export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.vara.network}"
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 export ROBO_MINER_SKILL_ROOT="${ROBO_MINER_SKILL_ROOT:-skill-pack}"
@@ -102,15 +102,14 @@ usually correct. When the skill was installed into an agent runtime, set
 `ROBO_MINER_SKILL_ROOT` to the installed skill folder's absolute path before
 calling `vara-wallet --idl`.
 
-Hoodi uses the public backend above. Mainnet is selectable, but until mainnet
-Robo Miner endpoints are published, provide explicit values:
+Use the production mainnet backend and endpoints:
 
 ```bash
 export VARA_ETH_NETWORK=mainnet
-export ROBO_MINER_BACKEND_URL=<mainnet-backend-url>
-export ROBO_MINER_ETH_RPC=<mainnet-ethereum-rpc>
-export ROBO_MINER_VARA_RPC=<mainnet-vara-eth-validator-rpc>
-export ROBO_MINER_ROUTER=<mainnet-router-address>
+export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.vara.network}"
+export ROBO_MINER_ETH_RPC="${ROBO_MINER_ETH_RPC:-https://mainnet-reth-rpc.gear-tech.io}"
+export ROBO_MINER_VARA_RPC="${ROBO_MINER_VARA_RPC:-wss://validator-1-eth.vara.network}"
+export ROBO_MINER_ROUTER="${ROBO_MINER_ROUTER:-0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6}"
 ```
 
 If `PASSPHRASE` is not already available, ask the user for it and keep it only
@@ -175,15 +174,10 @@ resVmtProgramId = manifest economy/resource config value if present
 redeemProgramId = manifest economy/resource config value if present
 ```
 
-If `/api/manifest` does not include economy ids, use the env-template fallback
-ids below, then verify them with read-only contract calls before settlement:
+If `/api/manifest` does not include economy ids, settlement is not configured
+yet. Do not use stale addresses from another network.
 
-```text
-resVmtProgramId = 0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240
-redeemProgramId = 0x9c5b14f959efa66d5015dd111912fc851232b787
-```
-
-Verification before using fallback economy ids:
+Verification before using economy ids:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \

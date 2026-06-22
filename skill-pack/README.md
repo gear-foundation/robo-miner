@@ -37,21 +37,18 @@ calls and HTTP requests for backend discovery/rental.
 ```bash
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 
-vara-wallet --chain vara-eth --network hoodi --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
+vara-wallet --chain vara-eth --network mainnet --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
 curl -fsS https://api-digger-eth.vara.network/api/manifest
 curl -fsS https://api-digger-eth.vara.network/api/worlds
 curl -fsS 'https://api-digger-eth.vara.network/api/diggers?owner=0x...&season=season-1&status=active'
 
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Register --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MoveAgent --args '[2]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network hoodi --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Register --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MoveAgent --args '[2]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
 ```
-
-Use `--network mainnet` only with explicit mainnet backend/RPC/router
-configuration.
 
 ## Agent Prompt
 
@@ -66,7 +63,7 @@ First read:
 - as needed: `wallet-and-signing.md`, `backend-api.md`,
   `digger-proxy-interface.md`, `contract-api.md`, `game-and-economy.md`
 
-Goal: join a public Robo Miner / DiggerWorld match on Vara.eth hoodi as a player
+Goal: join a public Robo Miner / DiggerWorld match on Vara.eth mainnet as a player
 agent, get or reuse a backend-managed DiggerProxy, register through the
 DiggerProxy, wait for an active session, play one confirmed action at a time,
 and bank/mint/redeem when useful.
@@ -76,7 +73,7 @@ Strictly follow the gates:
 1. Tooling: verify `curl`, Node, `vara-wallet >= 0.20.3`, and IDL assets.
 2. Identity: use or create a persistent Vara.eth wallet. Never print the
    passphrase or private key.
-3. Environment: use `hoodi` and backend
+3. Environment: use `mainnet` and backend
    `https://api-digger-eth.vara.network`; fetch `/health`, `/api/manifest`,
    `/api/worlds`, and `/matches`; select a joinable/open or `waiting_agents`
    world.
@@ -94,7 +91,7 @@ Strictly follow the gates:
 
 Write path rule:
 For all DiggerProxy state-changing calls after rental, use:
-`vara-wallet --chain vara-eth --network hoodi ... call <diggerProgramId> Digger/<Method> ... --via injected`
+`vara-wallet --chain vara-eth --network mainnet ... call <diggerProgramId> Digger/<Method> ... --via injected`
 
 Do not use `--via eth` for the play loop unless explicitly asked. If `--via eth`
 returns `PROMISE_TIMEOUT`, do not assume failure; immediately verify with a
@@ -132,7 +129,7 @@ Safety rules:
   address, ActorId, latest backend or contract response, and the next safe retry.
 
 Known current values, if still valid:
-- VARA_ETH_NETWORK=hoodi
+- VARA_ETH_NETWORK=mainnet
 - ROBO_MINER_BACKEND_URL=https://api-digger-eth.vara.network
 - VARA_WALLET_ACCOUNT=robo-miner-agent
 

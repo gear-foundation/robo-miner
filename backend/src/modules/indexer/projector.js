@@ -215,11 +215,11 @@ function applyWorldEvent(db, event, config) {
   const seasonId = world?.seasonId || config.diggerRentalSeason;
 
   if (event.service === 'Admin') {
-    applyWorldAdminEvent(db, event, world);
+    applyWorldAdminEvent(db, event, world, config);
     return;
   }
   if (event.event === 'SessionStarted') {
-    applyWorldSessionEvent(world, event, sessionId, 'active');
+    applyWorldSessionEvent(world, event, sessionId, 'active', config);
     return;
   }
 
@@ -296,12 +296,12 @@ function applyWorldEvent(db, event, config) {
   digger.updatedAt = event.timestamp;
 }
 
-function applyWorldSessionEvent(world, event, sessionId, status) {
+function applyWorldSessionEvent(world, event, sessionId, status, config) {
   if (!world) return;
   world.session = { ...(world.session || {}), id: sessionId };
   world.sessionId = sessionId;
   world.status = status;
-  applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status });
+  applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status });
   world.updatedAt = event.timestamp;
 }
 
@@ -316,7 +316,7 @@ function applyWorldRegistration(world, ownerActor, sessionId, timestamp) {
   world.updatedAt = timestamp;
 }
 
-function applyWorldAdminEvent(_db, event, world) {
+function applyWorldAdminEvent(_db, event, world, config) {
   if (!world) return;
   switch (event.event) {
     case 'MapGenerated':
@@ -325,15 +325,15 @@ function applyWorldAdminEvent(_db, event, world) {
       world.seed = String(event.args[1] ?? world.seed ?? '');
       world.agents = 0;
       world.owners = [];
-      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'waiting_agents' });
+      applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'waiting_agents' });
       break;
     case 'SessionStarted':
       world.status = 'active';
-      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'active' });
+      applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'active' });
       break;
     case 'SessionFinished':
       world.status = 'finished';
-      applyWorldSessionTiming(world, { config: {}, timestamp: event.timestamp, status: 'finished' });
+      applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'finished' });
       break;
     default:
       break;

@@ -157,9 +157,9 @@ curl -fsS "$ROBO_MINER_BACKEND_URL/matches"
 
 Use `/api/manifest` and `/api/worlds` as the primary discovery responses.
 Use `/matches` when it exposes clearer season/session status. Pick a world from
-`active[]` or the equivalent live/waiting list, preferably one with manifest
-status `waiting_agents`. The `worldId` is the world `programId`, not a human
-label.
+`active[]` or the equivalent live list whose manifest status is
+`waiting_agents` or `active` and whose `joinable/canRegister` flag is true. The
+`worldId` is the world `programId`, not a human label.
 
 Do not execute `/matches.register.steps`; they are legacy/non-authoritative for
 this skill. Register only through the rented DiggerProxy.
@@ -363,12 +363,12 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 Registration is successful when `World.AgentOf(agentActorId).result[0]` is
 present and is not `0`.
 
-If registration fails because the world is active, finished, full, or no longer
+If registration fails because the world is finished, full, or no longer
 joinable:
 
 1. Return to Gate 3 and fetch fresh worlds.
 2. Select a different `active[].programId` whose manifest status is
-   `waiting_agents`.
+   `waiting_agents` or `active` and whose `joinable/canRegister` flag is true.
 3. Query the candidate before switching:
 
 ```bash

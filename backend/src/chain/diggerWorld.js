@@ -298,7 +298,11 @@ export async function connectDiggerWorldChain(env) {
       config: () => world.queries.Config.encodePayload(),
       agentOf: (owner) => world.queries.AgentOf.encodePayload(owner),
       inventoryOf: (owner) => world.queries.InventoryOf.encodePayload(owner),
+      ownerOf: (proxy) => world.queries.OwnerOf.encodePayload(proxy),
       mapSnapshot: () => world.queries.MapSnapshot.encodePayload(),
+      mintResources: () => world.functions.MintResources.encodePayload(),
+      tradeResourcesForLadders: (scrst, bcrst, hcrst) =>
+        world.functions.TradeResourcesForLadders.encodePayload(scrst, bcrst, hcrst),
     },
     decode: {
       agents: (payload) => world.queries.Agents.decodeResult(payload),
@@ -306,6 +310,7 @@ export async function connectDiggerWorldChain(env) {
       config: (payload) => world.queries.Config.decodeResult(payload),
       agentOf: (payload) => world.queries.AgentOf.decodeResult(payload),
       inventoryOf: (payload) => world.queries.InventoryOf.decodeResult(payload),
+      ownerOf: (payload) => world.queries.OwnerOf.decodeResult(payload),
       mapSnapshot: (payload) => world.queries.MapSnapshot.decodeResult(payload),
       // The reply of register/move/drill is the agent_view [status,x,y,…] — the
       // per-action result straight from the injected-tx receipt (no snapshot).

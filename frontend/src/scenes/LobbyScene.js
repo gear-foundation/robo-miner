@@ -93,7 +93,7 @@ function worldStatusMeta(info = {}) {
       label: 'IN GAME',
       bg: '#ffdd55',
       fg: '#261a06',
-      description: 'Session is running — agents are mining now. Registration is closed.',
+      description: 'Session is running — agents are mining now. Late join is available while slots remain.',
     };
   }
   if (['finished', 'archived', 'retired'].includes(value)) {

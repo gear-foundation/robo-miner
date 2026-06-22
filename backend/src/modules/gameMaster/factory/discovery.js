@@ -3,24 +3,25 @@
 // always fresh from memory). Works identically in dry-run and battle mode, so the
 // agent integration is the same whether we're testing or live.
 //
-//   GET /matches  → registration-open, joinable matches + how-to-register block
+//   GET /matches  → joinable registration/in-game matches + how-to-register block
 //   GET /sessions → every live/archive session (CURRENT + PAST)
 //   GET /health   → liveness + counts
 //
 // An agent: poll /matches → pick one with slotsFree > 0 → send an injected
-// World.Register(owner) while status=open → wait for active → play.
+// World.Register(owner) while status=open/active → wait for active → play.
 
 import http from 'node:http';
 
 const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
+const JOINABLE_STATUSES = new Set(['open', 'active']);
 
 export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
   const sessionRecord = (w) => {
     const status = publicStatus(w.status);
     const agents = w.agents ?? 0;
     const maxAgents = w.capAgents ?? 0;
-    const canRegister = status === 'open' && agents < maxAgents;
+    const canRegister = JOINABLE_STATUSES.has(status) && agents < maxAgents;
     return {
       id: w.id,
       sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
@@ -56,10 +57,9 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     gasless: true, // the match's executable balance pays — your EOA needs no funds
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true (registration is open or in-game late join is available, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
       'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
-      'Do not register into active sessions: the current contract accepts Register only during registration',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

@@ -53,7 +53,7 @@ test('world registry manifest becomes agent match discovery feed', () => {
   assert.equal(discovery.updatedAt, '2026-06-15T00:00:00.000Z');
   assert.equal(discovery.register.network, 'mainnet');
   assert.equal(discovery.sessions.length, 3);
-  assert.equal(discovery.matches.length, 1);
+  assert.equal(discovery.matches.length, 2);
   assert.deepEqual(discovery.matches[0], {
     id: 'w001',
     sessionKey: 'w001-s3',
@@ -79,10 +79,16 @@ test('world registry manifest becomes agent match discovery feed', () => {
     archiveId: null,
     archiveUrl: null,
   });
+  assert.equal(discovery.matches[1].id, 'w002');
+  assert.equal(discovery.matches[1].status, 'active');
+  assert.equal(discovery.matches[1].joinable, true);
+  assert.equal(discovery.matches[1].canRegister, true);
+  assert.equal(discovery.matches[1].canPlay, true);
+  assert.equal(discovery.matches[1].slotsFree, 2);
   assert.equal(discovery.sessions[1].status, 'active');
   assert.equal(discovery.sessions[1].phase, 'active');
-  assert.equal(discovery.sessions[1].joinable, false);
-  assert.equal(discovery.sessions[1].canRegister, false);
+  assert.equal(discovery.sessions[1].joinable, true);
+  assert.equal(discovery.sessions[1].canRegister, true);
   assert.equal(discovery.sessions[1].canPlay, true);
   assert.equal(discovery.sessions[2].status, 'archived');
   assert.equal(discovery.sessions[2].joinable, false);

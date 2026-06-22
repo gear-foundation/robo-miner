@@ -2,6 +2,7 @@ const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-
 
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
 const OPEN_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'open']);
+const JOINABLE_STATUSES = new Set(['open', 'active']);
 
 export function discoveryFromManifest(manifest, config, now = () => new Date()) {
   const worlds = Array.isArray(manifest?.worlds) ? manifest.worlds : [];
@@ -21,7 +22,7 @@ export function sessionRecord(world, config) {
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
   const agents = numberOr(world.agents, 0);
   const status = discoveryStatus(world.status);
-  const canRegister = status === 'open' && agents < maxAgents;
+  const canRegister = JOINABLE_STATUSES.has(status) && agents < maxAgents;
   const sessionId = world.sessionId ?? world.session ?? null;
   return {
     id: world.id,
@@ -59,10 +60,9 @@ export function registerInfo(config) {
     gasless: true,
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (registration is open, slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true (registration is open or in-game late join is available, slotsFree > 0)',
       'Send an injected World.Register(owner) to that match.programId',
       'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
-      'Do not register into active sessions: the current contract accepts Register only during registration',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
     ],
     actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },

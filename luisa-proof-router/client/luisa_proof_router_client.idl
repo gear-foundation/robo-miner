@@ -1,0 +1,51 @@
+
+!@sails: 1.0.0-beta.2
+
+service ProofPack@0xf121aadba6a98650 {
+    events {
+        Paused([u8; 32]),
+        ReceiptSubmitted(u128, [u8; 32], [u8; 32], [u8; 32], String, String, String),
+        Unpaused([u8; 32]),
+    }
+    functions {
+        @query
+        GetReceipt(id: u128) -> Option<ProofReceipt>;
+        @query
+        IsPaused() -> bool;
+        @query
+        Owner() -> ActorId;
+        Pause() throws String;
+        @query
+        ReceiptCount() -> u128;
+        @query
+        ReceiptsForSubject(subject_app: ActorId) -> [u128];
+        @query
+        ReceiptsForTarget(target_app: ActorId) -> [u128];
+        @query
+        RecentReceipts(limit: u32) -> [ProofReceipt];
+        SubmitReceipt(subject_app: ActorId, target_app: ActorId, proof_kind: String, proof_tx_hash: String, evidence_hash: String, external_ref: String, summary: String) -> ProofReceipt throws String;
+        Unpause() throws String;
+    }
+    types {
+        struct ProofReceipt {
+            id: u128,
+            submitter: ActorId,
+            subject_app: ActorId,
+            target_app: ActorId,
+            proof_kind: String,
+            proof_tx_hash: String,
+            evidence_hash: String,
+            external_ref: String,
+            summary: String,
+        }
+    }
+}
+
+program LuisaProofRouterClient {
+    constructors {
+        Create();
+    }
+    services {
+        ProofPack@0xf121aadba6a98650,
+    }
+}

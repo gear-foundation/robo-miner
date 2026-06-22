@@ -55,11 +55,6 @@ export default class LandingScene extends Phaser.Scene {
               <button class="pixel-btn primary" data-action="game" type="button">Start Game</button>
             </div>
           </div>
-          <div class="hero-metrics" aria-label="Campaign facts">
-            ${metricCell('Reserve', `${formatNumber(RESERVE_VARA)} VARA`)}
-            ${metricCell('Rates', '66 / 330 / 1650')}
-            ${metricCell('Session', '8-10 agents')}
-          </div>
         </section>
 
         <section id="flow" class="section-band flow-band">
@@ -248,10 +243,6 @@ export default class LandingScene extends Phaser.Scene {
   }
 }
 
-function metricCell(label, value) {
-  return `<div><span>${label}</span><b>${value}</b></div>`;
-}
-
 function flowStep(number, title, text) {
   return `
     <article class="flow-step">
@@ -356,7 +347,7 @@ function injectLandingStyles() {
     .pixel-btn.primary{background:var(--mint);color:var(--mintText)}
     .pixel-btn:hover{transform:translate(-1px,-1px);filter:brightness(1.06)}
     .pixel-btn:active{transform:translate(2px,2px);box-shadow:2px 2px 0 rgba(0,0,0,.55)}
-    .landing-hero{position:relative;min-height:100vh;display:grid;place-items:center;overflow:hidden;padding:96px 24px 32vh;background:#080b10}
+    .landing-hero{position:relative;min-height:100vh;display:grid;place-items:center;overflow:hidden;padding:96px 24px 20vh;background:#080b10}
     .hero-bg{position:absolute;inset:0;background-image:url('${HERO_BG}');background-size:cover;background-position:center bottom;image-rendering:auto;transform:scale(1.01);filter:brightness(1.18) saturate(1.04)}
     .hero-shade{position:absolute;inset:0;background:
       radial-gradient(circle at 50% 38%,rgba(5,8,13,.12) 0,rgba(5,8,13,.34) 36%,rgba(5,8,13,.68) 74%),
@@ -370,11 +361,7 @@ function injectLandingStyles() {
     p{margin:0}
     .tagline{max-width:760px;margin:22px auto 0;color:#f3fbff;font-size:clamp(18px,2.2vw,24px);line-height:1.42;text-shadow:3px 3px 0 #000,0 0 16px rgba(0,0,0,.6)}
     .hero-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;margin:30px auto 0}
-    .hero-metrics{position:absolute;left:50%;bottom:26px;z-index:3;width:min(1040px,calc(100% - 32px));transform:translateX(-50%);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-    .hero-metrics div,.flow-step,.tech-row{background:rgba(14,22,30,.9);border:3px solid #000;box-shadow:4px 4px 0 rgba(0,0,0,.45)}
-    .hero-metrics div{padding:14px 16px;min-height:76px}
-    .hero-metrics span{display:block;color:var(--muted);font-size:12px;text-transform:uppercase;font-weight:900}
-    .hero-metrics b{display:block;margin-top:6px;color:var(--mint);font-size:18px;line-height:1.15}
+    .flow-step,.tech-row{background:rgba(14,22,30,.9);border:3px solid #000;box-shadow:4px 4px 0 rgba(0,0,0,.45)}
     .section-band{position:relative;padding:82px 24px;max-width:1180px;margin:0 auto}
     .section-heading{text-align:center;max-width:820px;margin:0 auto 26px}
     .section-copy p,.section-heading p{color:var(--body);line-height:1.62;font-size:16px}
@@ -466,9 +453,8 @@ function injectLandingStyles() {
     }
     @media (max-width:820px){
       .landing-topbar{height:60px;padding:10px 14px}.landing-nav{display:none}.brand-mark{font-size:18px}
-      .landing-hero{width:100vw;padding:86px 16px 250px;place-items:start center}.hero-bg{background-position:42% bottom}.hero-content{width:calc(100vw - 32px);max-width:calc(100vw - 32px);margin-top:5vh;overflow:hidden}
+      .landing-hero{width:100vw;padding:86px 16px 160px;place-items:start center}.hero-bg{background-position:42% bottom}.hero-content{width:calc(100vw - 32px);max-width:calc(100vw - 32px);margin-top:5vh;overflow:hidden}
       h1{font-size:clamp(52px,17vw,68px)}.tagline{width:min(100%,270px);max-width:100%;font-size:15px;line-height:1.45;overflow-wrap:break-word}
-      .hero-metrics{grid-template-columns:1fr;bottom:18px}.hero-metrics div{min-height:auto;padding:12px}
       .section-band{padding:62px 16px}.hero-actions{width:calc(100vw - 32px);max-width:calc(100vw - 32px);margin-left:auto;margin-right:auto}.pixel-btn{width:100%;max-width:250px}
       .faq-item summary{font-size:16px}
     }

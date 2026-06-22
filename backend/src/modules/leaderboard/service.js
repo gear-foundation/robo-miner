@@ -1,3 +1,5 @@
+import { generateAgentName } from '../agentNames.js';
+
 const DEFAULT_RATES = { scrst: 66, bcrst: 330, hcrst: 1650 };
 const METRICS = new Set(['live', 'banked', 'minted']);
 
@@ -28,6 +30,7 @@ export class LeaderboardService {
     return [...rowsByOwner.values()]
       .map((row) => ({
         ...row,
+        agentName: row.agentName || generateAgentName(row.diggerProgramId || row.ownerActor),
         score: scoreResources(row[selectedMetric], this.rates),
         metric: selectedMetric,
       }))
@@ -57,6 +60,7 @@ function emptyRow(stats) {
   return {
     ownerActor: stats.ownerActor,
     diggerProgramId: stats.diggerProgramId || null,
+    agentName: stats.agentName || generateAgentName(stats.diggerProgramId || stats.ownerActor),
     seasonId: stats.seasonId,
     worldsPlayed: 0,
     sessionsPlayed: 0,

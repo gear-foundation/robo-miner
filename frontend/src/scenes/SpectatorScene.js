@@ -7,6 +7,8 @@ import { createWorldSource } from '../chain/source.js';
 import { CHAIN, discoveryBaseUrl } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
 import { drawRobot as drawSharedRobot } from '../render/robot.js';
+import { generateAgentName } from '../agentNames.js';
+import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
 import { navigateBack } from '../router.js';
 
@@ -186,6 +188,8 @@ export default class SpectatorScene extends GameScene {
     this.backTo = data?.backTo || 'Lobby';
     this.worldMeta = null;
     this.worldMetaPollMs = 0;
+    this.agentNameMap = new Map();
+    this.agentNamePollMs = 0;
   }
 
   create() {
@@ -217,6 +221,7 @@ export default class SpectatorScene extends GameScene {
       miners: this.bots.map((b) => ({ name: b.name, hat: b.hat, color: b.color, items: b.items || undefined, radar: b.radar, maxLadders: b.maxLadders })),
     });
     this.rt.setAgents(this.bots.map((b) => b.decide));
+    this.refreshAgentNames();
     this._tornDown = false;
     this.sourceReady = false;
     this.sourceError = null;
@@ -715,6 +720,11 @@ export default class SpectatorScene extends GameScene {
       this.worldMetaPollMs = 0;
       this.refreshWorldMeta();
     }
+    this.agentNamePollMs += dt;
+    if (this.agentNamePollMs >= 10000) {
+      this.agentNamePollMs = 0;
+      this.refreshAgentNames();
+    }
 
     this.statsTimer += dt;
     if (this.statsTimer >= 200) {
@@ -1093,6 +1103,7 @@ export default class SpectatorScene extends GameScene {
     };
     const cargo = carried.scrst + carried.bcrst + carried.hcrst;
     const address = displayAddress(agent.owner);
+    const agentName = this.agentDisplayName(agent);
     const wallet = detail?.walletOwner ? displayAddress(detail.walletOwner) : '';
     const walletRow = wallet && wallet.toLowerCase() !== address.toLowerCase()
       ? `<div style="opacity:.72;overflow:hidden;text-overflow:ellipsis">${miniIcon('owner')} ${escapeHtml(shortAddress(wallet))}</div>`
@@ -1128,8 +1139,9 @@ export default class SpectatorScene extends GameScene {
       `${crystal('#c06bff', 'purple crystal', resources.hcrst)}`;
     return `
       <div style="line-height:1.2">
-        <span>I am </span><a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
-          title="${escapeHtml(address)}" style="color:#0b57d0;text-decoration:none;font-weight:bold">${escapeHtml(shortAddress(agent.owner))}</a>
+        <b>${escapeHtml(agentName)}</b>
+        <a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
+          title="${escapeHtml(address)}" style="display:block;margin-top:2px;color:#0b57d0;text-decoration:none;font-size:12px">${escapeHtml(shortAddress(agent.owner))}</a>
       </div>
       <div style="margin-top:6px;font-size:12px;line-height:1.45;color:#333">
         <div><b>${miniIcon('status', status.color)}${escapeHtml(status.label)}</b> · ${miniIcon('pos')}${x},${y}</div>
@@ -1380,7 +1392,7 @@ export default class SpectatorScene extends GameScene {
     if (this.consoleOpen) this.renderConsole();
   }
 
-  // Turn an engine event into a console line {hash,t,name,msg,color}; null = skip.
+  // Turn an engine event into a console line {hash,t,name,address,msg,color}; null = skip.
   pushEvent(e) {
     const line = this.formatEvent(e);
     if (!line) return;
@@ -1396,9 +1408,11 @@ export default class SpectatorScene extends GameScene {
     const miner = e.owner
       ? this.rt.s.miners.find((m) => m.owner && m.owner.toLowerCase() === e.owner.toLowerCase())
       : e.id != null ? this.rt.s.miners.find((m) => m.id === e.id) : null;
-    const name = e.owner || miner?.owner
-      ? shortAddress(e.owner || miner.owner)
+    const owner = e.owner || miner?.owner || '';
+    const name = owner
+      ? this.agentDisplayName({ ...miner, owner })
       : (miner?.name || (e.id != null ? `agent-${e.id}` : 'world')).slice(0, 12);
+    const address = owner ? shortAddress(owner) : '';
     const t = (this.rt.timeMs / 1000).toFixed(1);
     const surface = this.world?.surface ?? SURFACE_Y;
     const depth = e.y != null ? Math.max(0, e.y - (surface - 1)) : null;
@@ -1444,7 +1458,7 @@ export default class SpectatorScene extends GameScene {
       case 'chain_error': msg = `CHAIN ${e.message || 'ERROR'}`; color = '#ff6a6a'; break;
       default: return null;
     }
-    return { t, name, msg, color };
+    return { t, name, address, msg, color };
   }
 
   renderConsole() {
@@ -1457,7 +1471,8 @@ export default class SpectatorScene extends GameScene {
       `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">` +
       `<span style="color:#3a6a4a">${l.hash}</span> ` +
       `<span style="color:#566">${l.t}s</span> ` +
-      `<span style="color:#9bb0a4">${l.name}</span> ` +
+      `<span style="color:#cdd3da">${escapeHtml(l.name)}</span>` +
+      `${l.address ? ` <span style="color:#586a61">${escapeHtml(l.address)}</span>` : ''} ` +
       `<span style="color:${l.color}">${l.msg}</span></div>`,
     ).join('');
     body.scrollTop = keepTop ? 0 : previousScroll;
@@ -1519,6 +1534,31 @@ export default class SpectatorScene extends GameScene {
     } catch {
       // HUD can still render from chain/local source if discovery is unavailable.
     }
+  }
+
+  async refreshAgentNames() {
+    if (!backendEnabled() || !this.specProgramId || this.isArchiveReplay) return;
+    try {
+      const agents = await fetchAgentStats({ world: this.specProgramId });
+      const names = new Map();
+      for (const agent of agents) {
+        if (!agent?.agentName) continue;
+        if (agent.ownerActor) names.set(String(agent.ownerActor).toLowerCase(), agent.agentName);
+        if (agent.diggerProgramId) names.set(String(agent.diggerProgramId).toLowerCase(), agent.agentName);
+      }
+      this.agentNameMap = names;
+      if (this.agentBubbleMiner && this.agentBubbleContentEl) {
+        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, null);
+      }
+      if (this.consoleOpen) this.renderConsole();
+    } catch {
+      // Names are decorative; keep live spectator resilient if backend stats lag.
+    }
+  }
+
+  agentDisplayName(agent) {
+    const owner = String(agent?.owner || '').toLowerCase();
+    return this.agentNameMap?.get(owner) || agent?.agentName || agent?.name || generateAgentName(owner || agent?.id || '');
   }
 
   async fetchDiscoverySessions(base) {

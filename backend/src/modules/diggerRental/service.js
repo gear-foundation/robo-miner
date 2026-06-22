@@ -1,3 +1,5 @@
+import { generateAgentName } from '../agentNames.js';
+
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/i;
 const LIVE_WORLD_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
 
@@ -29,6 +31,7 @@ export class DiggerRentalService {
         const digger = {
           id: programId,
           programId,
+          agentName: existing.agentName || generateAgentName(programId),
           owner: null,
           seasonId: this.config.diggerRentalSeason,
           status: 'active',
@@ -74,6 +77,7 @@ export class DiggerRentalService {
         status: 'existing',
         requestId: existing.requestId || null,
         programId: existing.programId,
+        agentName: existing.agentName || generateAgentName(existing.programId),
         owner: existing.owner,
         worldId: existing.worldId,
         seasonId: existing.seasonId,
@@ -158,6 +162,7 @@ export class DiggerRentalService {
         id: request.programId,
         requestId: request.id,
         programId: request.programId,
+        agentName: generateAgentName(request.programId),
         owner: normalizedOwner,
         seasonId: resolvedSeasonId,
         worldId: normalizedWorldId,
@@ -201,6 +206,7 @@ export class DiggerRentalService {
       status: request.status,
       requestId: request.id,
       programId: request.programId,
+      agentName: generateAgentName(request.programId),
       owner: normalizedOwner,
       worldId: normalizedWorldId,
       seasonId: resolvedSeasonId,
@@ -238,6 +244,7 @@ export class DiggerRentalService {
         status: 'existing',
         requestId: existing.requestId || null,
         programId: existing.programId,
+        agentName: existing.agentName || generateAgentName(existing.programId),
         owner: existing.owner,
         worldId: existing.worldId,
         seasonId: existing.seasonId,
@@ -256,6 +263,7 @@ export class DiggerRentalService {
         status: pending.status,
         requestId: pending.id,
         programId: pending.programId || null,
+        agentName: pending.programId ? generateAgentName(pending.programId) : null,
         owner: normalizedOwner,
         worldId: normalizedWorldId,
         seasonId: resolvedSeasonId,
@@ -300,6 +308,7 @@ export class DiggerRentalService {
       status: request.status,
       requestId: request.id,
       programId: null,
+      agentName: null,
       owner: normalizedOwner,
       worldId: normalizedWorldId,
       seasonId: resolvedSeasonId,
@@ -352,6 +361,7 @@ export class DiggerRentalService {
           id: programId,
           requestId,
           programId,
+          agentName: generateAgentName(programId),
           owner: request.owner,
           seasonId: request.seasonId,
           worldId: request.worldId,
@@ -398,6 +408,7 @@ export class DiggerRentalService {
         status: 'confirmed',
         requestId,
         programId,
+        agentName: generateAgentName(programId),
       };
     } catch (error) {
       const failedAt = this.now().toISOString();

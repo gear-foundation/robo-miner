@@ -44,6 +44,13 @@ export async function fetchLeaderboard(params = {}) {
   return data?.leaderboard || [];
 }
 
+export async function fetchAgentStats(params = {}) {
+  const search = new URLSearchParams(params);
+  const query = search.toString();
+  const data = await backendGet(`/api/stats/agents${query ? `?${query}` : ''}`);
+  return data?.agents || [];
+}
+
 export async function fetchDiggers({ owner = null, worldId = null, seasonId = null, status = null } = {}) {
   const search = new URLSearchParams();
   if (owner) search.set('owner', owner);

@@ -26,13 +26,13 @@ export default class LeaderboardScene extends Phaser.Scene {
   buildDOM() {
     const root = document.createElement('div');
     root.id = 'leaderboard-page';
-    root.style.cssText = `position:fixed;inset:0;z-index:20;overflow:auto;
+    root.style.cssText = `position:fixed;inset:0;z-index:20;overflow:hidden;display:flex;flex-direction:column;
       background:radial-gradient(circle at 50% -10%, #4a3420, #1c1109 70%);
-      font-family:'Courier New',monospace;color:#fff;padding:30px 20px 60px;box-sizing:border-box`;
+      font-family:'Courier New',monospace;color:#fff;padding:24px 28px 24px;box-sizing:border-box`;
 
     const header = document.createElement('div');
-    header.style.cssText = 'text-align:center;margin-bottom:24px';
-    header.innerHTML = `<div style="font-size:40px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">LEADERBOARD</div>`;
+    header.style.cssText = 'text-align:center;margin-bottom:14px;flex:0 0 auto';
+    header.innerHTML = `<div style="font-size:36px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000;line-height:1">LEADERBOARD</div>`;
     root.appendChild(header);
 
     const back = wireBtn(document.createElement('button'));
@@ -43,8 +43,8 @@ export default class LeaderboardScene extends Phaser.Scene {
 
     this.leaderboardPanel = createLeaderboardPanel({
       id: 'leaderboard-page-panel',
-      style: 'max-width:980px;margin:0 auto;max-height:none',
-      pageSize: 10,
+      style: 'width:min(1320px,calc(100vw - 96px));margin:0 auto;max-height:calc(100vh - 112px);flex:1 1 auto',
+      pageSize: 8,
     });
     root.appendChild(this.leaderboardPanel.element);
 

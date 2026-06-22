@@ -1,3 +1,5 @@
+import { generateAgentName, withAgentName } from '../agentNames.js';
+
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/i;
 
 export class DiggerRegistryService {
@@ -32,6 +34,7 @@ export class DiggerRegistryService {
       const next = {
         id: existing?.id || normalizedProgramId,
         programId: normalizedProgramId,
+        agentName: existing?.agentName || generateAgentName(normalizedProgramId),
         owner: normalizedOwner ?? existing?.owner ?? null,
         seasonId: resolvedSeasonId || existing?.seasonId || this.config.diggerRentalSeason,
         worldId: normalizedWorldId ?? existing?.worldId ?? null,
@@ -68,7 +71,8 @@ export class DiggerRegistryService {
       .filter((digger) => !normalizedWorldId || normalizeNullableAddress(digger.worldId) === normalizedWorldId)
       .filter((digger) => !normalizedOwner || normalizeNullableAddress(digger.owner) === normalizedOwner)
       .filter((digger) => !status || digger.status === status)
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+      .map(withAgentName);
   }
 }
 

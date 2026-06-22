@@ -6,6 +6,7 @@ import { loadConfig } from '../config/index.js';
 import { createStore } from '../db/store.js';
 import { EventBus } from './eventBus.js';
 import { streamEvents, wantsEventStream } from './eventStream.js';
+import { withAgentName } from '../modules/agentNames.js';
 import { AdminService } from '../modules/admin/service.js';
 import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
@@ -162,7 +163,8 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, {
         agents: db.agentStats
           .filter((item) => !url.searchParams.get('season') || item.seasonId === url.searchParams.get('season'))
-          .filter((item) => !url.searchParams.get('world') || item.worldId === url.searchParams.get('world')),
+          .filter((item) => !url.searchParams.get('world') || item.worldId === url.searchParams.get('world'))
+          .map(withAgentName),
       });
     }
     if (req.method === 'GET' && url.pathname === '/api/stats/economy') {

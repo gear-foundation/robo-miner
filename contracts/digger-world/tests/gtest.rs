@@ -6,6 +6,7 @@ use sails_rs::{client::*, gtest::*, prelude::*};
 
 const ADMIN_ID: u64 = 42;
 const PLAYER_ID: u64 = 99;
+const LATE_PLAYER_ID: u64 = 100;
 const PARTICIPANT_IDS: [u64; 1] = [PLAYER_ID];
 const TEST_ACCOUNT_BALANCE: u128 = 100_000_000_000_000_000;
 const TEST_SEED: u64 = 777;
@@ -132,6 +133,70 @@ async fn drilling_chest_emits_event_and_applies_outcome() {
 }
 
 #[tokio::test]
+async fn active_session_still_accepts_late_registration() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-late-registration").await;
+
+    let uploaded: sails_rs::Result<Vec<u128>, sails_rs::String> = world
+        .admin()
+        .upload_map(
+            TEST_SEED,
+            map_with_spawn_resource(digger_world_app::TILE_RESOURCE_BCRST),
+        )
+        .await
+        .unwrap();
+    assert_eq!(uploaded, Ok(vec![1, TEST_SEED as u128, 0, 0]));
+
+    let mut world_service = world.world();
+    let first_registered: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .register(PLAYER_ID.into())
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert!(first_registered.is_ok());
+
+    let started: sails_rs::Result<Vec<u128>, sails_rs::String> =
+        world.admin().start_session().await.unwrap();
+    assert_eq!(
+        started,
+        Ok(vec![
+            1,
+            TEST_SEED as u128,
+            digger_world_app::SESSION_ACTIVE as u128,
+            0
+        ])
+    );
+
+    let late_registered: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .register(LATE_PLAYER_ID.into())
+        .with_actor_id(LATE_PLAYER_ID.into())
+        .await
+        .unwrap();
+    let late_agent = late_registered.expect("active session should accept late registration");
+    assert_eq!(late_agent[0], digger_world_app::AGENT_ACTIVE as u128);
+    assert_eq!(late_agent[2], 0);
+
+    let session: sails_rs::Result<Vec<u128>, sails_rs::String> =
+        world.world().session().await.unwrap();
+    assert_eq!(
+        session,
+        Ok(vec![
+            1,
+            TEST_SEED as u128,
+            digger_world_app::SESSION_ACTIVE as u128,
+            0
+        ])
+    );
+
+    let agents: sails_rs::Result<Vec<ActorId>, sails_rs::String> =
+        world.world().agents().await.unwrap();
+    let agents = agents.expect("agents query should succeed");
+    assert_eq!(agents.len(), 2);
+    assert!(agents.contains(&ActorId::from(PLAYER_ID)));
+    assert!(agents.contains(&ActorId::from(LATE_PLAYER_ID)));
+}
+
+#[tokio::test]
 async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
     let (env, code_id) = create_env();
     let world = deploy_world_program(&env, code_id, "world-resource-trade").await;
@@ -228,6 +293,7 @@ fn create_env() -> (GtestEnv, CodeId) {
     for id in PARTICIPANT_IDS {
         system.mint_to(id, TEST_ACCOUNT_BALANCE);
     }
+    system.mint_to(LATE_PLAYER_ID, TEST_ACCOUNT_BALANCE);
 
     let code_id = system.submit_code(::digger_world::WASM_BINARY);
     let env = GtestEnv::new(system, ADMIN_ID.into());

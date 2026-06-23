@@ -156,7 +156,7 @@ pub(crate) fn ensure_move_allowed(
         return Err("target tile is not traversable".into());
     }
     if direction == DIR_UP {
-        let climbs_to_ladder = target_tile == TILE_LADDER;
+        let climbs_to_ladder = current_tile == TILE_LADDER && target_tile == TILE_LADDER;
         let exits_to_surface = current_tile == TILE_LADDER && target_tile == TILE_SURFACE;
         if !climbs_to_ladder && !exits_to_surface {
             return Err("upward movement requires a ladder".into());
@@ -559,8 +559,12 @@ mod tests {
             ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_EMPTY),
             Err("upward movement requires a ladder".into())
         );
-        assert!(ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_LADDER).is_ok());
+        assert_eq!(
+            ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_LADDER),
+            Err("upward movement requires a ladder".into())
+        );
         assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_SURFACE).is_ok());
+        assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_LADDER).is_ok());
     }
 
     #[test]

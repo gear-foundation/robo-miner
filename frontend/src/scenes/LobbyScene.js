@@ -23,6 +23,7 @@ function isPastStatus(status) {
 function normalizeWorldRecord(world) {
   const maxAgents = world.maxAgents ?? world.targetAgents ?? world.capAgents ?? world.cap;
   const minAgents = world.minAgents ?? world.min ?? world.admission?.minAgents;
+  const past = isPastStatus(world.status) || isPastStatus(world.phase);
   return {
     id: world.id,
     programId: world.programId,
@@ -34,8 +35,8 @@ function normalizeWorldRecord(world) {
     agents: world.agents,
     minAgents,
     maxAgents,
-    archiveId: world.archiveId,
-    archiveUrl: world.archiveUrl,
+    archiveId: past ? world.archiveId : null,
+    archiveUrl: past ? world.archiveUrl : null,
     seed: world.seed,
     sessionId: world.sessionId ?? world.session,
     endsAt: world.endsAt,
@@ -383,7 +384,7 @@ export default class LobbyScene extends Phaser.Scene {
     watch.textContent = '▶  WATCH';
     watch.style.cssText = btnCss('#5fd0e6') + 'margin-top:8px;width:100%;font-size:16px;padding:10px';
     watch.onclick = () => {
-      if (info.archiveId) this.watchArchive(info);
+      if (isPastStatus(info.status) && info.archiveId) this.watchArchive(info);
       else this.watchChain(programId);
     };
     body.appendChild(watch);

@@ -62,8 +62,6 @@ Run dry mode:
 
 ```bash
 cd backend
-npm run gamemaster -- create --count 3
-npm run gamemaster -- list
 npm run factory
 ```
 
@@ -82,15 +80,14 @@ npm run sim:play -- <worldProgramId> 10
 
 ## World Registry
 
-`gameMaster` remains the writer for generated worlds and local map artifacts.
-`worldRegistry` syncs those records into the shared backend DB so API, indexer,
-rental, and leaderboard modules can use one canonical projection.
+The factory is the writer for generated worlds and live map metadata.
+`worldRegistry` exposes those records from the shared backend DB so API,
+indexer, rental, and leaderboard modules use one canonical projection.
 
 ```bash
 cd backend
-npm run gamemaster -- create --count 3
-npm run registry:sync
 npm run api
+npm run factory:chain
 ```
 
 Discovery endpoints:
@@ -348,8 +345,8 @@ state document.
 
 When `BACKEND_STORE=postgres`, the live factory persists its pool/live/past
 documents in Postgres and also publishes world records directly into the shared
-Postgres-backed registry. It still writes compatibility JSON files locally, but
-API, scheduler, and factory containers do not need a shared filesystem for
+Postgres-backed registry. API, scheduler, and factory containers do not need a
+shared filesystem for
 `backend.json`, `gamemaster.json`, `factory-live.json`, `factory-past.json`, or
 `factory-programs.json`.
 

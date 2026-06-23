@@ -1,7 +1,6 @@
-// Registry publisher — writes the factory's worlds into gamemaster.json, the file
-// the colleague's World Registry ingests via syncFromGameMaster(). Record shape +
-// status vocabulary match backend/src/modules/worldRegistry (normalizeWorld) and
-// the existing gamemaster.js, so their showcase serves our worlds unchanged.
+// Registry publisher — writes factory worlds into the World Registry. In
+// production this goes directly to Postgres; local JSON mode still writes the
+// legacy gamemaster.json file for dry-run/debug flows.
 
 import { mkdir, writeFile, rename } from 'node:fs/promises';
 import path from 'node:path';
@@ -66,6 +65,10 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       const ts = new Date(now()).toISOString();
       if (!createdAt) createdAt = ts;
       const records = worlds.map((world) => toRecord(world, ts));
+      if (worldRegistry) {
+        await worldRegistry.syncWorldRecords(records, { source: 'factory', mode: deployMode });
+        return;
+      }
       const payload = {
         schemaVersion: 1,
         createdAt,
@@ -76,7 +79,6 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       const tmp = `${file}.${process.pid}.tmp`;
       await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
       await rename(tmp, file);
-      await worldRegistry?.syncWorldRecords(records, { source: 'factory', mode: deployMode });
     },
   };
 }

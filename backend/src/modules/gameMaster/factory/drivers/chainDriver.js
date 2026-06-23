@@ -11,9 +11,9 @@
 //   recycle    → Admin.UploadMap again (clears agents, bumps session, → CREATED)
 //   pollAgents → World.Agents() length
 //
-// Code is validated ONCE → its code id + the program ids we deploy are persisted
-// to <GAMEMASTER_STATE_DIR>/factory-programs.json, so restarts reuse the pool
-// for the selected code id. Set DIGGER_CODE_ID to skip the code-state check.
+// Code is validated ONCE → its code id + deployed program ids are persisted to
+// Postgres in production, or to <GAMEMASTER_STATE_DIR>/factory-programs.json in
+// local JSON mode. Restarts reuse the pool for the selected code id.
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -66,7 +66,10 @@ export async function createChainDriver({
     }
   }
   async function savePool() {
-    await documentStore?.write(poolDocumentId, pool);
+    if (documentStore) {
+      await documentStore.write(poolDocumentId, pool);
+      return;
+    }
     await mkdir(path.dirname(poolFile), { recursive: true });
     await writeFile(poolFile, `${JSON.stringify(pool, null, 2)}\n`);
   }

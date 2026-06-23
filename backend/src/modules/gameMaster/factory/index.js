@@ -35,7 +35,9 @@ const documentPrefix =
     : '';
 
 // Durable factory state: live worlds keep the same programId/session across
-// operator restarts; retired worlds survive for the lobby's PAST tab.
+// operator restarts; retired worlds survive for the lobby's PAST tab. With
+// BACKEND_STORE=postgres this is stored in backend_documents; JSON files are
+// only the local fallback when no document store is configured.
 function stateFilePath(name) {
   const stateDir = process.env.GAMEMASTER_STATE_DIR || 'state';
   const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
@@ -57,7 +59,10 @@ async function readJson(file, fallback = null) {
 }
 
 async function writeJson(file, payload) {
-  await documentStore?.write(documentIdFor(file), payload);
+  if (documentStore) {
+    await documentStore.write(documentIdFor(file), payload);
+    return;
+  }
   await mkdir(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`);
@@ -215,7 +220,11 @@ const archives = createArchiveStore({
   stateDir: process.env.GAMEMASTER_STATE_DIR || 'state',
   cfg: config,
 });
-console.log(`[factory] publishing worlds → ${publisher.file} (World Registry reads this)`);
+console.log(
+  backendConfig.storeBackend === 'postgres'
+    ? '[factory] publishing worlds → Postgres World Registry'
+    : `[factory] publishing worlds → ${publisher.file} (JSON registry)`,
+);
 
 const initialPast = useChain ? await loadPast() : [];
 if (initialLive.length) console.log(`[factory] restored ${initialLive.length} live world(s) → CURRENT tab`);

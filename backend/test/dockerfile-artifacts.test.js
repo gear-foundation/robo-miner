@@ -25,7 +25,9 @@ test('backend Docker image dispatches component roles through entrypoint', async
   assert.match(dockerfile, /backend\/docker-entrypoint\.sh\s+\/app\/backend\/docker-entrypoint\.sh/);
   assert.match(dockerfile, /CMD \["\.\/docker-entrypoint\.sh"\]/);
   assert.doesNotMatch(dockerfile, /CMD \["node", "src\/api\/server\.js"\]/);
+  assert.match(entrypoint, /api\)\s+exec node src\/api\/server\.js/s);
   assert.match(entrypoint, /indexer\)\s+exec node src\/jobs\/indexer\.js watch/s);
   assert.match(entrypoint, /scheduler\)\s+exec node src\/jobs\/scheduler\.js/s);
   assert.match(entrypoint, /factory\)\s+exec node src\/modules\/gameMaster\/factory\/index\.js --chain/s);
+  assert.doesNotMatch(entrypoint, /operator\.js|gamemaster\.js/);
 });

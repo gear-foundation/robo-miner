@@ -555,7 +555,7 @@ export class ChainSource {
       case 'registered':
         break;
       case 'spawned':
-        this._placeMiner(miner, event.x, event.y, { alive: true });
+        this._placeMiner(miner, event.x, event.y, { alive: true, status: AGENT_STATUS.ACTIVE });
         miner.spawnX = event.x;
         miner.spawnY = this.world?.surface ?? event.y;
         break;
@@ -634,6 +634,7 @@ export class ChainSource {
       case 'exited':
         if (miner) {
           miner.alive = false;
+          miner.status = AGENT_STATUS.EXITED;
           miner.exited = true;
           miner.act = null;
           miner.actQueue = [];
@@ -754,6 +755,7 @@ export class ChainSource {
     miner.act = null;
     miner.actQueue = [];
     if ('alive' in opts) miner.alive = opts.alive;
+    if ('status' in opts) miner.status = opts.status;
     if (opts.alive) {
       miner.exited = false;
       miner.respawnAtMs = null;
@@ -832,6 +834,7 @@ export class ChainSource {
       miner.drawX = fromX;
       miner.drawY = fromY;
       miner.alive = true;
+      miner.status = AGENT_STATUS.ACTIVE;
       miner.exited = false;
       miner.respawnAtMs = null;
       miner.act = { ...act, kind: 'move', fromX, fromY, tx: toX, ty: toY, t: 0, dur: CHAIN_PLAYBACK.moveMs };
@@ -928,13 +931,14 @@ export class ChainSource {
       miner.banked = amount;
       miner.bankedResources = banked;
       miner.cargo = 0;
+      miner.status = AGENT_STATUS.SURFACED;
       miner.stats.sold = amount;
       this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
       this._emitVisualEvent(event);
       return;
     }
     if (act.kind === 'death') {
-      this._placeMiner(miner, event.x, event.y, { alive: false });
+      this._placeMiner(miner, event.x, event.y, { alive: false, status: AGENT_STATUS.DEAD });
       miner.stats.deaths += 1;
       miner.respawnAtMs = this.timeMs + 1400;
       this._emitVisualEvent(event);

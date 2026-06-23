@@ -154,10 +154,61 @@ function addressScanUrl(address) {
 }
 
 const BANK_RESOURCE_LABELS = {
-  scrst: { label: 'SCRST', color: '#8fe9ff' },
-  bcrst: { label: 'BCRST', color: '#9bffbf' },
-  hcrst: { label: 'HCRST', color: '#ff8fdc' },
+  scrst: { label: 'SCRST', color: '#8fe9ff', out: '#123a52', body: '#36bde6', mid: '#66dfff', hi: '#cff8ff' },
+  bcrst: { label: 'BCRST', color: '#9bffbf', out: '#103a25', body: '#39c96f', mid: '#6effa0', hi: '#d2ffe2' },
+  hcrst: { label: 'HCRST', color: '#ff8fdc', out: '#4a0d35', body: '#e85cc0', mid: '#ff8fdc', hi: '#ffc6ef' },
 };
+
+function resourceTotal(resources) {
+  return Number(resources?.scrst || 0) + Number(resources?.bcrst || 0) + Number(resources?.hcrst || 0);
+}
+
+function agentBubbleIcon(kind, color = '#333') {
+  const style = 'display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:-4px;flex:0 0 18px';
+  if (kind === 'status') {
+    return `<span style="${style}"><span style="width:9px;height:9px;border:1px solid #17313a;border-radius:50%;background:${color};display:block"></span></span>`;
+  }
+  if (kind === 'pos') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M9 2v14M2 9h14" stroke="#5b4127" stroke-width="2" stroke-linecap="square"/><rect x="7" y="7" width="4" height="4" fill="#d59a48" stroke="#3b2a18"/></svg></span>`;
+  }
+  if (kind === 'ladder') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M5 2v14M13 2v14" stroke="#7a471b" stroke-width="2"/><path d="M5 5h8M5 9h8M5 13h8" stroke="#d59a48" stroke-width="2"/></svg></span>`;
+  }
+  if (kind === 'bag') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M6 6V5c0-2 6-2 6 0v1" fill="none" stroke="#3b2a18" stroke-width="1.8" stroke-linecap="round"/><path d="M3.5 6.5h11l-1 9h-9z" fill="#b9823a" stroke="#3b2a18" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 8h8M6 12h5" stroke="#e7bd70" stroke-width="1.4"/></svg></span>`;
+  }
+  if (kind === 'bank') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 8h12v7H3z" fill="#d6d9dd" stroke="#3a3a3a" stroke-width="1.4"/><path d="M2 8l7-5 7 5z" fill="#f0f2f4" stroke="#3a3a3a" stroke-width="1.4" stroke-linejoin="round"/><path d="M5 8v7M9 8v7M13 8v7" stroke="#8a8f96" stroke-width="1.3"/><path d="M2 15h14" stroke="#3a3a3a" stroke-width="1.6"/></svg></span>`;
+  }
+  if (kind === 'owner') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><circle cx="9" cy="6" r="3.2" fill="#ddd" stroke="#444" stroke-width="1.3"/><path d="M4 15c.7-3 9.3-3 10 0z" fill="#ddd" stroke="#444" stroke-width="1.3"/></svg></span>`;
+  }
+  return '';
+}
+
+function crystalIcon(kind) {
+  const c = BANK_RESOURCE_LABELS[kind] || BANK_RESOURCE_LABELS.scrst;
+  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="display:block;filter:drop-shadow(1px 1px 0 rgba(0,0,0,.22))">
+    <path d="M12 2 21 11 12 22 3 11Z" fill="${c.out}" stroke="${c.out}" stroke-width="1.2" stroke-linejoin="round"/>
+    <path d="M12 4.6 18.2 11 12 19.4 5.8 11Z" fill="${c.body}" stroke="${c.out}" stroke-width=".8" stroke-linejoin="round"/>
+    <path d="M12 4.6 18.2 11 12 11Z" fill="${c.mid}"/>
+    <path d="M12 11 18.2 11 12 19.4Z" fill="${c.body}"/>
+    <path d="M5.8 11 12 11 12 19.4Z" fill="${c.mid}"/>
+    <path d="M9.5 10.5 12 6.7 14.5 10.5Z" fill="${c.hi}" opacity=".98"/>
+    <path d="M12 7.6v6.9M8.8 11h6.4" stroke="#fff" stroke-width="1.5" stroke-linecap="square" opacity=".92"/>
+  </svg>`;
+}
+
+function crystalCount(kind, value) {
+  const c = BANK_RESOURCE_LABELS[kind] || BANK_RESOURCE_LABELS.scrst;
+  return `<span title="${c.label}" style="display:inline-flex;align-items:center;gap:4px;min-width:42px;color:#222">
+    ${crystalIcon(kind)}<b>${Number(value || 0)}</b>
+  </span>`;
+}
+
+function crystalCounts(resources) {
+  return `${crystalCount('scrst', resources.scrst)}${crystalCount('bcrst', resources.bcrst)}${crystalCount('hcrst', resources.hcrst)}`;
+}
 
 function squadCounts(n) {
   const kinds = ['shuttle', 'prospector', 'deepdiver', 'shuttle', 'prospector'];
@@ -1039,7 +1090,7 @@ export default class SpectatorScene extends GameScene {
     const cam = this.cameras.main;
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
     return this.rt.s.miners.find((m) => {
-      if (!m.alive || !m.owner) return false;
+      if (!m.owner || m.exited) return false;
       const cx = m.drawX * TILE + TILE / 2;
       const cy = m.drawY * TILE + TILE / 2;
       return Math.abs(worldPoint.x - cx) <= TILE * 0.62 &&
@@ -1057,11 +1108,10 @@ export default class SpectatorScene extends GameScene {
 
   sayAgentBubble(agent, ms = 2200) {
     if (!this.agentBubbleEl || !agent) return;
-    const address = displayAddress(agent.owner);
     if (this.agentBubbleContentEl) {
       this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(agent, null);
     }
-    this.agentBubbleEl.title = address;
+    this.agentBubbleEl.removeAttribute('title');
     this.agentBubbleEl.style.display = 'block';
     this.agentBubbleMiner = agent;
     this.positionAgentBubble();
@@ -1090,7 +1140,8 @@ export default class SpectatorScene extends GameScene {
   agentBubbleHtml(agent, detail = null) {
     const state = Array.isArray(detail?.state) ? detail.state : [];
     const inv = Array.isArray(detail?.inventory) ? detail.inventory : agent.inventory || [];
-    const statusCode = Number(state[0] ?? agent.status ?? 1);
+    const fallbackStatus = agent.status ?? (!agent.alive ? (agent.exited ? 4 : 3) : 1);
+    const statusCode = Number(state[0] ?? fallbackStatus);
     const status = agentStatusMeta(statusCode);
     const x = Number(state[1] ?? agent.tx ?? 0);
     const y = Number(state[2] ?? agent.ty ?? 0);
@@ -1101,53 +1152,45 @@ export default class SpectatorScene extends GameScene {
       bcrst: Number(inv[1] ?? state[6] ?? 0),
       hcrst: Number(inv[2] ?? state[7] ?? 0),
     };
-    const cargo = carried.scrst + carried.bcrst + carried.hcrst;
+    const banked = {
+      scrst: Number(inv[3] ?? state[8] ?? agent.bankedResources?.scrst ?? 0),
+      bcrst: Number(inv[4] ?? state[9] ?? agent.bankedResources?.bcrst ?? 0),
+      hcrst: Number(inv[5] ?? state[10] ?? agent.bankedResources?.hcrst ?? 0),
+    };
+    const cargo = resourceTotal(carried);
+    const bankedTotal = resourceTotal(banked);
     const address = displayAddress(agent.owner);
     const agentName = this.agentDisplayName(agent);
-    const wallet = detail?.walletOwner ? displayAddress(detail.walletOwner) : '';
-    const walletRow = wallet && wallet.toLowerCase() !== address.toLowerCase()
-      ? `<div style="opacity:.72;overflow:hidden;text-overflow:ellipsis">${miniIcon('owner')} ${escapeHtml(shortAddress(wallet))}</div>`
-      : '';
-    function miniIcon(kind, color = '#333') {
-      const base = 'display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;vertical-align:-2px;margin-right:3px;position:relative;box-sizing:border-box';
-      if (kind === 'status') {
-        return `<span style="${base}"><span style="width:9px;height:9px;border:1px solid #17313a;border-radius:50%;background:${color};display:block"></span></span>`;
-      }
-      if (kind === 'pos') {
-        return `<span style="${base}"><span style="position:absolute;left:7px;top:2px;width:2px;height:10px;background:#5b4127"></span><span style="position:absolute;left:3px;top:6px;width:10px;height:2px;background:#5b4127"></span></span>`;
-      }
-      if (kind === 'ladder') {
-        return `<span style="${base}"><span style="position:absolute;left:4px;top:1px;width:2px;height:12px;background:#9a6229"></span><span style="position:absolute;right:4px;top:1px;width:2px;height:12px;background:#9a6229"></span><span style="position:absolute;left:4px;top:3px;width:8px;height:2px;background:#d59a48"></span><span style="position:absolute;left:4px;top:7px;width:8px;height:2px;background:#d59a48"></span><span style="position:absolute;left:4px;top:11px;width:8px;height:2px;background:#d59a48"></span></span>`;
-      }
-      if (kind === 'bag') {
-        return `<span style="${base}"><span style="position:absolute;left:4px;top:5px;width:9px;height:7px;border:1px solid #3b2a18;background:#b9823a"></span><span style="position:absolute;left:6px;top:2px;width:5px;height:4px;border:1px solid #3b2a18;border-bottom:0;border-radius:4px 4px 0 0"></span></span>`;
-      }
-      if (kind === 'mine') {
-        return `<span style="${base}"><span style="position:absolute;left:4px;top:3px;width:9px;height:2px;background:#4a3624;transform:rotate(-35deg)"></span><span style="position:absolute;left:8px;top:4px;width:2px;height:9px;background:#7a5731;transform:rotate(25deg)"></span></span>`;
-      }
-      if (kind === 'owner') {
-        return `<span style="${base};margin-right:2px"><span style="position:absolute;left:5px;top:1px;width:6px;height:6px;border:1px solid #444;border-radius:50%;background:#ddd"></span><span style="position:absolute;left:3px;top:8px;width:10px;height:5px;border:1px solid #444;background:#ddd"></span></span>`;
-      }
-      return '';
-    }
-    const crystal = (color, title, value) =>
-      `<span title="${title}" style="display:inline-flex;align-items:center;gap:4px;margin-right:7px">` +
-      `<span style="width:8px;height:8px;background:${color};border:1px solid #17313a;transform:rotate(45deg);display:inline-block"></span>${value}</span>`;
-    const crystalRow = (resources) =>
-      `${crystal('#47d7ff', 'blue crystal', resources.scrst)} ` +
-      `${crystal('#61e889', 'green crystal', resources.bcrst)} ` +
-      `${crystal('#c06bff', 'purple crystal', resources.hcrst)}`;
+    const hasReadableName = agentName && !/^0x/i.test(agentName);
+    const addressLink = `<a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
+      style="display:block;color:#0b57d0;text-decoration:none;${hasReadableName ? 'margin-top:2px;font-size:12px' : 'font-size:18px;font-weight:700;color:#222'}">${escapeHtml(shortAddress(agent.owner))}</a>`;
     return `
-      <div style="line-height:1.2">
-        <b>${escapeHtml(agentName)}</b>
-        <a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
-          title="${escapeHtml(address)}" style="display:block;margin-top:2px;color:#0b57d0;text-decoration:none;font-size:12px">${escapeHtml(shortAddress(agent.owner))}</a>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;line-height:1.15">
+        <div style="min-width:0">
+          ${hasReadableName ? `<b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(agentName)}</b>` : ''}
+          ${addressLink}
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#333;white-space:nowrap;padding-top:2px">
+          ${agentBubbleIcon('status', status.color)}${escapeHtml(status.label)}
+        </div>
       </div>
-      <div style="margin-top:6px;font-size:12px;line-height:1.45;color:#333">
-        <div><b>${miniIcon('status', status.color)}${escapeHtml(status.label)}</b> · ${miniIcon('pos')}${x},${y}</div>
-        <div>${miniIcon('ladder')}<b>${ladders}</b> · ${miniIcon('bag')}<b>${cargo}/${capacity}</b></div>
-        <div title="carried crystals">${miniIcon('mine')}${crystalRow(carried)}</div>
-        ${walletRow}
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px;font-size:13px;color:#333;border-top:1px solid #e8e1d8;padding-top:7px">
+        <span title="position" style="display:flex;align-items:center;gap:4px">${agentBubbleIcon('pos')}<b>${x},${y}</b></span>
+        <span style="color:#b7aa98">·</span>
+        <span title="ladders left" style="display:flex;align-items:center;gap:4px">${agentBubbleIcon('ladder')}<b>${ladders}</b></span>
+        <span style="color:#b7aa98">·</span>
+        <span title="bag" style="display:flex;align-items:center;gap:4px">${agentBubbleIcon('bag')}<b>${cargo}/${capacity}</b></span>
+      </div>
+      <div style="margin-top:7px;font-size:12px;color:#333">
+        <div title="carried crystals" style="display:grid;grid-template-columns:58px 1fr;align-items:center;gap:6px;padding:4px 0">
+          <span style="display:flex;align-items:center;gap:4px;color:#5b4127;font-weight:700">${agentBubbleIcon('bag')}bag</span>
+          <span style="display:flex;align-items:center;justify-content:space-between;gap:7px">${crystalCounts(carried)}</span>
+        </div>
+        <div title="banked crystals" style="display:grid;grid-template-columns:58px 1fr;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #eee">
+          <span style="display:flex;align-items:center;gap:4px;color:#5b4127;font-weight:700">${agentBubbleIcon('bank')}bank</span>
+          <span style="display:flex;align-items:center;justify-content:space-between;gap:7px">${crystalCounts(banked)}</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;color:#5b4127;font-size:11px;margin-top:-1px">banked total: <b style="margin-left:4px;color:#222">${bankedTotal}</b></div>
       </div>`;
   }
 
@@ -1344,10 +1387,10 @@ export default class SpectatorScene extends GameScene {
     bubble.style.cssText = `
       position: fixed; transform: translate(-50%, -100%);
       background: #fff; color: #222; font-family: 'Courier New', monospace;
-      font-size: 14px; padding: 6px 10px; border-radius: 10px;
-      border: 2px solid #222; box-shadow: 2px 2px 0 rgba(0,0,0,0.3);
+      font-size: 14px; padding: 9px 12px; border-radius: 9px;
+      border: 2px solid #222; box-shadow: 3px 3px 0 rgba(0,0,0,0.28);
       white-space: normal; pointer-events: auto; z-index: 18;
-      display: none; min-width: 210px; max-width: 280px;
+      display: none; min-width: 238px; max-width: 304px;
     `;
     bubble.innerHTML = `<div id="spec-agent-bubble-content"></div>
       <div style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);

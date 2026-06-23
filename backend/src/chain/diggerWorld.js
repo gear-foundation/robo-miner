@@ -72,6 +72,9 @@ function printableReplyPayload(payload) {
 }
 
 function assertSuccessfulReply(reply, label) {
+  if (reply?.code?.isSuccess === false) {
+    throw new Error(`${label} failed: ${reply.code.reason || 'error'}`);
+  }
   const code = reply?.replyCode || reply?.code?.toString?.();
   if (!code || SUCCESS_REPLY_CODES.has(String(code))) return;
   const message = printableReplyPayload(reply.payload);
@@ -169,16 +172,15 @@ export async function connectDiggerWorldChain(env) {
     return await tx.getProgramId();
   }
 
-  // Admin/ctor messages go through the Mirror signed by the admin EOA, so the
-  // program sees message_source == admin (ensure_admin passes).
+  // Admin/ctor messages use injected transactions signed by the admin EOA.
+  // The program sees message_source == admin (ensure_admin passes), and the
+  // program's executable balance pays for execution. Router/Mirror txs are
+  // still required for program creation and executable-balance top-ups.
   async function sendAdmin(programId, payload) {
-    const mirror = mirrorFor(programId);
-    const tx = await mirror.sendMessage(payload, 0n);
-    await tx.send();
-    const receipt = await tx.getReceipt();
-    const message = await tx.getMessage();
-    const reply = await mirror.waitForReply(message.id, receipt.blockNumber);
-    assertSuccessfulReply(reply, 'admin message');
+    const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
+    injected.setDefaultValidator();
+    const reply = await waitForInjectedReply(injected);
+    assertSuccessfulReply(reply, 'admin injected message');
     return reply;
   }
 
@@ -236,9 +238,7 @@ export async function connectDiggerWorldChain(env) {
     const injected = await api.createInjectedTransaction({ destination: programId, payload, value });
     injected.setDefaultValidator();
     const reply = await waitForInjectedReply(injected);
-    if (reply?.code && reply.code.isSuccess === false) {
-      throw new Error(`reply failed: ${reply.code.reason || 'error'}`);
-    }
+    assertSuccessfulReply(reply, 'injected message');
     return reply;
   }
 

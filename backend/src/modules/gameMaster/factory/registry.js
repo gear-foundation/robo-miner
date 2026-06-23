@@ -41,6 +41,7 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       updatedAt: ts,
       startsAt: iso(startsAt),
       endsAt: cfg.sessionAutofinish && world.startedAt ? iso(world.startedAt + cfg.sessionMs) : null,
+      sessionId: world.sessionId ?? null,
       sessionMs: cfg.sessionMs,
       sessionAutofinish: Boolean(cfg.sessionAutofinish),
       admission: {
@@ -56,6 +57,10 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       map: { hash: world.mapHash || null },
       paths: {},
       chain: { startedAt: iso(world.startedAt), finishedAt: iso(world.finishedAt) },
+      finishedAt: iso(world.finishedAt),
+      archivedAt: iso(world.archivedAt),
+      archiveId: world.archiveId || null,
+      archiveUrl: world.archiveUrl || null,
     };
   }
 

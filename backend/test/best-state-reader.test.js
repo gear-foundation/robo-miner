@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { BestStateEventReader } from '../src/modules/indexer/bestStateReader.js';
+import { decodeProgramEvent } from '../src/modules/indexer/liveReader.js';
 
 test('best-state reader decodes zero-destination program events once', () => {
   const programId = '0x000000000000000000000000000000000000dEaD';
@@ -35,4 +36,27 @@ test('best-state reader decodes zero-destination program events once', () => {
   assert.deepEqual(event.args, ['7', '0x0000000000000000000000000000000000000001', 1, 2, 1, 3]);
 
   assert.equal(reader.decodeMessage(sub, message, bestState, 0), null);
+});
+
+test('program event decoder supports sails-js builds without decodeEvent helper', () => {
+  const decoded = decodeProgramEvent({
+    services: {
+      World: {
+        events: {
+          AgentMoved: {
+            decode(payload) {
+              assert.equal(payload, '0x010203');
+              return ['7', '0xowner', 1, 2, 1, 3];
+            },
+          },
+        },
+      },
+    },
+  }, '0x010203');
+
+  assert.deepEqual(decoded, {
+    service: 'World',
+    event: 'AgentMoved',
+    data: ['7', '0xowner', 1, 2, 1, 3],
+  });
 });

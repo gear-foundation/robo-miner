@@ -23,7 +23,9 @@ import { createBalanceKeeper } from '../balanceKeeper.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../../..'); // backend/src/modules/gameMaster/factory/drivers → repo root
+const SESSION_CREATED = 0;
 const SESSION_ACTIVE = 1;
+const SESSION_FINISHED = 2;
 
 export async function createChainDriver({
   env,
@@ -55,6 +57,7 @@ export async function createChainDriver({
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
   const reservedPrograms = new Set((reservedProgramIds || []).filter(Boolean).map(String));
   const hardPoolSize = Number(env.poolSize || 0);
+  const adminReplyTimeoutMs = Number(env.timeoutMs || 180000);
 
   async function loadPool() {
     const doc = await documentStore?.read(poolDocumentId, undefined);
@@ -100,6 +103,41 @@ export async function createChainDriver({
     return { sessionId: arr[0], seed: arr[1], status: arr[2], actionSeq: arr[3] };
   }
 
+  async function waitForAdminReply(label, operation) {
+    const promise = operation();
+    promise.catch(() => {});
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`${label} reply timeout after ${adminReplyTimeoutMs}ms`)),
+          adminReplyTimeoutMs,
+        );
+      }),
+    ]);
+  }
+
+  async function waitForSession(programId, predicate, label) {
+    const deadline = Date.now() + adminReplyTimeoutMs;
+    let lastSession = null;
+    while (Date.now() <= deadline) {
+      lastSession = await readSession(programId);
+      if (predicate(lastSession)) return lastSession;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    throw new Error(`${label} state recovery failed; last session=${JSON.stringify(lastSession)}`);
+  }
+
+  async function sendAdminWithSessionRecovery(programId, label, payload, predicate) {
+    try {
+      await waitForAdminReply(label, () => chain.sendAdmin(programId, payload));
+      return await readSession(programId);
+    } catch (error) {
+      log(`[chain] ${label} reply missing; checking session state: ${error?.message || error}`);
+      return waitForSession(programId, predicate, label);
+    }
+  }
+
   async function readAgents(programId) {
     const reply = await chain.query(programId, chain.encode.agents());
     const arr = chain.decode.agents(reply.payload);
@@ -141,8 +179,13 @@ export async function createChainDriver({
       if (candidate.valid) map = candidate;
     }
     if (!map) throw new Error('could not generate a valid map after 5 attempts');
-    await chain.sendAdmin(programId, chain.encode.uploadMap(map.seed, map.map));
-    const session = await readSession(programId);
+    const expectedSeed = Number(map.seed);
+    const session = await sendAdminWithSessionRecovery(
+      programId,
+      'UploadMap',
+      chain.encode.uploadMap(map.seed, map.map),
+      (state) => Number(state.seed) === expectedSeed && Number(state.status) === SESSION_CREATED,
+    );
     return { seed: String(map.seed), mapHash: gridHash(map.map), sessionId: session.sessionId };
   }
 
@@ -203,16 +246,29 @@ export async function createChainDriver({
       // enforces its own minimum participant count.
       const session = await readSession(world.programId);
       if (session.status === SESSION_ACTIVE) return;
-      await chain.sendAdmin(world.programId, chain.encode.startSession());
+      await sendAdminWithSessionRecovery(
+        world.programId,
+        'StartSession',
+        chain.encode.startSession(),
+        (state) => Number(state.status) === SESSION_ACTIVE,
+      );
     },
     async finish(world) {
-      await chain.sendAdmin(world.programId, chain.encode.finishSession());
+      await sendAdminWithSessionRecovery(
+        world.programId,
+        'FinishSession',
+        chain.encode.finishSession(),
+        (state) => Number(state.status) === SESSION_FINISHED,
+      );
     },
     async recycle(world) {
       // UploadMap on the same program clears agents + bumps session → reuse forever.
       return uploadFreshMap(world.programId);
     },
     async retire() {},
+    async pollSession(world) {
+      return readSession(world.programId);
+    },
     async pollAgents(world) {
       return readAgents(world.programId); // real on-chain owner ActorIds
     },

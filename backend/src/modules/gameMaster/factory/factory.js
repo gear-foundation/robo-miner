@@ -8,6 +8,7 @@
 import { WORLD, newWorld, syncWorldCounter, decideStart, worldView } from './world.js';
 
 const POOL_STATUSES = [WORLD.PROVISIONING, WORLD.OPEN, WORLD.ACTIVE];
+const SESSION_FINISHED = 2;
 
 export function createFactory({
   driver,
@@ -151,6 +152,18 @@ export function createFactory({
   }
 
   async function tickActive(world) {
+    if (typeof driver.pollSession === 'function') {
+      const session = await driver.pollSession(world);
+      if (session?.sessionId != null) world.sessionId = session.sessionId;
+      if (session?.seed != null) world.seed = String(session.seed);
+      if (Number(session?.status) === SESSION_FINISHED) {
+        world.status = WORLD.FINISHED;
+        world.finishedAt = clock();
+        log(`[factory] = ${world.id} FINISHED by contract session status`);
+        await persistLive();
+        return;
+      }
+    }
     if (!cfg.sessionAutofinish || Number(cfg.sessionMs) <= 0) return;
     if (clock() - world.startedAt >= cfg.sessionMs) {
       await driver.finish(world);
@@ -200,11 +213,6 @@ export function createFactory({
   }
 
   async function tick() {
-    // Invariant: keep at least minOpenWorlds open lobbies. FACTORY_POOL_MAX
-    // optionally caps concurrent live worlds; 0 means elastic/unbounded.
-    while (countOpen() < cfg.minOpenWorlds && poolHasCapacity()) {
-      await provisionOne();
-    }
     for (const world of active()) {
       if (world.status === WORLD.OPEN) {
         driver.ensureBalance?.(world); // proactive top-up so the open world stays fundable
@@ -212,9 +220,16 @@ export function createFactory({
       } else if (world.status === WORLD.ACTIVE) {
         driver.ensureBalance?.(world); // keep the running session funded (agents pay from it)
         await tickActive(world);
-      } else if (world.status === WORLD.FINISHED) {
+      }
+      if (world.status === WORLD.FINISHED) {
         await recycleWorld(world);
       }
+    }
+    // Recycle/restore existing programs before provisioning. Otherwise a just
+    // finished world temporarily drops the open-lobby count and the factory pays
+    // to create a replacement program instead of resetting the same contract.
+    while (countOpen() < cfg.minOpenWorlds && poolHasCapacity()) {
+      await provisionOne();
     }
     // Publish the world list for the colleague's World Registry to serve (gamemaster.json).
     if (publish) {

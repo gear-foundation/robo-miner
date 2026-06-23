@@ -154,15 +154,33 @@ function uniquePrograms(programs) {
 }
 
 export function decodeProgramEvent(sails, payload) {
-  const decoded = sails.decodeEvent(payload);
-  if (decoded.kind === 'event' && decoded.entry.kind === 'event') {
-    return {
-      service: decoded.entry.service,
-      event: decoded.entry.event,
-      data: jsonSafe(decoded.data),
-    };
+  if (typeof sails?.decodeEvent === 'function') {
+    const decoded = sails.decodeEvent(payload);
+    if (decoded.kind === 'event' && decoded.entry.kind === 'event') {
+      return {
+        service: decoded.entry.service,
+        event: decoded.entry.event,
+        data: jsonSafe(decoded.data),
+      };
+    }
+    return { kind: 'unknown', reason: decoded.reason || decoded.kind };
   }
-  return { kind: 'unknown', reason: decoded.reason || decoded.kind };
+
+  for (const [serviceName, service] of Object.entries(sails?.services || {})) {
+    for (const [eventName, event] of Object.entries(service?.events || {})) {
+      try {
+        return {
+          service: serviceName,
+          event: eventName,
+          data: jsonSafe(event.decode(payload)),
+        };
+      } catch {
+        // Best-state messages also include replies/calls; only program event
+        // payloads match one of the Sails event headers.
+      }
+    }
+  }
+  return { kind: 'unknown', reason: 'no matching event decoder' };
 }
 
 function normalizeProgramConfig(program) {

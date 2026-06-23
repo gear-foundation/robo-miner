@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { normalizeDb } from '../src/db/jsonStore.js';
+import { createRegistryPublisher } from '../src/modules/gameMaster/factory/registry.js';
 import { discoveryFromManifest } from '../src/modules/worldRegistry/discovery.js';
 import { WorldRegistryService } from '../src/modules/worldRegistry/service.js';
 
@@ -125,6 +126,80 @@ test('world registry seeds configured program ids into discovery when store is e
   assert.equal(discovery.matches[0].joinable, true);
   assert.equal(discovery.matches[0].minAgents, 8);
   assert.equal(discovery.matches[0].maxAgents, 10);
+});
+
+test('factory publisher preserves session and archive metadata in registry', async () => {
+  const store = new MemoryStore();
+  const registry = new WorldRegistryService({
+    store,
+    config: {
+      ...CONFIG,
+      sessionMs: 1800000,
+      factoryLobbyMin: 1,
+      factoryLobbyCap: 10,
+      factorySessionAutofinish: false,
+    },
+    now: () => new Date('2026-06-23T13:00:00.000Z'),
+  });
+  const publisher = createRegistryPublisher({
+    cfg: {
+      lobbyMin: 1,
+      lobbyCap: 10,
+      sessionMs: 1800000,
+      sessionAutofinish: false,
+    },
+    env: {
+      adminKey: '0xadmin',
+      network: 'mainnet',
+      router: '0xrouter',
+    },
+    now: () => Date.parse('2026-06-23T13:00:00.000Z'),
+    worldRegistry: registry,
+  });
+
+  await publisher.publish([
+    {
+      id: 'w001',
+      status: 'open',
+      programId: '0x1111111111111111111111111111111111111111',
+      seed: '42',
+      mapHash: 'hash',
+      sessionId: 6,
+      agents: 0,
+      owners: [],
+      createdAt: Date.parse('2026-06-23T12:00:00.000Z'),
+      openedAt: Date.parse('2026-06-23T12:30:00.000Z'),
+    },
+    {
+      id: 'w001-s5',
+      status: 'archived',
+      programId: '0x1111111111111111111111111111111111111111',
+      seed: '41',
+      mapHash: 'old-hash',
+      sessionId: 5,
+      agents: 3,
+      owners: ['0xowner'],
+      createdAt: Date.parse('2026-06-23T11:00:00.000Z'),
+      openedAt: Date.parse('2026-06-23T11:05:00.000Z'),
+      startedAt: Date.parse('2026-06-23T11:10:00.000Z'),
+      finishedAt: Date.parse('2026-06-23T11:40:00.000Z'),
+      archivedAt: Date.parse('2026-06-23T11:41:00.000Z'),
+      archiveId: 'w001-s5',
+      archiveUrl: '/archives/w001-s5',
+    },
+  ]);
+
+  const manifest = await registry.getManifest();
+  const live = manifest.active.find((world) => world.id === 'w001');
+  const archived = manifest.past.find((world) => world.id === 'w001-s5');
+
+  assert.equal(live.sessionId, 6);
+  assert.equal(live.minAgents, 1);
+  assert.equal(live.sessionAutofinish, false);
+  assert.equal(archived.sessionId, 5);
+  assert.equal(archived.archiveId, 'w001-s5');
+  assert.equal(archived.archiveUrl, '/archives/w001-s5');
+  assert.equal(archived.archivedAt, '2026-06-23T11:41:00.000Z');
 });
 
 class MemoryStore {

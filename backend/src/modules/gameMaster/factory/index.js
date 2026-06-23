@@ -181,6 +181,7 @@ if (useChain) {
   // the open-world invariant, and the operator start policy.
   config = loadConfig({ lobbyMode: true });
   chainEnv = loadChainEnv();
+  chainEnv.poolSize = config.poolSize;
   const { createChainDriver } = await import('./drivers/chainDriver.js');
   driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore, documentPrefix });
 } else {

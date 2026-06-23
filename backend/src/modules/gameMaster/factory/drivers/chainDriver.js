@@ -54,6 +54,7 @@ export async function createChainDriver({
   let codeId = env.codeId || pool.codeId || null;
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
   const reservedPrograms = new Set((reservedProgramIds || []).filter(Boolean).map(String));
+  const hardPoolSize = Number(env.poolSize || 0);
 
   async function loadPool() {
     const doc = await documentStore?.read(poolDocumentId, undefined);
@@ -68,6 +69,10 @@ export async function createChainDriver({
     await documentStore?.write(poolDocumentId, pool);
     await mkdir(path.dirname(poolFile), { recursive: true });
     await writeFile(poolFile, `${JSON.stringify(pool, null, 2)}\n`);
+  }
+
+  function knownProgramCount() {
+    return new Set([...pool.programs, ...reservedPrograms].filter(Boolean).map(String)).size;
   }
 
   function normalizePool(value) {
@@ -167,11 +172,17 @@ export async function createChainDriver({
         reservedPrograms.add(programId);
         return { programId };
       }
+      if (hardPoolSize > 0 && knownProgramCount() >= hardPoolSize) {
+        throw new Error(
+          `program pool hard cap reached (${knownProgramCount()}/${hardPoolSize}); ` +
+          'refusing to create a new on-chain program',
+        );
+      }
       const code = await ensureCode();
       const programId = await chain.createProgram(code, BigInt(env.topUp));
       await chain.sendAdmin(programId, chain.encode.create());
       await configureWorldEconomy(programId);
-      pool.programs.push(programId);
+      if (!pool.programs.includes(programId)) pool.programs.push(programId);
       reservedPrograms.add(programId);
       reuseIdx += 1; // this program is now assigned to a world — don't reuse it for the next one
       await savePool();

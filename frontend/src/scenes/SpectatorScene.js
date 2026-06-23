@@ -1565,8 +1565,9 @@ export default class SpectatorScene extends GameScene {
     const response = await fetch(`${base}/sessions`);
     if (!response.ok) throw new Error(`discovery failed: ${response.status}`);
     const data = await response.json();
-    if (!Array.isArray(data?.sessions)) throw new Error('discovery response has no sessions');
-    return data;
+    const sessions = Array.isArray(data) ? data : data?.sessions;
+    if (!Array.isArray(sessions)) throw new Error('discovery response has no sessions');
+    return { ...data, sessions };
   }
 
   isChainWorld() {

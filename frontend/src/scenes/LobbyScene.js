@@ -21,7 +21,8 @@ function isPastStatus(status) {
 }
 
 function normalizeWorldRecord(world) {
-  const maxAgents = world.maxAgents ?? world.targetAgents ?? world.capAgents;
+  const maxAgents = world.maxAgents ?? world.targetAgents ?? world.capAgents ?? world.cap;
+  const minAgents = world.minAgents ?? world.min ?? world.admission?.minAgents;
   return {
     id: world.id,
     programId: world.programId,
@@ -31,6 +32,7 @@ function normalizeWorldRecord(world) {
     canRegister: world.canRegister,
     canPlay: world.canPlay,
     agents: world.agents,
+    minAgents,
     maxAgents,
     archiveId: world.archiveId,
     archiveUrl: world.archiveUrl,
@@ -248,7 +250,8 @@ export default class LobbyScene extends Phaser.Scene {
   async fetchDiscoveryWorlds(base) {
     try {
       const sessions = await this.fetchJson(`${base}/sessions`);
-      const worlds = (sessions?.sessions || [])
+      const sessionWorlds = Array.isArray(sessions) ? sessions : (sessions?.sessions || []);
+      const worlds = sessionWorlds
         .filter((world) => world.programId)
         .map(normalizeWorldRecord);
       return {

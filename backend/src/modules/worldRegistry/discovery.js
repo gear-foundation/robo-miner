@@ -26,6 +26,7 @@ export function sessionRecord(world, config) {
   const sessionId = world.sessionId ?? world.session ?? null;
   return {
     id: world.id,
+    worldId: world.worldId || world.id,
     sessionKey: world.archiveId || `${world.id}-s${sessionId ?? world.seed ?? 0}`,
     programId: world.programId,
     status,

@@ -28,10 +28,13 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
 
   function toRecord(world, ts) {
     const startsAt = world.startedAt ?? world.openedAt ?? world.createdAt;
+    const status = STATUS_MAP[world.status] || world.status;
+    const id = status === 'archived' && world.archiveId ? world.archiveId : world.id;
     return {
       schemaVersion: 1,
-      id: world.id,
-      status: STATUS_MAP[world.status] || world.status,
+      id,
+      worldId: world.id,
+      status,
       deployMode,
       programId: world.programId || null,
       seed: String(world.seed ?? ''),

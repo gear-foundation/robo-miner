@@ -57,6 +57,7 @@ test('world registry manifest becomes agent match discovery feed', () => {
   assert.equal(discovery.matches.length, 2);
   assert.deepEqual(discovery.matches[0], {
     id: 'w001',
+    worldId: 'w001',
     sessionKey: 'w001-s3',
     programId: '0x1111111111111111111111111111111111111111',
     status: 'open',
@@ -171,7 +172,7 @@ test('factory publisher preserves session and archive metadata in registry', asy
       openedAt: Date.parse('2026-06-23T12:30:00.000Z'),
     },
     {
-      id: 'w001-s5',
+      id: 'w001',
       status: 'archived',
       programId: '0x1111111111111111111111111111111111111111',
       seed: '41',
@@ -194,8 +195,10 @@ test('factory publisher preserves session and archive metadata in registry', asy
   const archived = manifest.past.find((world) => world.id === 'w001-s5');
 
   assert.equal(live.sessionId, 6);
+  assert.equal(manifest.active.length, 1);
   assert.equal(live.minAgents, 1);
   assert.equal(live.sessionAutofinish, false);
+  assert.equal(archived.worldId, 'w001');
   assert.equal(archived.sessionId, 5);
   assert.equal(archived.archiveId, 'w001-s5');
   assert.equal(archived.archiveUrl, '/archives/w001-s5');

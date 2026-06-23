@@ -159,6 +159,7 @@ export function pickCurrentSeason(seasons, now = () => new Date()) {
 function normalizeWorld(world, seasonId, syncedAt) {
   return {
     id: world.id,
+    worldId: world.worldId || world.id,
     seasonId,
     status: world.status,
     deployMode: world.deployMode || 'dry-run',
@@ -192,6 +193,7 @@ function normalizeWorld(world, seasonId, syncedAt) {
 function publicWorld(world) {
   return {
     id: world.id,
+    worldId: world.worldId || world.id,
     seasonId: world.seasonId,
     status: world.status,
     deployMode: world.deployMode,

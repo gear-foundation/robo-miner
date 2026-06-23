@@ -1572,6 +1572,7 @@ export default class SpectatorScene extends GameScene {
       );
       if (found) {
         this.worldMeta = found;
+        this.rt?.syncSessionMeta?.(found);
         this.updateHUD();
       }
     } catch {

@@ -370,6 +370,8 @@ export class ChainSource {
     this._polling = false;
     this._playbackGroups = [];
     this._playbackOpenGroups = new Map();
+    this._snapshotReloadReason = null;
+    this._snapshotReloadPromise = null;
     this._lastGrid = null;
     this._lastAgents = new Map();
     this.ready = this._boot();
@@ -377,6 +379,21 @@ export class ChainSource {
 
   setAgents() { /* chain: real agents drive their own diggers via injected tx */ }
   observe() { return null; } // read-only spectator
+
+  syncSessionMeta(meta = {}) {
+    const currentSessionId = Number(this.session?.[0] || 0);
+    const nextSessionId = Number(meta.sessionId || 0);
+    if (currentSessionId && nextSessionId && currentSessionId !== nextSessionId) {
+      this._requestSnapshotReload(`discovery session ${nextSessionId}`);
+      return;
+    }
+
+    const currentSeed = Number(this.session?.[1] || 0);
+    const nextSeed = Number(meta.seed || 0);
+    if (currentSeed && nextSeed && currentSeed !== nextSeed) {
+      this._requestSnapshotReload(`discovery seed ${nextSeed}`);
+    }
+  }
 
   async _boot() {
     await this.connect();
@@ -427,6 +444,14 @@ export class ChainSource {
   }
 
   _queuePlaybackEvent(event) {
+    const currentSessionId = Number(this.session?.[0] || 0);
+    const eventSessionId = Number(event?.sessionId || 0);
+    if (event?.type === 'map_generated' || (eventSessionId && currentSessionId && eventSessionId !== currentSessionId)) {
+      this._requestSnapshotReload(event?.type === 'map_generated' ? 'map generated' : `session ${eventSessionId}`);
+      if (event?.type === 'map_generated') this._pending.push(event);
+      return;
+    }
+
     const key = playbackGroupKey(event);
     const ts = nowMs();
     let group = this._playbackOpenGroups.get(key);
@@ -476,6 +501,7 @@ export class ChainSource {
   //    expose them as .events (the renderer + TX console read this verbatim).
   update(dtMs = 0) {
     this.timeMs += dtMs;
+    this._startSnapshotReloadIfNeeded();
     this._drainPlaybackQueue();
     this._advanceAnimations(dtMs);
 
@@ -645,8 +671,8 @@ export class ChainSource {
         this.finished = true;
         break;
       case 'map_generated':
-        this._pending.push({ type: 'chain_error', message: 'map regenerated; reload world to read initial state' });
-        break;
+        this._requestSnapshotReload('map generated');
+        return;
       default:
         break;
     }
@@ -1096,6 +1122,38 @@ export class ChainSource {
     }
   }
 
+  _requestSnapshotReload(reason) {
+    this._snapshotReloadReason ||= reason || 'snapshot changed';
+  }
+
+  _startSnapshotReloadIfNeeded() {
+    if (!this._snapshotReloadReason || this._snapshotReloadPromise || this._polling) return;
+    const reason = this._snapshotReloadReason;
+    this._snapshotReloadReason = null;
+    this._snapshotReloadPromise = this._refresh({ resetPlayback: true, resetWorld: true })
+      .then(() => {
+        this._pending.push({ type: 'map_reloaded', message: `reloaded after ${reason}` });
+      })
+      .catch((error) => {
+        this._pending.push({ type: 'chain_error', message: `snapshot reload failed: ${error?.message || error}` });
+      })
+      .finally(() => {
+        this._snapshotReloadPromise = null;
+      });
+  }
+
+  _clearPlaybackState() {
+    this._playbackGroups = [];
+    this._playbackOpenGroups.clear();
+    this._pending = [];
+    this.stones = [];
+    this.bombs = [];
+    for (const miner of this.s?.miners || []) {
+      miner.act = null;
+      miner.actQueue = [];
+    }
+  }
+
   _applySnapshot(snap, opts = {}) {
     const emitEvents = opts.emitEvents !== false;
     const [W = 40, rawH = 64] = snap.config;
@@ -1103,8 +1161,12 @@ export class ChainSource {
     const surface = 4;
     const { grid, H, yOffset } = decorateDiggerGrid(snap.rawGrid, W, rawH, rawSurface, surface);
     const { chests, chestsAt } = buildDiggerChests(snap.rawGrid, W, rawH, rawSurface, surface, yOffset, H);
+    const prevSessionId = Number(this.session?.[0] || 0);
+    const nextSessionId = Number(snap.session?.[0] || 0);
+    const sessionChanged = Boolean(prevSessionId && nextSessionId && prevSessionId !== nextSessionId);
+    const rebuildWorld = !this.world || opts.resetWorld || sessionChanged;
 
-    if (!this.world) {
+    if (rebuildWorld) {
       this.world = {
         grid,
         rawGrid: Uint32Array.from(snap.rawGrid),
@@ -1125,6 +1187,7 @@ export class ChainSource {
         signals: null,
         validation: { ok: true, warnings: [] },
       };
+      this.worldDirty = true;
     } else {
       let gridChanged = this.world.grid.length !== grid.length;
       if (!gridChanged) {
@@ -1216,6 +1279,7 @@ export class ChainSource {
   async _refresh(opts = {}) {
     this._polling = true;
     try {
+      if (opts.resetPlayback) this._clearPlaybackState();
       const snap = await this._readSnapshot();
       this._applySnapshot(snap, { ...opts, emitEvents: false });
     } finally {

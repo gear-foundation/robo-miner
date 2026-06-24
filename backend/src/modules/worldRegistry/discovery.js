@@ -18,7 +18,7 @@ export function discoveryFromManifest(manifest, config, now = () => new Date()) 
 }
 
 export function sessionRecord(world, config) {
-  const minAgents = numberOr(world.minAgents, 3);
+  const minAgents = numberOr(world.minAgents, config?.factoryLobbyMin ?? 1);
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
   const agents = numberOr(world.agents, 0);
   const status = discoveryStatus(world.status);

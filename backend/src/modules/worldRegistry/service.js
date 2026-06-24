@@ -236,7 +236,7 @@ function configuredWorldRecord({ index, programId, seasonId, config, now }) {
     sessionMs: config.sessionMs || 30 * 60 * 1000,
     sessionAutofinish: Boolean(config.factorySessionAutofinish),
     agents: 0,
-    minAgents: config.factoryLobbyMin || 3,
+    minAgents: config.factoryLobbyMin || 1,
     targetAgents: config.factoryLobbyCap || 10,
     owners: [],
     sessionId: null,

@@ -94,7 +94,7 @@ export async function connectDiggerWorldChain(env) {
   const { createPublicClient, createWalletClient, http, webSocket } = await import('viem');
   const { privateKeyToAccount } = await import('viem/accounts');
 
-  if (!env.adminKey) throw new Error('DIGGER_ADMIN_KEY is required for chain mode');
+  if (!env.adminKey) throw new Error('admin key is required for chain mode (set MAINNET_ADMIN_KEY / TESTNET_ADMIN_KEY)');
 
   const account = privateKeyToAccount(hexKey(env.adminKey));
   const ethTransport = env.ethRpc.startsWith('ws') ? webSocket(env.ethRpc) : http(env.ethRpc);
@@ -252,7 +252,7 @@ export async function connectDiggerWorldChain(env) {
     const mirror = mirrorFor(programId);
     const stateHash = await mirror.stateHash();
     const st = await api.query.program.readState(stateHash);
-    return st.executableBalance; // bigint, 1 VARA = 1e12
+    return st.executableBalance; // bigint, 1 wVARA = 1e12
   }
 
   // Top up a program's executable balance. The WVARA permit spender MUST be the

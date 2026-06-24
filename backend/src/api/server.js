@@ -70,8 +70,10 @@ function bundleFor(networkParam) {
   const network = KNOWN_NETWORKS.includes(requested) ? requested : DEFAULT_NETWORK;
   let bundle = bundleCache.get(network);
   if (!bundle) {
-    // Clear the endpoint env vars so the chosen network's preset wins (env holds
-    // the process-default network's endpoints); only the namespace + network flip.
+    // Clear every env value that pins a network identity so the chosen network's
+    // profile wins (env holds only the process-default network's). Endpoints come
+    // from the profile; world/proxy program ids must NOT leak across networks
+    // (e.g. mainnet WORLD_PROGRAM_IDS bleeding into ?network=testnet).
     const netConfig = loadConfig({
       ...process.env,
       CHAIN_NETWORK: network,
@@ -79,6 +81,13 @@ function bundleFor(networkParam) {
       ROUTER_ADDRESS: '',
       ETH_RPC: '',
       VARA_ETH_WS: '',
+      INDEXER_WORLD_PROGRAM_IDS: '',
+      WORLD_PROGRAM_IDS: '',
+      WORLD_PROGRAM_ID: '',
+      INDEXER_PROXY_PROGRAM_IDS: '',
+      DIGGER_PROGRAM_IDS: '',
+      DIGGER_PROXY_PROGRAM_IDS: '',
+      DIGGER_PROXY_PROGRAM_ID: '',
     });
     const netStore = createStore(netConfig);
     bundle = {

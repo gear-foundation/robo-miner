@@ -23,11 +23,12 @@
 import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { generateMap, randomSeed, gridHash } from './genmap.js';
 import { adminActions } from '../../../../frontend/src/chain/world.js';
+import { adminKeyFor, DEFAULT_NETWORK } from '../../config/networks.js';
 
 const IDL_PATH = new URL('../../../../frontend/src/chain/world.idl', import.meta.url);
 
 const ENV = {
-  adminKey: process.env.DIGGER_ADMIN_KEY || '',
+  adminKey: adminKeyFor(String(process.env.CHAIN_NETWORK || DEFAULT_NETWORK).toLowerCase()),
   ethRpc: process.env.ETH_RPC || '',
   varaEthWs: process.env.VARA_ETH_WS || '',
   router: process.env.ROUTER_ADDRESS || '',

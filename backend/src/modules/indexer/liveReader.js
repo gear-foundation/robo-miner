@@ -121,17 +121,20 @@ export class VaraEthLiveReader {
   }
 }
 
+// Program ids come only from the already-assembled per-network config (loadConfig
+// reads the env names into config.*ProgramIds). The read-layer must NOT re-read
+// process.env directly, or one network's ids would leak into another.
 export function programsFromConfig(config) {
   return uniquePrograms([
-    ...programConfigs('world', config.worldProgramIds, process.env.INDEXER_WORLD_PROGRAM_IDS || process.env.WORLD_PROGRAM_ID || ''),
-    ...programConfigs('proxy', config.diggerProgramIds, process.env.INDEXER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_IDS || process.env.DIGGER_PROXY_PROGRAM_ID || ''),
-    ...programConfigs('resVmt', config.resVmtProgramIds, process.env.INDEXER_RES_VMT_PROGRAM_IDS || process.env.DIGGER_RES_VMT_PROGRAM_ID || ''),
-    ...programConfigs('redeem', config.redeemProgramIds, process.env.INDEXER_REDEEM_PROGRAM_IDS || process.env.DIGGER_REDEEM_PROGRAM_ID || ''),
+    ...programConfigs('world', config.worldProgramIds),
+    ...programConfigs('proxy', config.diggerProgramIds),
+    ...programConfigs('resVmt', config.resVmtProgramIds),
+    ...programConfigs('redeem', config.redeemProgramIds),
   ]);
 }
 
-function programConfigs(programType, configured, fallback) {
-  const raw = Array.isArray(configured) && configured.length > 0 ? configured : splitList(fallback);
+function programConfigs(programType, configured) {
+  const raw = Array.isArray(configured) ? configured : splitList(configured);
   return raw
     .map((item) => {
       if (typeof item === 'string') return { programType, programId: item };

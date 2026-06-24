@@ -17,6 +17,8 @@ const NETWORKS = {
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://validator-1-eth.vara.network',
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
+    resVmtProgramId: '0x09ca219f6b7f4c897ddcf60c6ab16c2802f51cfb',
+    redeemProgramId: '0x5f627eb3d4658ed0f793e94142d4dfdba68090ee',
     explorer: 'https://etherscan.io',
   },
   // Hoodi testnet (Vara.eth), chainId 560048 — see vara-wiki network-endpoints.
@@ -24,6 +26,8 @@ const NETWORKS = {
     ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
     routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    resVmtProgramId: '',
+    redeemProgramId: '',
     explorer: 'https://hoodi.etherscan.io',
   },
 };
@@ -39,9 +43,10 @@ function networkConfig(name) {
   return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.mainnet;
 }
 
-// Network is runtime-switchable: a UI/console toggle writes localStorage, which
-// wins over the build-time VITE_CHAIN_NETWORK. Switching network flips both the
-// chain config (via the NETWORKS preset) and the ?network= the lobby asks the API.
+// Network is runtime-switchable ONLY where the toggle exists (dev, or
+// VITE_NETWORK_TOGGLE=true): the toggle writes localStorage, which then wins over
+// the build-time VITE_CHAIN_NETWORK. In a normal prod build the toggle is hidden,
+// so a stale localStorage value can't pin a user to the wrong network.
 function storedNetwork() {
   try {
     return (typeof localStorage !== 'undefined' && localStorage.getItem('mp_network')) || '';
@@ -49,7 +54,8 @@ function storedNetwork() {
     return '';
   }
 }
-const network = String(storedNetwork() || env.VITE_CHAIN_NETWORK || 'mainnet').toLowerCase();
+const networkToggleEnabled = Boolean(env.DEV) || env.VITE_NETWORK_TOGGLE === 'true';
+const network = String((networkToggleEnabled && storedNetwork()) || env.VITE_CHAIN_NETWORK || 'mainnet').toLowerCase();
 const defaults = networkConfig(network);
 
 export const CHAIN = {
@@ -58,15 +64,11 @@ export const CHAIN = {
   enabled: env.VITE_CHAIN_ENABLED === 'true',
   network,
 
-  // @vara-eth/api connection inputs.
-  // The selected network's preset drives the endpoints, so the toggle actually
-  // switches chain (router/RPC/WS) — not just a label. VITE_* is only a fallback
-  // for a network with no preset. (Pinning VITE_* would otherwise lock every
-  // network to one endpoint set — e.g. reading mainnet programs on the testnet
-  // validator → "not found state hash".)
-  ethRpc: defaults.ethRpc || env.VITE_ETH_RPC,
-  varaEthWs: defaults.varaEthWs || env.VITE_VARA_ETH_WS,
-  routerAddress: defaults.routerAddress || env.VITE_ROUTER_ADDRESS,
+  // @vara-eth/api connection inputs — driven entirely by the selected network's
+  // preset, so the toggle switches chain (router/RPC/WS), not just a label.
+  ethRpc: defaults.ethRpc,
+  varaEthWs: defaults.varaEthWs,
+  routerAddress: defaults.routerAddress,
   explorerUrl: defaults.explorer,
 
   // The World program (one per active map). Direct world routes pass the id in
@@ -80,8 +82,8 @@ export const CHAIN = {
   // Optional thin registry / leaderboard program (aggregate across maps).
   registryProgramId: env.VITE_REGISTRY_PROGRAM_ID || '',
   backendUrl: env.VITE_BACKEND_URL || '',
-  resVmtProgramId: env.VITE_RES_VMT_PROGRAM_ID || '',
-  redeemProgramId: env.VITE_REDEEM_PROGRAM_ID || '',
+  resVmtProgramId: defaults.resVmtProgramId || env.VITE_RES_VMT_PROGRAM_ID || '',
+  redeemProgramId: defaults.redeemProgramId || env.VITE_REDEEM_PROGRAM_ID || '',
 
   // Operator discovery feed (factory /sessions + /matches). If empty, the
   // frontend uses backendUrl for the same endpoints.

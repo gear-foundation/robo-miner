@@ -6,7 +6,7 @@
 //   node src/modules/gameMaster/factory/index.js --real-timers   # real timers
 //   node src/modules/gameMaster/factory/index.js --chain         # live mainnet
 //
-// Chain mode needs DIGGER_ADMIN_KEY (+ funded WVARA) in backend/.env.
+// Chain mode needs MAINNET_ADMIN_KEY / TESTNET_ADMIN_KEY (+ funded wVARA) in backend/.env.
 // The factory state machine is identical in both modes — only the driver differs.
 
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
@@ -254,7 +254,7 @@ const discovery = createDiscoveryServer({
   env: chainEnv,
   cfg: config,
   archives,
-  port: Number(process.env.DISCOVERY_PORT || 8780),
+  port: Number(process.env.DISCOVERY_PORT || chainEnv.discoveryPort || 8780),
 });
 try {
   await discovery.start();

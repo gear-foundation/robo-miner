@@ -176,8 +176,8 @@ POST /api/diggers/request
 }
 ```
 
-Live deploy requires `DIGGER_PROXY_CODE_ID` (or legacy `DIGGER_CODE_ID`) plus
-`DIGGER_ADMIN_KEY`, `ETH_RPC`, `VARA_ETH_WS`, and `ROUTER_ADDRESS`.
+Live deploy requires the admin signer `MAINNET_ADMIN_KEY` / `TESTNET_ADMIN_KEY`;
+the proxy code id, RPC, WS, and router come from the network profile (`CHAIN_NETWORK`).
 When `DIGGER_PROXY_CODE_ID` already points to validated Router code, the backend
 does not need the local proxy wasm artifact. If the code is not validated yet,
 ship `digger_proxy.opt.wasm` with the backend image or set `DIGGER_PROXY_WASM_PATH`
@@ -240,8 +240,8 @@ Without `--digger`, the rental job selects active diggers from the configured
 season. If a digger has `worldId`, that world must also be live according to
 `worldRegistry`.
 
-Live mode requires `DIGGER_ADMIN_KEY`, `ETH_RPC`, `VARA_ETH_WS`,
-`ROUTER_ADDRESS`, and either `DIGGER_PROGRAM_IDS` or `--digger`:
+Live mode requires `MAINNET_ADMIN_KEY` / `TESTNET_ADMIN_KEY` (RPC, WS, and router
+come from the network profile) and either `DIGGER_PROGRAM_IDS` or `--digger`:
 
 ```bash
 npm run rental:top-up -- --live
@@ -574,7 +574,7 @@ Live rental smoke checklist:
 
 ```txt
 1. Set DIGGER_RENTAL_MODE=live.
-2. Set DIGGER_ADMIN_KEY, DIGGER_PROXY_CODE_ID, ETH_RPC, VARA_ETH_WS, ROUTER_ADDRESS.
+2. Set MAINNET_ADMIN_KEY / TESTNET_ADMIN_KEY (proxy code id, RPC, WS, router come from the network profile via CHAIN_NETWORK).
 3. If DIGGER_PROXY_CODE_ID is not validated yet, include digger_proxy.opt.wasm and set DIGGER_PROXY_WASM_PATH.
 4. Set ADMIN_API_TOKEN before exposing the API outside localhost.
 5. POST /api/diggers/request with owner + worldId + dryRun=false.

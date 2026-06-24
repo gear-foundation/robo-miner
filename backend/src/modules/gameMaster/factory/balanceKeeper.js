@@ -5,14 +5,14 @@
 // world stalls. This watches each live world and tops it up BEFORE it runs dry —
 // accounting for the ~90s validator lag before a top-up actually lands.
 //
-// Tuning from measured economics (10 busy agents): ~0.057 VARA/action, ~0.56
-// VARA/s. Defaults: top up +400 VARA whenever balance dips under 150 VARA (~4.5
+// Tuning from measured economics (10 busy agents): ~0.057 wVARA/action, ~0.56
+// wVARA/s. Defaults: top up +400 wVARA whenever balance dips under 150 wVARA (~4.5
 // min of runway at full tilt), with a cooldown ≥ the top-up lag so we never stack
 // redundant top-ups while one is still settling. The live 10-agent stream is
 // bursty enough that the defaults are intentionally conservative.
 
-const VARA = 1_000_000_000_000n; // 1 VARA in wei
-const toVara = (wei) => Number(wei) / 1e12;
+const WVARA = 1_000_000_000_000n; // 1 wVARA in wei
+const toWvara = (wei) => Number(wei) / 1e12;
 
 export function createBalanceKeeper({
   chain,
@@ -24,10 +24,10 @@ export function createBalanceKeeper({
 }) {
   const checkMs = options.checkMs ?? 30_000;
   const cooldownMs = options.cooldownMs ?? 120_000; // ≥ the ~90s top-up lag
-  const minVara = options.minVara ?? 700;
-  const topUpVara = options.topUpVara ?? 1200;
-  const minWei = BigInt(Math.round(minVara)) * VARA;
-  const topUpWei = BigInt(Math.round(topUpVara)) * VARA;
+  const minWvara = options.minWvara ?? 700;
+  const topUpWvara = options.topUpWvara ?? 1200;
+  const minWei = BigInt(Math.round(minWvara)) * WVARA;
+  const topUpWei = BigInt(Math.round(topUpWvara)) * WVARA;
 
   const state = new Map(); // programId → { lastCheckAt, lastTopUpAt, busy, lastEb }
   let loadStatePromise = null;
@@ -88,13 +88,13 @@ export function createBalanceKeeper({
     s.lastEb = eb;
     const now = clock();
     if (eb < minWei && now - s.lastTopUpAt >= cooldownMs) {
-      log(`[balance] ${programId} ${toVara(eb).toFixed(1)} VARA < ${minVara} → top up +${topUpVara} VARA`);
+      log(`[balance] ${programId} ${toWvara(eb).toFixed(1)} wVARA < ${minWvara} → top up +${topUpWvara} wVARA`);
       // Persist before sending: a top-up may take ~90s to land, and a factory
-      // restart during that window must not send another +topUpVara immediately.
+      // restart during that window must not send another +topUpWvara immediately.
       s.lastTopUpAt = now;
       await persistState();
       await enqueueTopUp(() => chain.topUpExecutableBalance(programId, topUpWei));
-      log(`[balance] ${programId} top-up sent (+${topUpVara} VARA, applies in ~90s)`);
+      log(`[balance] ${programId} top-up sent (+${topUpWvara} wVARA, applies in ~90s)`);
     }
   }
 
@@ -128,7 +128,7 @@ export function createBalanceKeeper({
     snapshot() {
       return [...state.entries()].map(([programId, s]) => ({
         programId,
-        executableVara: s.lastEb == null ? null : toVara(s.lastEb),
+        executableWvara: s.lastEb == null ? null : toWvara(s.lastEb),
         lastTopUpAt: s.lastTopUpAt || null,
       }));
     },

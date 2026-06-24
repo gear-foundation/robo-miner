@@ -45,8 +45,8 @@ export async function createChainDriver({
     stateStore: documentStore,
     stateDocumentId: `${documentPrefix}factory:balance-keeper`,
     options: {
-      minVara: env.balanceMinVara,
-      topUpVara: env.balanceTopUpVara,
+      minWvara: env.balanceMinWvara,
+      topUpWvara: env.balanceTopUpWvara,
       checkMs: env.balanceCheckMs,
       cooldownMs: env.balanceCooldownMs,
     },

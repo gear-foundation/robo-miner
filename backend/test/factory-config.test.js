@@ -2,73 +2,58 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { loadChainEnv, loadConfig } from '../src/modules/gameMaster/factory/config.js';
+import { adminKeyFor, MAINNET, TESTNET } from '../src/config/networks.js';
 
-test('loadChainEnv uses the first configured RES VMT program for world economy setup', () => {
-  const original = {
-    DIGGER_RES_VMT_PROGRAM_ID: process.env.DIGGER_RES_VMT_PROGRAM_ID,
-    INDEXER_RES_VMT_PROGRAM_IDS: process.env.INDEXER_RES_VMT_PROGRAM_IDS,
-  };
-  process.env.DIGGER_RES_VMT_PROGRAM_ID = '';
-  process.env.INDEXER_RES_VMT_PROGRAM_IDS = '0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222';
-
+test('mainnet profile drives the factory config', () => {
+  const prev = process.env.CHAIN_NETWORK;
+  process.env.CHAIN_NETWORK = 'mainnet';
   try {
-    const env = loadChainEnv();
-    assert.equal(env.resVmtProgramId, '0x1111111111111111111111111111111111111111');
+    const c = loadConfig();
+    assert.equal(c.poolSize, MAINNET.POOL_MAX);
+    assert.equal(c.baseWorlds, 3);
+    assert.equal(c.allowCreate, false);
+    assert.equal(c.lobbyMin, 1);
+    assert.equal(c.lobbyCap, 10);
+    assert.equal(c.sessionAutofinish, false);
+    const e = loadChainEnv();
+    assert.equal(e.network, 'mainnet');
+    assert.equal(e.router, MAINNET.ROUTER);
+    assert.equal(e.codeId, MAINNET.WORLD_CODE_ID);
+    assert.equal(e.balanceMinWvara, MAINNET.BALANCE_MIN_WVARA);
+    assert.equal(e.topUp, MAINNET.TOP_UP_WEI);
   } finally {
-    restoreEnv('DIGGER_RES_VMT_PROGRAM_ID', original.DIGGER_RES_VMT_PROGRAM_ID);
-    restoreEnv('INDEXER_RES_VMT_PROGRAM_IDS', original.INDEXER_RES_VMT_PROGRAM_IDS);
+    restoreEnv('CHAIN_NETWORK', prev);
   }
 });
 
-test('factory disables runtime program creation by default', () => {
-  const original = snapshotEnv('FACTORY_ALLOW_CREATE', 'FACTORY_POOL_MAX', 'FACTORY_MIN_OPEN');
-  delete process.env.FACTORY_ALLOW_CREATE;
-  process.env.FACTORY_POOL_MAX = '6';
-  process.env.FACTORY_MIN_OPEN = '3';
-
+test('testnet profile drives the factory config', () => {
+  const prev = process.env.CHAIN_NETWORK;
+  process.env.CHAIN_NETWORK = 'testnet';
   try {
-    const fixedPoolConfig = loadConfig();
-    assert.equal(fixedPoolConfig.allowCreate, false);
-    // FACTORY_MIN_OPEN is the base world count and must NOT be forced up to the pool
-    // size — the factory keeps 3 running and only grows toward 6 on demand.
-    assert.equal(fixedPoolConfig.baseWorlds, 3);
-    assert.equal(fixedPoolConfig.poolSize, 6);
-
-    process.env.FACTORY_ALLOW_CREATE = 'true';
-    const expandableConfig = loadConfig();
-    assert.equal(expandableConfig.allowCreate, true);
-    assert.equal(expandableConfig.baseWorlds, 3);
+    const c = loadConfig();
+    assert.equal(c.allowCreate, true);
+    assert.equal(c.lobbyMin, 1);
+    const e = loadChainEnv();
+    assert.equal(e.network, 'testnet');
+    assert.equal(e.router, TESTNET.ROUTER);
+    assert.equal(e.varaWs, TESTNET.VARA_WS);
   } finally {
-    restoreSnapshot(original);
+    restoreEnv('CHAIN_NETWORK', prev);
   }
 });
 
-test('baseWorlds clamps down to the pool size, never up', () => {
-  const original = snapshotEnv('FACTORY_ALLOW_CREATE', 'FACTORY_POOL_MAX', 'FACTORY_MIN_OPEN');
-  delete process.env.FACTORY_ALLOW_CREATE;
-  process.env.FACTORY_POOL_MAX = '4';
-  process.env.FACTORY_MIN_OPEN = '8'; // larger than the pool — base cannot exceed the cap
-
-  try {
-    const cfg = loadConfig();
-    assert.equal(cfg.baseWorlds, 4);
-  } finally {
-    restoreSnapshot(original);
-  }
+test('baseWorlds never exceeds the pool cap', () => {
+  assert.ok(loadConfig().baseWorlds <= loadConfig().poolSize);
 });
 
-function snapshotEnv(...names) {
-  return Object.fromEntries(names.map((name) => [name, process.env[name]]));
-}
-
-function restoreSnapshot(snapshot) {
-  for (const [name, value] of Object.entries(snapshot)) restoreEnv(name, value);
-}
+test('admin key is resolved per network from env', () => {
+  const env = { MAINNET_ADMIN_KEY: '0xmain', TESTNET_ADMIN_KEY: '0xtest' };
+  assert.equal(adminKeyFor('mainnet', env), '0xmain');
+  assert.equal(adminKeyFor('testnet', env), '0xtest');
+  assert.equal(adminKeyFor('mainnet', {}), '');
+});
 
 function restoreEnv(name, value) {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
 }

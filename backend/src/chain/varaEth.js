@@ -1,5 +1,5 @@
 export async function createVaraEthChain(config, { logger = null } = {}) {
-  if (!config.adminKey) throw new Error('DIGGER_ADMIN_KEY is required for live digger rental top-up');
+  if (!config.adminKey) throw new Error('admin key is required for live digger rental top-up (set MAINNET_ADMIN_KEY / TESTNET_ADMIN_KEY)');
 
   const { CodeState, ReplyCode, WsVaraEthProvider, createVaraEthApi, getMirrorClient } = await import('@vara-eth/api');
   const { walletClientToSigner } = await import('@vara-eth/api/signer');

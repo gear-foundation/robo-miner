@@ -2,8 +2,8 @@
 // programs via the operator/admin account. Same shape as dryRunDriver, so the
 // factory state machine is identical; only the side effects are real.
 //
-//   provision  → reuse a persisted program, else validate code (once) +
-//                createProgram + executable balance + Create()
+//   provision  → reuse a persisted program from the fixed pool; optional
+//                createProgram is only allowed when FACTORY_ALLOW_CREATE=true
 //   loadMap    → generateMap + Admin.UploadMap   (→ CREATED, registration open;
 //                also reopens a reused program by clearing agents)
 //   start      → Admin.StartSession (contract can also auto-start at cap=10)
@@ -42,6 +42,8 @@ export async function createChainDriver({
   const keeper = createBalanceKeeper({
     chain,
     log,
+    stateStore: documentStore,
+    stateDocumentId: `${documentPrefix}factory:balance-keeper`,
     options: {
       minVara: env.balanceMinVara,
       topUpVara: env.balanceTopUpVara,
@@ -57,6 +59,7 @@ export async function createChainDriver({
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
   const reservedPrograms = new Set((reservedProgramIds || []).filter(Boolean).map(String));
   const hardPoolSize = Number(env.poolSize || 0);
+  const allowCreate = env.allowCreate === true || env.allowCreate === 'true' || env.allowCreate === 1;
   const adminReplyTimeoutMs = Number(env.timeoutMs || 180000);
 
   async function loadPool() {
@@ -120,12 +123,20 @@ export async function createChainDriver({
   async function waitForSession(programId, predicate, label) {
     const deadline = Date.now() + adminReplyTimeoutMs;
     let lastSession = null;
+    let lastError = null;
     while (Date.now() <= deadline) {
-      lastSession = await readSession(programId);
-      if (predicate(lastSession)) return lastSession;
+      try {
+        lastSession = await readSession(programId);
+        if (predicate(lastSession)) return lastSession;
+      } catch (error) {
+        lastError = error;
+      }
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    throw new Error(`${label} state recovery failed; last session=${JSON.stringify(lastSession)}`);
+    throw new Error(
+      `${label} state recovery failed; last session=${JSON.stringify(lastSession)} ` +
+      `last error=${lastError?.message || lastError || '-'}`,
+    );
   }
 
   async function sendAdminWithSessionRecovery(programId, label, payload, predicate) {
@@ -204,18 +215,39 @@ export async function createChainDriver({
     );
   }
 
+  async function rememberProgram(programId) {
+    if (pool.programs.includes(programId)) return;
+    pool.programs.push(programId);
+    await savePool();
+  }
+
+  async function ensureProgramInitialized(programId) {
+    // The Create() ctor (the program's INIT message) MUST go through the Mirror on
+    // Ethereum L1 — an injected tx does not initialize a freshly created program.
+    // chain.initializeProgram waits through the registration window, runs Create()
+    // via the mirror, and confirms `initialized` before returning. Idempotent: it
+    // no-ops if the program is already initialized (reused pool programs).
+    log(`[chain] ensuring program initialized ${programId}`);
+    await chain.initializeProgram(programId);
+    return readSession(programId);
+  }
+
   return {
     async provision() {
       // Reuse an already-deployed program before paying to create a new one.
       // loadMap's UploadMap reopens it (clears agents → CREATED).
       while (reuseIdx < pool.programs.length) {
         const programId = pool.programs[reuseIdx];
-        reuseIdx += 1;
-        if (reservedPrograms.has(programId)) continue;
+        if (reservedPrograms.has(programId)) {
+          reuseIdx += 1;
+          continue;
+        }
         log(`[chain] reusing program ${programId}`);
+        await ensureProgramInitialized(programId);
         await keeper.ensureNow(programId); // a reused program may be low — top up before opening
         await configureWorldEconomy(programId);
         reservedPrograms.add(programId);
+        reuseIdx += 1;
         return { programId };
       }
       if (hardPoolSize > 0 && knownProgramCount() >= hardPoolSize) {
@@ -224,14 +256,22 @@ export async function createChainDriver({
           'refusing to create a new on-chain program',
         );
       }
+      if (!allowCreate) {
+        throw new Error(
+          `program pool exhausted (${knownProgramCount()}/${hardPoolSize || 'unbounded'}) ` +
+          'and FACTORY_ALLOW_CREATE=false; refusing to create a new on-chain program',
+        );
+      }
       const code = await ensureCode();
       const programId = await chain.createProgram(code, BigInt(env.topUp));
-      await chain.sendAdmin(programId, chain.encode.create());
+      // createProgram already charged the initial executable balance. Persist the
+      // program before any later chain step so a dropped Create/UploadMap reply
+      // cannot leak a funded program outside the pool.
+      await rememberProgram(programId);
+      await ensureProgramInitialized(programId);
       await configureWorldEconomy(programId);
-      if (!pool.programs.includes(programId)) pool.programs.push(programId);
       reservedPrograms.add(programId);
       reuseIdx += 1; // this program is now assigned to a world — don't reuse it for the next one
-      await savePool();
       log(`[chain] program created + initialized ${programId}`);
       await keeper.ensureNow(programId);
       return { programId };

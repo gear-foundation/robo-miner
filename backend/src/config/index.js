@@ -21,6 +21,14 @@ const NETWORKS = {
     varaEthWs: 'wss://validator-1-eth.vara.network',
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
   },
+  // Hoodi testnet (Vara.eth), chainId 560048. Public endpoints per vara-wiki
+  // /docs/vara-eth/reference/network-endpoints. Non-secret defaults; the admin
+  // key still comes from env. Faucet: eth.vara.network/faucet.
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
 };
 
 export function loadConfig(env = process.env) {

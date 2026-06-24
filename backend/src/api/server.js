@@ -56,6 +56,44 @@ const socialVerifier = new SocialVerifierService({
   logger: createLogger('social'),
 });
 
+// ── Per-network read bundles (the ?network= switch) ────────────────────────────
+// One API process can serve several networks: each gets its own config (chain
+// preset + DATABASE_DOCUMENT_ID namespace) and its own store/registry, so the
+// data never crosses between mainnet and testnet. A request picks one with
+// ?network=<name>; unknown/missing falls back to the process default network.
+const DEFAULT_NETWORK = (config.network || 'mainnet').toLowerCase();
+const KNOWN_NETWORKS = String(process.env.BACKEND_NETWORKS || 'mainnet,testnet')
+  .split(',').map((n) => n.trim().toLowerCase()).filter(Boolean);
+const bundleCache = new Map();
+function bundleFor(networkParam) {
+  const requested = String(networkParam || '').toLowerCase();
+  const network = KNOWN_NETWORKS.includes(requested) ? requested : DEFAULT_NETWORK;
+  let bundle = bundleCache.get(network);
+  if (!bundle) {
+    // Clear the endpoint env vars so the chosen network's preset wins (env holds
+    // the process-default network's endpoints); only the namespace + network flip.
+    const netConfig = loadConfig({
+      ...process.env,
+      CHAIN_NETWORK: network,
+      DATABASE_DOCUMENT_ID: network,
+      ROUTER_ADDRESS: '',
+      ETH_RPC: '',
+      VARA_ETH_WS: '',
+    });
+    const netStore = createStore(netConfig);
+    bundle = {
+      network,
+      config: netConfig,
+      store: netStore,
+      registry: new WorldRegistryService({ store: netStore, config: netConfig }),
+      diggerRegistry: new DiggerRegistryService({ store: netStore, config: netConfig }),
+      leaderboardService: new LeaderboardService({ store: netStore, config: netConfig }),
+    };
+    bundleCache.set(network, bundle);
+  }
+  return bundle;
+}
+
 const PORT = Number(process.env.PORT || process.env.BACKEND_PORT || 8787);
 
 const server = http.createServer(async (req, res) => {
@@ -69,7 +107,16 @@ const server = http.createServer(async (req, res) => {
     logger.info('request.start', {
       method: req.method,
       path: url.pathname,
+      network: url.searchParams.get('network') || DEFAULT_NETWORK,
     });
+    // Resolve the network bundle and shadow the shared services for this request,
+    // so every read endpoint below transparently serves the requested network.
+    const net = bundleFor(url.searchParams.get('network'));
+    const config = net.config;
+    const store = net.store;
+    const registry = net.registry;
+    const diggerRegistry = net.diggerRegistry;
+    const leaderboardService = net.leaderboardService;
     if (url.pathname.startsWith('/api/admin/') && !authorizedAdmin(req)) {
       logger.warn('admin.unauthorized', { method: req.method, path: url.pathname });
       return json(res, 401, { error: 'unauthorized' });

@@ -14,7 +14,14 @@
 const VARA = 1_000_000_000_000n; // 1 VARA in wei
 const toVara = (wei) => Number(wei) / 1e12;
 
-export function createBalanceKeeper({ chain, log = console.log, clock = Date.now, options = {} }) {
+export function createBalanceKeeper({
+  chain,
+  log = console.log,
+  clock = Date.now,
+  options = {},
+  stateStore = null,
+  stateDocumentId = 'factory:balance-keeper',
+}) {
   const checkMs = options.checkMs ?? 30_000;
   const cooldownMs = options.cooldownMs ?? 120_000; // ≥ the ~90s top-up lag
   const minVara = options.minVara ?? 700;
@@ -23,6 +30,7 @@ export function createBalanceKeeper({ chain, log = console.log, clock = Date.now
   const topUpWei = BigInt(Math.round(topUpVara)) * VARA;
 
   const state = new Map(); // programId → { lastCheckAt, lastTopUpAt, busy, lastEb }
+  let loadStatePromise = null;
   let topUpQueue = Promise.resolve();
   const stateFor = (programId) => {
     let s = state.get(programId);
@@ -36,14 +44,56 @@ export function createBalanceKeeper({ chain, log = console.log, clock = Date.now
     return run;
   }
 
+  async function loadPersistedState() {
+    if (!stateStore) return;
+    if (!loadStatePromise) {
+      loadStatePromise = stateStore.read(stateDocumentId, null)
+        .then((doc) => {
+          const programs = doc?.programs && typeof doc.programs === 'object' ? doc.programs : {};
+          for (const [programId, saved] of Object.entries(programs)) {
+            const s = stateFor(programId);
+            s.lastTopUpAt = Number(saved?.lastTopUpAt || 0);
+            if (saved?.lastEb != null) {
+              try { s.lastEb = BigInt(saved.lastEb); } catch { s.lastEb = null; }
+            }
+          }
+        })
+        .catch((error) => {
+          loadStatePromise = null;
+          throw error;
+        });
+    }
+    await loadStatePromise;
+  }
+
+  async function persistState() {
+    if (!stateStore) return;
+    const programs = {};
+    for (const [programId, s] of state.entries()) {
+      programs[programId] = {
+        lastTopUpAt: s.lastTopUpAt || 0,
+        lastEb: s.lastEb == null ? null : s.lastEb.toString(),
+      };
+    }
+    await stateStore.write(stateDocumentId, {
+      schemaVersion: 1,
+      updatedAt: new Date(clock()).toISOString(),
+      programs,
+    });
+  }
+
   async function check(programId, s) {
+    await loadPersistedState();
     const eb = await chain.readExecutableBalance(programId);
     s.lastEb = eb;
     const now = clock();
     if (eb < minWei && now - s.lastTopUpAt >= cooldownMs) {
       log(`[balance] ${programId} ${toVara(eb).toFixed(1)} VARA < ${minVara} → top up +${topUpVara} VARA`);
+      // Persist before sending: a top-up may take ~90s to land, and a factory
+      // restart during that window must not send another +topUpVara immediately.
+      s.lastTopUpAt = now;
+      await persistState();
       await enqueueTopUp(() => chain.topUpExecutableBalance(programId, topUpWei));
-      s.lastTopUpAt = clock();
       log(`[balance] ${programId} top-up sent (+${topUpVara} VARA, applies in ~90s)`);
     }
   }

@@ -23,6 +23,13 @@ const NETWORKS = {
     varaWs: 'wss://validator-1-eth.vara.network',
     router: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
   },
+  // Hoodi testnet (Vara.eth), chainId 560048. Public endpoints per vara-wiki
+  // /docs/vara-eth/reference/network-endpoints. Admin key still comes from env.
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    router: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+  },
 };
 
 function networkConfig(name) {
@@ -77,13 +84,28 @@ function firstListValue(value) {
 }
 
 export function loadConfig(overrides = {}) {
+  const poolSize = num('FACTORY_POOL_MAX', num('FACTORY_POOL_SIZE', 3));
+  const allowCreate = bool('FACTORY_ALLOW_CREATE', false);
+  const configuredBaseWorlds = num('FACTORY_MIN_OPEN', 1);
+  // FACTORY_MIN_OPEN is the BASE number of worlds the factory keeps running — NOT a
+  // target to eagerly fill. The factory stands up this many, lets agents fill them,
+  // and opens another world ONLY when there is no open lobby left (every current
+  // world is full), growing on demand up to FACTORY_POOL_MAX. Clamp to the pool cap
+  // so the base can never exceed the hard ceiling.
+  const baseWorlds = poolSize > 0
+    ? Math.min(configuredBaseWorlds, poolSize)
+    : configuredBaseWorlds;
+
   return {
     // ── pool ────────────────────────────────────────────────────────────────
     // FACTORY_POOL_SIZE is kept as a legacy default for FACTORY_POOL_MAX.
-    // Set FACTORY_POOL_MAX=0 for elastic/unbounded growth; otherwise it is a
-    // safety cap on concurrent provisioning/open/active worlds.
-    poolSize: num('FACTORY_POOL_MAX', num('FACTORY_POOL_SIZE', 3)),
-    minOpenWorlds: num('FACTORY_MIN_OPEN', 1), // invariant: always keep >= this many open lobbies
+    // FACTORY_POOL_MAX is the hard ceiling on total provisioning/open/active worlds.
+    // FACTORY_ALLOW_CREATE=true lets the factory deploy+fund+initialize a new program
+    // on demand (when all worlds are full and the cap is not reached); =false keeps a
+    // fixed preseeded pool with no runtime deploys.
+    poolSize,
+    allowCreate,
+    baseWorlds, // base worlds kept running; grow on demand (only at 0 open lobbies) up to poolSize
 
     // ── lobby admission rules ────────────────────────────────────────────────
     lobbyMin: num('FACTORY_LOBBY_MIN', 3), // agents we want gathered before a start

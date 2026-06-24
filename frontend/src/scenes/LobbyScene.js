@@ -3,7 +3,7 @@ import { GAME_MODES } from '../engine/index.js';
 import { generateWorld } from '../world.js';
 import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
-import { CHAIN, chainReady, discoveryBaseUrl } from '../chain/config.js';
+import { CHAIN, chainReady, discoveryBaseUrl, discoveryUrl, setNetwork } from '../chain/config.js';
 import { navigateBack, navigateTo } from '../router.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
@@ -166,6 +166,25 @@ export default class LobbyScene extends Phaser.Scene {
     back.onclick = () => this.goMenu();
     root.appendChild(back);
 
+    // Network switch — lobby only (lives inside #arena-lobby, removed on shutdown).
+    // Shown in dev (or prod with VITE_NETWORK_TOGGLE=true) so end users don't see it.
+    const netEnv = (typeof import.meta !== 'undefined' && import.meta.env) || {};
+    if (netEnv.DEV || netEnv.VITE_NETWORK_TOGGLE === 'true') {
+      const netWrap = document.createElement('div');
+      netWrap.style.cssText = 'position:fixed;right:18px;top:18px;display:flex;gap:6px;z-index:21';
+      for (const net of ['mainnet', 'testnet']) {
+        const active = CHAIN.network === net;
+        const nb = document.createElement('button');
+        nb.textContent = net;
+        nb.style.cssText = `padding:8px 14px;border-radius:8px;cursor:pointer;font:600 13px 'Courier New',monospace;`
+          + `border:1px solid ${active ? '#4a78c8' : '#5a463a'};background:${active ? '#1b3a6b' : '#2a1d12'};`
+          + `color:${active ? '#cfe2ff' : '#c9b79f'}`;
+        nb.onclick = () => { if (CHAIN.network !== net) setNetwork(net); };
+        netWrap.appendChild(nb);
+      }
+      root.appendChild(netWrap);
+    }
+
     if (CHAIN.enabled) root.appendChild(this.makeToggle());
 
     const grid = document.createElement('div');
@@ -250,7 +269,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   async fetchDiscoveryWorlds(base) {
     try {
-      const sessions = await this.fetchJson(`${base}/sessions`);
+      const sessions = await this.fetchJson(discoveryUrl('/sessions'));
       const sessionWorlds = Array.isArray(sessions) ? sessions : (sessions?.sessions || []);
       const worlds = sessionWorlds
         .filter((world) => world.programId)
@@ -260,7 +279,7 @@ export default class LobbyScene extends Phaser.Scene {
         past: worlds.filter((world) => isPastStatus(world.status)),
       };
     } catch (sessionsError) {
-      const manifest = await this.fetchJson(`${base}/api/manifest`);
+      const manifest = await this.fetchJson(discoveryUrl('/api/manifest'));
       const manifestWorlds = Array.isArray(manifest?.worlds)
         ? manifest.worlds
         : [...(manifest?.active || []), ...(manifest?.past || [])];

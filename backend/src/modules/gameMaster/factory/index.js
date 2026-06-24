@@ -22,6 +22,7 @@ import { createRegistryPublisher } from './registry.js';
 import { createDiscoveryServer } from './discovery.js';
 import { createArchiveStore } from './archive.js';
 import { WORLD } from './world.js';
+import { gridHash } from '../genmap.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..'); // backend/src/modules/gameMaster/factory → repo root
@@ -178,8 +179,8 @@ const durationMs = Number(argValue('--duration', useChain ? '0' : '25000')); // 
 let driver;
 let config;
 let chainEnv = {};
-const initialLive = useChain ? await loadLive() : [];
-const reservedProgramIds = initialLive.map((world) => world.programId).filter(Boolean);
+let initialLive = [];
+let reservedProgramIds = [];
 
 if (useChain) {
   // Live: the contract owns cap=10 auto-start; we own provisioning, the pool,
@@ -187,6 +188,9 @@ if (useChain) {
   config = loadConfig({ lobbyMode: true });
   chainEnv = loadChainEnv();
   chainEnv.poolSize = config.poolSize;
+  chainEnv.allowCreate = config.allowCreate;
+  initialLive = await recoverLiveFromPool(await loadLive(), chainEnv);
+  reservedProgramIds = initialLive.map((world) => world.programId).filter(Boolean);
   const { createChainDriver } = await import('./drivers/chainDriver.js');
   driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore, documentPrefix });
 } else {
@@ -202,7 +206,7 @@ if (useChain) {
           poolSize: process.env.FACTORY_POOL_MAX != null
             ? Number(process.env.FACTORY_POOL_MAX)
             : (Number(process.env.FACTORY_POOL_SIZE) || 3),
-          minOpenWorlds: Number(process.env.FACTORY_MIN_OPEN) || 1,
+          baseWorlds: Number(process.env.FACTORY_MIN_OPEN) || 1,
           autoStartOnTimeout: true, // demo progresses without a human clicking start
         },
   );
@@ -291,4 +295,83 @@ function createWorldRegistry() {
     store: createStore(backendConfig),
     config: backendConfig,
   });
+}
+
+async function recoverLiveFromPool(live, env) {
+  const pool = await readJson(stateFilePath('factory-programs.json'), {});
+  const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
+  const known = new Set(live.map((world) => String(world.programId || '').toLowerCase()).filter(Boolean));
+  const missing = programs.filter((programId) => !known.has(String(programId).toLowerCase()));
+  if (missing.length === 0) return live;
+
+  let chain = null;
+  const recovered = [];
+  try {
+    const { connectDiggerWorldChain } = await import('../../../chain/diggerWorld.js');
+    chain = await connectDiggerWorldChain(env);
+    let nextId = nextWorldNumber(live);
+    for (const programId of missing) {
+      try {
+        const session = chain.decode.session((await chain.query(programId, chain.encode.session())).payload).map(Number);
+        const owners = await readOwners(chain, programId);
+        const rawGrid = await readRawGrid(chain, programId);
+        const now = Date.now();
+        const status = session[2] === 1
+          ? WORLD.ACTIVE
+          : session[2] === 2
+            ? WORLD.FINISHED
+            : WORLD.OPEN;
+        nextId += 1;
+        recovered.push(compactWorld({
+          id: `w${String(nextId).padStart(3, '0')}`,
+          status,
+          programId,
+          seed: String(session[1] || 0),
+          mapHash: rawGrid ? gridHash(rawGrid) : null,
+          sessionId: session[0],
+          agents: owners.length,
+          owners,
+          createdAt: now,
+          openedAt: status === WORLD.OPEN ? now : null,
+          lastJoinAt: status === WORLD.OPEN ? now : null,
+          startedAt: status === WORLD.ACTIVE ? now : null,
+          finishedAt: status === WORLD.FINISHED ? now : null,
+        }));
+      } catch (error) {
+        console.warn(`[factory] pool program ${programId} not restored: ${error?.message || error}`);
+      }
+    }
+  } finally {
+    chain?.disconnect?.();
+  }
+
+  if (recovered.length > 0) {
+    console.warn(`[factory] recovered ${recovered.length} live world(s) from factory-programs pool`);
+  }
+  return [...live, ...recovered];
+}
+
+function nextWorldNumber(worlds) {
+  let max = 0;
+  for (const world of worlds) {
+    const match = /^w(\d+)$/i.exec(String(world?.id || ''));
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  }
+  return max;
+}
+
+async function readOwners(chain, programId) {
+  try {
+    return chain.decode.agents((await chain.query(programId, chain.encode.agents())).payload).map(String);
+  } catch {
+    return [];
+  }
+}
+
+async function readRawGrid(chain, programId) {
+  try {
+    return chain.decode.mapSnapshot((await chain.query(programId, chain.encode.mapSnapshot())).payload).map(Number);
+  } catch {
+    return null;
+  }
 }

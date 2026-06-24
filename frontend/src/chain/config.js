@@ -19,6 +19,13 @@ const NETWORKS = {
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
     explorer: 'https://etherscan.io',
   },
+  // Hoodi testnet (Vara.eth), chainId 560048 — see vara-wiki network-endpoints.
+  testnet: {
+    ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
+    varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
+    routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
+    explorer: 'https://hoodi.etherscan.io',
+  },
 };
 
 function num(name, fallback) {
@@ -32,7 +39,17 @@ function networkConfig(name) {
   return NETWORKS[String(name || '').toLowerCase()] || NETWORKS.mainnet;
 }
 
-const network = env.VITE_CHAIN_NETWORK || 'mainnet';
+// Network is runtime-switchable: a UI/console toggle writes localStorage, which
+// wins over the build-time VITE_CHAIN_NETWORK. Switching network flips both the
+// chain config (via the NETWORKS preset) and the ?network= the lobby asks the API.
+function storedNetwork() {
+  try {
+    return (typeof localStorage !== 'undefined' && localStorage.getItem('mp_network')) || '';
+  } catch {
+    return '';
+  }
+}
+const network = String(storedNetwork() || env.VITE_CHAIN_NETWORK || 'mainnet').toLowerCase();
 const defaults = networkConfig(network);
 
 export const CHAIN = {
@@ -42,9 +59,14 @@ export const CHAIN = {
   network,
 
   // @vara-eth/api connection inputs.
-  ethRpc: env.VITE_ETH_RPC || defaults.ethRpc,
-  varaEthWs: env.VITE_VARA_ETH_WS || defaults.varaEthWs,
-  routerAddress: env.VITE_ROUTER_ADDRESS || defaults.routerAddress,
+  // The selected network's preset drives the endpoints, so the toggle actually
+  // switches chain (router/RPC/WS) — not just a label. VITE_* is only a fallback
+  // for a network with no preset. (Pinning VITE_* would otherwise lock every
+  // network to one endpoint set — e.g. reading mainnet programs on the testnet
+  // validator → "not found state hash".)
+  ethRpc: defaults.ethRpc || env.VITE_ETH_RPC,
+  varaEthWs: defaults.varaEthWs || env.VITE_VARA_ETH_WS,
+  routerAddress: defaults.routerAddress || env.VITE_ROUTER_ADDRESS,
   explorerUrl: defaults.explorer,
 
   // The World program (one per active map). Direct world routes pass the id in
@@ -95,6 +117,28 @@ export function chainReady(programId = CHAIN.worldProgramId) {
 
 export function discoveryBaseUrl() {
   return String(CHAIN.matchesUrl || CHAIN.backendUrl || '').replace(/\/+$/, '');
+}
+
+// Append the active network to a discovery/API path so one backend can serve both
+// (the ?network= switch). Use instead of `${discoveryBaseUrl()}${path}`.
+export function discoveryUrl(path) {
+  const base = discoveryBaseUrl();
+  const rel = String(path || '');
+  if (!base) return rel;
+  const sep = rel.includes('?') ? '&' : '?';
+  return `${base}${rel}${sep}network=${encodeURIComponent(CHAIN.network)}`;
+}
+
+// UI/console toggle: persist the chosen network and reload so the whole app
+// (chain config + lobby data) re-resolves for it.
+export function setNetwork(name) {
+  const next = String(name || '').toLowerCase();
+  try { localStorage.setItem('mp_network', next); } catch { /* non-browser */ }
+  if (typeof location !== 'undefined') location.reload();
+}
+if (typeof window !== 'undefined') {
+  window.mpSetNetwork = setNetwork;
+  window.mpNetwork = CHAIN.network;
 }
 
 export function addressExplorerUrl(address) {

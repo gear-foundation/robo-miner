@@ -25,6 +25,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const permitDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 60 * 60);
 const hexKey = (key) => (key.startsWith('0x') ? key : `0x${key}`);
 const SUCCESS_REPLY_CODES = new Set(['0x00010000', '0x00000000']);
+const ZERO_STATE_HASH = `0x${'0'.repeat(64)}`;
 
 // 12 zero bytes + 20-byte EOA address = 32-byte ActorId (matches the scripts).
 export const actorIdFromAddress = (address) => `0x${'00'.repeat(12)}${address.slice(2)}`;
@@ -73,8 +74,10 @@ function printableReplyPayload(payload) {
 
 function assertSuccessfulReply(reply, label) {
   if (reply?.code?.isSuccess === false) {
-    throw new Error(`${label} failed: ${reply.code.reason || 'error'}`);
+    const message = printableReplyPayload(reply.payload);
+    throw new Error(`${label} failed: ${reply.code.reason || 'error'}${message ? ` ${message}` : ''}`);
   }
+  if (reply?.code?.isSuccess === true) return;
   const code = reply?.replyCode || reply?.code?.toString?.();
   if (!code || SUCCESS_REPLY_CODES.has(String(code))) return;
   const message = printableReplyPayload(reply.payload);
@@ -264,6 +267,52 @@ export async function connectDiggerWorldChain(env) {
 
   const wvaraBalanceOf = (address) => api.eth.wvara.balanceOf(address);
 
+  // Read a program's full Vara.eth state (via its mirror state hash). Throws while
+  // the program is not yet observable on the validator side (fresh program window).
+  async function readProgramState(programId) {
+    const mirror = mirrorFor(programId);
+    const stateHash = await mirror.stateHash();
+    if (!stateHash || stateHash.toLowerCase() === ZERO_STATE_HASH) {
+      throw new Error('not found state hash for program');
+    }
+    return api.query.program.readState(stateHash);
+  }
+
+  function isProgramInitialized(state) {
+    const program = state?.program;
+    return Boolean(program && 'Active' in program && program.Active?.initialized === true);
+  }
+
+  // Run the program's Create() constructor — the program's INIT message. The init
+  // MUST go through the Mirror (Ethereum L1): an injected transaction does NOT
+  // initialize a freshly created program (it silently never runs the ctor, which is
+  // how the factory previously leaked funded-but-uninitialized programs). Idempotent.
+  // Ported from contracts/scripts/reload-program.ts (the tested reference).
+  async function initializeProgram(programId) {
+    const deadline = Date.now() + Number(env.timeoutMs || 180000);
+    // 1. Wait through the post-creation registration window until state is readable.
+    let state = null;
+    while (Date.now() < deadline) {
+      try { state = await readProgramState(programId); break; }
+      catch { await sleep(2000); }
+    }
+    if (!state) throw new Error(`program ${programId} not visible within ${env.timeoutMs}ms`);
+    if (isProgramInitialized(state)) return;
+
+    // 2. Send Create() through the Mirror, then wait until the program reports initialized.
+    const mirror = mirrorFor(programId);
+    const tx = await mirror.sendMessage(sails.ctors.Create.encodePayload(), 0n);
+    await tx.send();
+    await tx.getReceipt();
+    while (Date.now() < deadline) {
+      try {
+        if (isProgramInitialized(await readProgramState(programId))) return;
+      } catch { /* transient — keep polling */ }
+      await sleep(2000);
+    }
+    throw new Error(`program ${programId} did not initialize after Create()`);
+  }
+
   const admin = sails.services.Admin.functions;
   const world = sails.services.World;
 
@@ -282,6 +331,9 @@ export async function connectDiggerWorldChain(env) {
     wvaraBalanceOf,
     query,
     ensureWorldEconomy,
+    readProgramState,
+    isProgramInitialized,
+    initializeProgram,
     encode: {
       create: () => sails.ctors.Create.encodePayload(),
       uploadMap: (seed, tiles) => admin.UploadMap.encodePayload(seed, tiles),

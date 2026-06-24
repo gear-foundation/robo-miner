@@ -512,13 +512,27 @@ export class ChainSource {
     }
   }
 
-  async _call(payload) {
-    const reply = await this._api.call.program.calculateReplyForHandle(
-      READ_SOURCE,
-      this.programId,
-      payload,
-    );
-    return reply.payload;
+  async _call(payload, attempts = 6) {
+    let lastError;
+    for (let i = 0; i < attempts; i += 1) {
+      try {
+        const reply = await this._api.call.program.calculateReplyForHandle(
+          READ_SOURCE,
+          this.programId,
+          payload,
+        );
+        return reply.payload;
+      } catch (error) {
+        lastError = error;
+        // "not found state hash" (RpcError 8000) is transient: the validator
+        // briefly lacks the program's current state during a recycle/reset or
+        // sync lag. Retry instead of hard-failing the whole spectator.
+        const msg = String(error?.message || error);
+        if (!/not found state hash|RpcError\(8000\)/i.test(msg) || i === attempts - 1) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+      }
+    }
+    throw lastError;
   }
 
   async inspectAgent(owner) {

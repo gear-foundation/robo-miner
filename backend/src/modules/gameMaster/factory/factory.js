@@ -102,10 +102,12 @@ export function createFactory({
           `(${cfg.lobbyMode ? 'registration' : 'prestarted'})`,
       );
       await persistLive();
+      return true;
     } catch (error) {
       log(`[factory] ! ${world.id} provision failed: ${error?.message || error}`);
       worlds.delete(world.id);
       await persistLive();
+      return false;
     }
   }
 
@@ -226,10 +228,21 @@ export function createFactory({
       }
     }
     // Recycle/restore existing programs before provisioning. Otherwise a just
-    // finished world temporarily drops the open-lobby count and the factory pays
-    // to create a replacement program instead of resetting the same contract.
-    while (countOpen() < cfg.minOpenWorlds && poolHasCapacity()) {
-      await provisionOne();
+    // finished world temporarily drops the open count and the factory pays to
+    // create a replacement program instead of resetting the same contract.
+    //
+    // Demand-driven growth (never eagerly fill the pool to the cap):
+    //   1. stand up / keep the base of cfg.baseWorlds worlds running, then
+    //   2. open ANOTHER world only when no open lobby is left (every current world
+    //      is full) — so new agents always have somewhere to land — up to poolSize.
+    //
+    // Break on the first failed provision: a dead pool program or a chain timeout
+    // would otherwise be retried unbounded within a single tick (the failed world
+    // is removed, so counts never advance). Let the next tick retry — natural
+    // backoff instead of hammering on an error.
+    const wantsAnotherWorld = () => (poolBusy() < cfg.baseWorlds ? true : countOpen() === 0);
+    while (wantsAnotherWorld() && poolHasCapacity()) {
+      if (!(await provisionOne())) break;
     }
     // Publish the world list for the colleague's World Registry to serve (gamemaster.json).
     if (publish) {
@@ -257,9 +270,10 @@ export function createFactory({
       if (running) return;
       running = true;
       log(
-        `[factory] starting · pool=${cfg.poolSize === 0 ? 'elastic' : cfg.poolSize} minOpen=${cfg.minOpenWorlds} ` +
+        `[factory] starting · pool=${cfg.poolSize === 0 ? 'elastic' : cfg.poolSize} base=${cfg.baseWorlds} ` +
           `lobby=${cfg.lobbyMin}..${cfg.lobbyCap} startAtMin=${cfg.autoStartAtMin} timeout=${cfg.lobbyTimeoutMs}ms ` +
-          `session=${cfg.sessionAutofinish ? `${cfg.sessionMs}ms` : 'manual'} mode=${cfg.lobbyMode ? 'registration' : 'prestarted'}`,
+          `session=${cfg.sessionAutofinish ? `${cfg.sessionMs}ms` : 'manual'} mode=${cfg.lobbyMode ? 'registration' : 'prestarted'} ` +
+          `create=${cfg.allowCreate ? 'enabled' : 'disabled'}`,
       );
       if (initialLive.length) {
         log(`[factory] restored ${initialLive.length} live world(s) from disk`);

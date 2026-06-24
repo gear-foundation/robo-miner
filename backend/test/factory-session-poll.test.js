@@ -31,7 +31,7 @@ test('factory recycles an active world when the contract session is already fini
   const factory = createFactory({
     config: {
       poolSize: 1,
-      minOpenWorlds: 0,
+      baseWorlds: 0,
       lobbyMode: true,
       lobbyMin: 1,
       lobbyCap: 10,
@@ -95,7 +95,7 @@ test('factory recycles a finished active world before provisioning a replacement
   const factory = createFactory({
     config: {
       poolSize: 6,
-      minOpenWorlds: 3,
+      baseWorlds: 3,
       lobbyMode: true,
       lobbyMin: 1,
       lobbyCap: 10,
@@ -130,7 +130,7 @@ test('factory recycles a finished active world before provisioning a replacement
       },
       async provision() {
         provisioned = true;
-        throw new Error('provision should not be called when recycle restores minOpen');
+        throw new Error('provision should not be called when recycle restores the base worlds');
       },
       ensureBalance() {},
     },
@@ -147,10 +147,93 @@ test('factory recycles a finished active world before provisioning a replacement
   assert.equal(factory.worlds().length, 4); // 3 live worlds + 1 archived snapshot
 });
 
-async function waitFor(predicate, timeoutMs = 500) {
+test('factory keeps a base of worlds and grows one-at-a-time only when all are full, capped at poolSize', async () => {
+  let now = 1000;
+  const config = {
+    poolSize: 6,
+    baseWorlds: 3,
+    lobbyMode: true,
+    lobbyMin: 10,
+    lobbyCap: 10, // a world auto-starts (→ ACTIVE) the moment its lobby is full
+    autoStartAtMin: true,
+    lobbyTimeoutMs: 0,
+    autoStartOnTimeout: false,
+    sessionAutofinish: false,
+    sessionMs: 0,
+    recycle: true,
+    pastLimit: 50,
+    tickMs: 5,
+  };
+  let provisionCount = 0;
+  const full = new Set(); // programIds whose lobby reports full → auto-start to ACTIVE
+  const factory = createFactory({
+    config,
+    clock: () => (now += 50),
+    log: () => {},
+    initialLive: [],
+    initialPast: [],
+    onLive: async () => {},
+    onPast: async () => {},
+    driver: {
+      async provision() {
+        provisionCount += 1;
+        return { programId: `0xprog${provisionCount}` };
+      },
+      async loadMap() {
+        return { seed: '1', mapHash: 'h', sessionId: 1 };
+      },
+      async openLobby() {},
+      async start() {},
+      async pollAgents(world) {
+        return full.has(world.programId)
+          ? Array.from({ length: config.lobbyCap }, (_, i) => `0xowner${i}`)
+          : [];
+      },
+      async pollSession() {
+        return { sessionId: 1, seed: 1, status: 1, actionSeq: 0 }; // stays ACTIVE, never finishes
+      },
+      ensureBalance() {},
+    },
+  });
+
+  const open = () => factory.worlds().filter((w) => w.status === WORLD.OPEN);
+  const fillEveryWorld = () => factory.worlds().forEach((w) => w.programId && full.add(w.programId));
+
+  await factory.start();
+  try {
+    // Base of 3 — and crucially NOT an eager fill to the cap of 6.
+    await waitFor(() => open().length === 3);
+    await sleep(80);
+    assert.equal(provisionCount, 3, 'should stand up exactly the base, never eagerly fill to poolSize');
+    assert.equal(open().length, 3);
+
+    // Fill all worlds → all go ACTIVE → no open lobby left → exactly ONE more opens.
+    for (const target of [4, 5, 6]) {
+      fillEveryWorld();
+      await waitFor(() => provisionCount === target);
+      await sleep(40);
+      assert.equal(provisionCount, target, 'grows one world at a time, not in bursts');
+      assert.equal(open().length, 1, 'the freshly opened world is the only open lobby');
+    }
+
+    // At the cap: even with every world full, no 7th program is ever created.
+    fillEveryWorld();
+    await sleep(80);
+    assert.equal(provisionCount, 6, 'hard cap at poolSize — no runaway creation');
+    assert.equal(factory.worlds().filter((w) => w.status === WORLD.ACTIVE).length, 6);
+  } finally {
+    factory.stop();
+  }
+});
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(predicate, timeoutMs = 1500) {
   const deadline = Date.now() + timeoutMs;
   while (!predicate()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for factory recycle');
+    if (Date.now() > deadline) throw new Error('timed out waiting for factory state');
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }

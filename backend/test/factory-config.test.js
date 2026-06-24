@@ -10,7 +10,7 @@ test('mainnet profile drives the factory config', () => {
   try {
     const c = loadConfig();
     assert.equal(c.poolSize, MAINNET.POOL_MAX);
-    assert.equal(c.baseWorlds, 3);
+    assert.equal(c.baseWorlds, 6);
     assert.equal(c.allowCreate, false);
     assert.equal(c.lobbyMin, 1);
     assert.equal(c.lobbyCap, 10);

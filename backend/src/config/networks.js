@@ -81,5 +81,5 @@ export function profileFor(network) {
 }
 
 export function adminKeyFor(network, env = process.env) {
-  return env[`${String(network || '').toUpperCase()}_ADMIN_KEY`] || '';
+  return env[`${String(network || '').toUpperCase()}_ADMIN_KEY`] || env.DIGGER_ADMIN_KEY || '';
 }

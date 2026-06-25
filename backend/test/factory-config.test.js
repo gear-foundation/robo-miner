@@ -50,6 +50,8 @@ test('admin key is resolved per network from env', () => {
   const env = { MAINNET_ADMIN_KEY: '0xmain', TESTNET_ADMIN_KEY: '0xtest' };
   assert.equal(adminKeyFor('mainnet', env), '0xmain');
   assert.equal(adminKeyFor('testnet', env), '0xtest');
+  assert.equal(adminKeyFor('testnet', { DIGGER_ADMIN_KEY: '0xdigger' }), '0xdigger');
+  assert.equal(adminKeyFor('testnet', { TESTNET_ADMIN_KEY: '0xtest', DIGGER_ADMIN_KEY: '0xdigger' }), '0xtest');
   assert.equal(adminKeyFor('mainnet', {}), '');
 });
 

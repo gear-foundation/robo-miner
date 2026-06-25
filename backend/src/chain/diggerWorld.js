@@ -100,21 +100,48 @@ export async function connectDiggerWorldChain(env) {
   const ethTransport = env.ethRpc.startsWith('ws') ? webSocket(env.ethRpc) : http(env.ethRpc);
   const publicClient = createPublicClient({ transport: ethTransport });
   const walletClient = createWalletClient({ account, transport: ethTransport });
-  const provider = env.varaWs.startsWith('ws')
+  const isWsProvider = env.varaWs.startsWith('ws');
+  const wsLabel = `${env.network || 'unknown'} ${env.varaWs}`;
+  const provider = isWsProvider
     ? new WsVaraEthProvider(env.varaWs, {
         requestTimeout: env.timeoutMs,
-        // Resilience: keep reconnecting on a dropped WS instead of dying. Without
-        // this a transient disconnect silently kills the factory + balanceKeeper
-        // and a world's executable balance drains to 0 (program becomes
-        // unresponsive). High attempts ≈ "never give up"; fixed short backoff.
         reconnectAttempts: Number(env.wsReconnectAttempts ?? 1_000_000),
         reconnectDelay: Number(env.wsReconnectDelay ?? 2000),
       })
     : new HttpVaraEthProvider(env.varaWs, { requestTimeout: env.timeoutMs });
+  let providerClosing = false;
+  let providerReconnectPromise = null;
+
+  async function ensureProviderConnected(reason = 'request') {
+    if (!isWsProvider || typeof provider.connect !== 'function' || providerClosing) return;
+    if (provider.isConnected === true || provider.connectionState === 'connected') return;
+    if (!providerReconnectPromise) {
+      console.warn(`[chain] WS reconnecting reason=${reason} endpoint=${wsLabel} state=${provider.connectionState || 'unknown'}`);
+      providerReconnectPromise = provider.connect().finally(() => {
+        providerReconnectPromise = null;
+      });
+    }
+    await providerReconnectPromise;
+  }
+
   if (typeof provider.on === 'function') {
-    provider.on('disconnected', () => console.warn('[chain] WS disconnected — auto-reconnecting…'));
-    provider.on('connected', () => console.log('[chain] WS connected'));
-    provider.on('error', (e) => console.warn(`[chain] WS error: ${e?.error?.message || ''}`));
+    provider.on('disconnected', (event) => {
+      if (providerClosing) return;
+      const details = event?.details || {};
+      const reason = details.reason ? ` reason=${JSON.stringify(details.reason)}` : '';
+      console.warn(
+        `[chain] WS disconnected endpoint=${wsLabel} code=${details.code ?? 'unknown'} ` +
+          `wasClean=${details.wasClean ?? 'unknown'}${reason}`,
+      );
+      ensureProviderConnected('disconnect').catch((error) => {
+        console.warn(`[chain] WS reconnect failed endpoint=${wsLabel}: ${error?.message || error}`);
+      });
+    });
+    provider.on('connected', (event) => {
+      const ms = event?.details?.connectionDuration ?? 'unknown';
+      console.log(`[chain] WS connected endpoint=${wsLabel} attempt=${event?.attempt ?? 'unknown'} ms=${ms}`);
+    });
+    provider.on('error', (e) => console.warn(`[chain] WS error endpoint=${wsLabel}: ${e?.error?.message || ''}`));
   }
   const api = await createVaraEthApi(provider, publicClient, env.router, walletClientToSigner(walletClient));
   const accountAddress = await api.eth.signer.getAddress();
@@ -180,6 +207,7 @@ export async function connectDiggerWorldChain(env) {
   // program's executable balance pays for execution. Router/Mirror txs are
   // still required for program creation and executable-balance top-ups.
   async function sendAdmin(programId, payload) {
+    await ensureProviderConnected();
     const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
     injected.setDefaultValidator();
     const reply = await waitForInjectedReply(injected);
@@ -188,6 +216,7 @@ export async function connectDiggerWorldChain(env) {
   }
 
   async function query(programId, payload) {
+    await ensureProviderConnected();
     return api.call.program.calculateReplyForHandle(accountAddress, programId, payload, 0n);
   }
 
@@ -238,6 +267,7 @@ export async function connectDiggerWorldChain(env) {
   // Agent-side write (register/move/drill): injected from this connection's key.
   // Throws on a contract-level error reply so callers see real failures.
   async function sendInjected(programId, payload, value = 0n) {
+    await ensureProviderConnected();
     const injected = await api.createInjectedTransaction({ destination: programId, payload, value });
     injected.setDefaultValidator();
     const reply = await waitForInjectedReply(injected);
@@ -249,6 +279,7 @@ export async function connectDiggerWorldChain(env) {
   // wvara.balanceOf(programId) (that reads 0) — it lives in the program state and
   // is read via the Vara.eth node: stateHash → readState.executableBalance (wei).
   async function readExecutableBalance(programId) {
+    await ensureProviderConnected();
     const mirror = mirrorFor(programId);
     const stateHash = await mirror.stateHash();
     const st = await api.query.program.readState(stateHash);
@@ -270,6 +301,7 @@ export async function connectDiggerWorldChain(env) {
   // Read a program's full Vara.eth state (via its mirror state hash). Throws while
   // the program is not yet observable on the validator side (fresh program window).
   async function readProgramState(programId) {
+    await ensureProviderConnected();
     const mirror = mirrorFor(programId);
     const stateHash = await mirror.stateHash();
     if (!stateHash || stateHash.toLowerCase() === ZERO_STATE_HASH) {
@@ -368,6 +400,9 @@ export async function connectDiggerWorldChain(env) {
       // per-action result straight from the injected-tx receipt (no snapshot).
       actionView: (fn, payload) => world.functions[fn].decodeResult(payload),
     },
-    disconnect: () => provider.disconnect(),
+    disconnect: () => {
+      providerClosing = true;
+      return provider.disconnect();
+    },
   };
 }

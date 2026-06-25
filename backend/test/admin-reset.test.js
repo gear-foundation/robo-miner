@@ -5,7 +5,11 @@ import { AdminService } from '../src/modules/admin/service.js';
 
 test('testnet reset clears registry and queues a factory reset request', async () => {
   const store = new MemoryStore({ worlds: [{ id: 'w001' }], jobRuns: [{ id: 'old' }] });
-  const documents = new MemoryDocumentStore();
+  const documents = new MemoryDocumentStore({
+    'testnet:factory:factory-live': { worlds: [{ id: 'w001' }] },
+    'testnet:factory:factory-programs': { programs: ['0xold'] },
+    'testnet:factory:gamemaster': { worlds: [{ id: 'w001', programId: '0xold' }] },
+  });
   const service = new AdminService({
     store,
     documentStore: documents,
@@ -29,6 +33,7 @@ test('testnet reset clears registry and queues a factory reset request', async (
     'testnet:factory:factory-live',
     'testnet:factory:factory-programs',
     'testnet:factory:factory-past',
+    'testnet:factory:gamemaster',
     'testnet:factory:balance-keeper',
   ]]);
   assert.equal(documents.writes[0].id, 'testnet:factory:factory-reset-request');
@@ -105,17 +110,23 @@ class MemoryStore {
 }
 
 class MemoryDocumentStore {
-  constructor() {
+  constructor(initial = {}) {
+    this.docs = new Map(Object.entries(structuredClone(initial)));
     this.deleted = [];
     this.writes = [];
   }
 
   async deleteMany(ids) {
     this.deleted.push([...ids]);
-    return [...ids];
+    const deleted = [];
+    for (const id of ids) {
+      if (this.docs.delete(id)) deleted.push(id);
+    }
+    return deleted;
   }
 
   async write(id, data) {
+    this.docs.set(id, structuredClone(data));
     this.writes.push({ id, data: structuredClone(data) });
   }
 }

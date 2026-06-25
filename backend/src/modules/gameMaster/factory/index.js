@@ -364,6 +364,7 @@ async function consumeFactoryResetRequest() {
   await writeJson(liveFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
   await writeJson(pastFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
   await writeJson(programsFilePath(), { schemaVersion: 1, updatedAt: now, codeId: null, programs: [] });
+  await writeJson(registryFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
   await documentStore?.deleteMany?.([`${documentPrefix}factory:balance-keeper`]);
   await writeJson(resetRequestFilePath(), {
     ...request,

@@ -248,6 +248,7 @@ function factoryDocumentIds(config) {
     `${prefix}factory:factory-live`,
     `${prefix}factory:factory-programs`,
     `${prefix}factory:factory-past`,
+    `${prefix}factory:gamemaster`,
     `${prefix}factory:balance-keeper`,
   ];
 }
@@ -261,6 +262,7 @@ function factoryStateFiles(config) {
     'factory-live.json',
     'factory-programs.json',
     'factory-past.json',
+    'gamemaster.json',
   ].map((name) => path.join(config.stateDir, name));
 }
 

@@ -21,6 +21,7 @@ import { createDryRunDriver } from './drivers/dryRunDriver.js';
 import { createRegistryPublisher } from './registry.js';
 import { createDiscoveryServer } from './discovery.js';
 import { createArchiveStore } from './archive.js';
+import { resetRequestDecision } from './resetRequest.js';
 import { WORLD } from './world.js';
 import { gridHash } from '../genmap.js';
 
@@ -28,6 +29,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '../../../../..'); // backend/src/modules/gameMaster/factory → repo root
 const backendConfig = loadBackendConfig();
 const documentStore = createDocumentStore(backendConfig);
+const processStartedAtMs = Date.now();
 const documentPrefix =
   backendConfig.storeBackend === 'postgres' &&
   backendConfig.databaseDocumentId &&
@@ -50,6 +52,7 @@ const registryFilePath = () => stateFilePath('gamemaster.json');
 const programsFilePath = () => stateFilePath('factory-programs.json');
 const resetRequestFilePath = () => stateFilePath('factory-reset-request.json');
 const RESTORABLE_LIVE = new Set([WORLD.OPEN, WORLD.ACTIVE, WORLD.FINISHED]);
+let latestResetRequest = null;
 
 async function readJson(file, fallback = null) {
   const doc = await documentStore?.read(documentIdFor(file), undefined);
@@ -76,12 +79,35 @@ function documentIdFor(file) {
   return `${documentPrefix}factory:${path.basename(file, '.json')}`;
 }
 
+async function refreshResetRequest() {
+  latestResetRequest = await readJson(resetRequestFilePath(), null);
+  return latestResetRequest;
+}
+
+function resetGenerationId() {
+  const status = String(latestResetRequest?.status || '').toLowerCase();
+  return latestResetRequest?.id && (status === 'pending' || status === 'applied')
+    ? latestResetRequest.id
+    : null;
+}
+
+function staleForResetGeneration(payload) {
+  const resetId = resetGenerationId();
+  return Boolean(resetId && payload?.resetRequestId !== resetId);
+}
+
 async function loadPast() {
   const data = await readJson(pastFilePath(), {});
+  if (staleForResetGeneration(data)) return [];
   return Array.isArray(data?.worlds) ? data.worlds : [];
 }
 async function savePast(worlds) {
-  await writeJson(pastFilePath(), { schemaVersion: 1, updatedAt: new Date().toISOString(), worlds });
+  await writeJson(pastFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: resetGenerationId(),
+    updatedAt: new Date().toISOString(),
+    worlds,
+  });
 }
 
 function compactWorld(world) {
@@ -110,6 +136,10 @@ function compactWorld(world) {
 async function loadLive() {
   const live = await readJson(liveFilePath(), null);
   if (Array.isArray(live?.worlds)) {
+    if (staleForResetGeneration(live)) {
+      console.warn(`[factory] ignoring stale live state from before reset ${resetGenerationId()}`);
+      return [];
+    }
     return live.worlds
       .map(compactWorld)
       .filter((world) => world.programId && RESTORABLE_LIVE.has(world.status));
@@ -118,6 +148,10 @@ async function loadLive() {
   // First run after this persistence patch: recover from the public registry we
   // were already writing, so existing live worlds do not disappear.
   const registry = await readJson(registryFilePath(), null);
+  if (staleForResetGeneration(registry)) {
+    console.warn(`[factory] ignoring stale gamemaster fallback from before reset ${resetGenerationId()}`);
+    return [];
+  }
   if (!Array.isArray(registry?.worlds)) return [];
   return registry.worlds
     .map(worldFromRegistryRecord)
@@ -128,7 +162,12 @@ async function saveLive(worlds) {
   const active = worlds
     .filter((world) => world.programId && RESTORABLE_LIVE.has(world.status))
     .map(compactWorld);
-  await writeJson(liveFilePath(), { schemaVersion: 1, updatedAt: new Date().toISOString(), worlds: active });
+  await writeJson(liveFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: resetGenerationId(),
+    updatedAt: new Date().toISOString(),
+    worlds: active,
+  });
 }
 
 function ms(value) {
@@ -189,8 +228,10 @@ if (useChain) {
   // the open-world invariant, and the operator start policy.
   config = loadConfig({ lobbyMode: true });
   chainEnv = loadChainEnv();
+  await refreshResetRequest();
   chainEnv.poolSize = config.poolSize;
   chainEnv.allowCreate = config.allowCreate;
+  chainEnv.resetRequestId = resetGenerationId();
   initialLive = await recoverLiveFromPool(await loadLive(), chainEnv);
   reservedProgramIds = initialLive.map((world) => world.programId).filter(Boolean);
   const { createChainDriver } = await import('./drivers/chainDriver.js');
@@ -302,6 +343,10 @@ function createWorldRegistry() {
 
 async function recoverLiveFromPool(live, env) {
   const pool = await readJson(programsFilePath(), {});
+  if (staleForResetGeneration(pool)) {
+    console.warn(`[factory] ignoring stale program pool from before reset ${resetGenerationId()}`);
+    return live;
+  }
   const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
   const known = new Set(live.map((world) => String(world.programId || '').toLowerCase()).filter(Boolean));
   const missing = programs.filter((programId) => !known.has(String(programId).toLowerCase()));
@@ -356,21 +401,55 @@ async function recoverLiveFromPool(live, env) {
 
 async function consumeFactoryResetRequest() {
   const request = await readJson(resetRequestFilePath(), null);
-  if (!request || request.status !== 'pending') return false;
-  if (request.network && request.network !== chainEnv.network) return false;
+  const decision = resetRequestDecision(request, {
+    network: chainEnv.network,
+    processStartedAtMs,
+  });
+  if (decision.action === 'ignore') return false;
 
   const now = new Date().toISOString();
-  console.warn(`[factory] reset requested id=${request.id || '-'} scope=${request.scope || '-'} — clearing factory state`);
-  await writeJson(liveFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
-  await writeJson(pastFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
-  await writeJson(programsFilePath(), { schemaVersion: 1, updatedAt: now, codeId: null, programs: [] });
-  await writeJson(registryFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
+  console.warn(
+    `[factory] reset ${decision.action} id=${request.id || '-'} scope=${request.scope || '-'} ` +
+      `reason=${decision.reason || '-'} — clearing factory state`,
+  );
+  await writeJson(liveFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: request.id || resetGenerationId(),
+    updatedAt: now,
+    worlds: [],
+  });
+  await writeJson(pastFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: request.id || resetGenerationId(),
+    updatedAt: now,
+    worlds: [],
+  });
+  await writeJson(programsFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: request.id || resetGenerationId(),
+    updatedAt: now,
+    codeId: null,
+    programs: [],
+  });
+  await writeJson(registryFilePath(), {
+    schemaVersion: 1,
+    resetRequestId: request.id || resetGenerationId(),
+    updatedAt: now,
+    worlds: [],
+  });
   await documentStore?.deleteMany?.([`${documentPrefix}factory:balance-keeper`]);
   await writeJson(resetRequestFilePath(), {
     ...request,
     status: 'applied',
-    appliedAt: now,
+    appliedAt: request.appliedAt || now,
+    lastSeenByFactoryAt: now,
   });
+  latestResetRequest = {
+    ...request,
+    status: 'applied',
+    appliedAt: request.appliedAt || now,
+    lastSeenByFactoryAt: now,
+  };
 
   console.warn('[factory] reset applied — exiting so the process supervisor restarts with an empty pool');
   setTimeout(() => {

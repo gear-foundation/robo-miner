@@ -54,6 +54,7 @@ export async function createChainDriver({
 
   const poolFile = path.resolve(ROOT, process.env.GAMEMASTER_STATE_DIR || 'state', 'factory-programs.json');
   const poolDocumentId = `${documentPrefix}factory:factory-programs`;
+  const poolResetRequestId = env.resetRequestId || null;
   const pool = await loadPool();
   let codeId = env.codeId || pool.codeId || null;
   let reuseIdx = 0; // next persisted program to reuse before deploying a new one
@@ -85,7 +86,11 @@ export async function createChainDriver({
   }
 
   function normalizePool(value) {
+    if (poolResetRequestId && value?.resetRequestId !== poolResetRequestId) {
+      return { resetRequestId: poolResetRequestId, codeId: null, programs: [] };
+    }
     return {
+      resetRequestId: value?.resetRequestId || poolResetRequestId || null,
       codeId: value?.codeId || null,
       programs: Array.isArray(value?.programs) ? value.programs : [],
     };

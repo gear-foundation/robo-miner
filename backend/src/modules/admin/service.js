@@ -83,6 +83,21 @@ export class AdminService {
     let deletedFactoryDocuments = [];
     let resetRequest = null;
 
+    if (resetFactory) {
+      resetRequest = {
+        schemaVersion: 1,
+        id: requestId,
+        type: 'factory-reset-request',
+        status: 'pending',
+        network: 'testnet',
+        scope: normalizedScope,
+        restartFactory: Boolean(restartFactory),
+        createdAt: now,
+      };
+      await this.writeFactoryResetRequest(resetRequest);
+      deletedFactoryDocuments = await this.deleteFactoryDocuments(factoryDocuments);
+    }
+
     if (resetRegistry) {
       await this.store.write({
         jobRuns: [{
@@ -95,21 +110,6 @@ export class AdminService {
           createdAt: now,
         }],
       });
-    }
-
-    if (resetFactory) {
-      deletedFactoryDocuments = await this.deleteFactoryDocuments(factoryDocuments);
-      resetRequest = {
-        schemaVersion: 1,
-        id: requestId,
-        type: 'factory-reset-request',
-        status: 'pending',
-        network: 'testnet',
-        scope: normalizedScope,
-        restartFactory: Boolean(restartFactory),
-        createdAt: now,
-      };
-      await this.writeFactoryResetRequest(resetRequest);
     }
 
     this.logger?.warn?.('testnet.reset', {

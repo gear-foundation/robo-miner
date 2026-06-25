@@ -36,6 +36,8 @@ test('testnet reset clears registry and queues a factory reset request', async (
     'testnet:factory:gamemaster',
     'testnet:factory:balance-keeper',
   ]]);
+  assert.deepEqual(documents.operations.map((item) => item.type), ['write', 'deleteMany']);
+  assert.equal(documents.operations[0].id, 'testnet:factory:factory-reset-request');
   assert.equal(documents.writes[0].id, 'testnet:factory:factory-reset-request');
   assert.equal(documents.writes[0].data.status, 'pending');
   assert.equal(documents.writes[0].data.network, 'testnet');
@@ -114,9 +116,11 @@ class MemoryDocumentStore {
     this.docs = new Map(Object.entries(structuredClone(initial)));
     this.deleted = [];
     this.writes = [];
+    this.operations = [];
   }
 
   async deleteMany(ids) {
+    this.operations.push({ type: 'deleteMany', ids: [...ids] });
     this.deleted.push([...ids]);
     const deleted = [];
     for (const id of ids) {
@@ -126,6 +130,7 @@ class MemoryDocumentStore {
   }
 
   async write(id, data) {
+    this.operations.push({ type: 'write', id });
     this.docs.set(id, structuredClone(data));
     this.writes.push({ id, data: structuredClone(data) });
   }

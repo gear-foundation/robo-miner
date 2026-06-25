@@ -1,10 +1,13 @@
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { SnapshotReader } from '../indexer/snapshotReader.js';
 
 export class AdminService {
-  constructor({ store, config, chainFactory, now = () => new Date(), logger = null }) {
+  constructor({ store, config, chainFactory, documentStore = null, now = () => new Date(), logger = null }) {
     this.store = store;
     this.config = config;
     this.chainFactory = chainFactory;
+    this.documentStore = documentStore;
     this.now = now;
     this.logger = logger;
   }
@@ -54,6 +57,109 @@ export class AdminService {
       this.logger?.warn?.('rental.clear_failed', { removed });
       return { removed };
     });
+  }
+
+  async resetTestnetState({ scope = 'all', confirm = '', restartFactory = true } = {}) {
+    if (this.config.network !== 'testnet' || this.config.databaseDocumentId !== 'testnet') {
+      throw httpError(403, 'testnet reset is only available for the testnet data namespace');
+    }
+    if (confirm !== 'reset-testnet') {
+      throw httpError(400, 'missing reset confirmation');
+    }
+
+    const normalizedScope = String(scope || 'all').toLowerCase();
+    if (!['registry', 'factory', 'all'].includes(normalizedScope)) {
+      throw httpError(400, 'invalid reset scope');
+    }
+
+    const now = this.now().toISOString();
+    const requestId = `admin-testnet-reset:${now}`;
+    const resetRegistry = normalizedScope === 'registry' || normalizedScope === 'all';
+    const resetFactory = normalizedScope === 'factory' || normalizedScope === 'all';
+    if (resetFactory && restartFactory !== true) {
+      throw httpError(400, 'factory reset requires restartFactory=true');
+    }
+    const factoryDocuments = factoryDocumentIds(this.config);
+    let deletedFactoryDocuments = [];
+    let resetRequest = null;
+
+    if (resetRegistry) {
+      await this.store.write({
+        jobRuns: [{
+          id: requestId,
+          job: 'admin-testnet-reset',
+          mode: 'admin',
+          scope: normalizedScope,
+          resetRegistry,
+          resetFactory,
+          createdAt: now,
+        }],
+      });
+    }
+
+    if (resetFactory) {
+      deletedFactoryDocuments = await this.deleteFactoryDocuments(factoryDocuments);
+      resetRequest = {
+        schemaVersion: 1,
+        id: requestId,
+        type: 'factory-reset-request',
+        status: 'pending',
+        network: 'testnet',
+        scope: normalizedScope,
+        restartFactory: Boolean(restartFactory),
+        createdAt: now,
+      };
+      await this.writeFactoryResetRequest(resetRequest);
+    }
+
+    this.logger?.warn?.('testnet.reset', {
+      scope: normalizedScope,
+      resetRegistry,
+      resetFactory,
+      restartFactory: Boolean(restartFactory),
+      deletedFactoryDocuments,
+    });
+
+    return {
+      status: 'ok',
+      network: 'testnet',
+      scope: normalizedScope,
+      resetRegistry,
+      resetFactory,
+      restartFactory: Boolean(restartFactory),
+      deletedFactoryDocuments,
+      factoryResetQueued: Boolean(resetRequest),
+      resetRequestId: resetRequest?.id || null,
+    };
+  }
+
+  async deleteFactoryDocuments(ids) {
+    if (this.documentStore?.deleteMany) {
+      return this.documentStore.deleteMany(ids);
+    }
+    const removed = [];
+    for (const file of factoryStateFiles(this.config)) {
+      try {
+        await rm(file, { force: true });
+        removed.push(file);
+      } catch {
+        // rm({ force: true }) should not throw for missing files, but keep reset
+        // best-effort for stores that do not expose document deletion.
+      }
+    }
+    return removed;
+  }
+
+  async writeFactoryResetRequest(request) {
+    const id = factoryResetDocumentId(this.config);
+    if (this.documentStore?.write) {
+      await this.documentStore.write(id, request);
+      return id;
+    }
+    const file = path.join(this.config.stateDir, 'factory-reset-request.json');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, `${JSON.stringify(request, null, 2)}\n`);
+    return file;
   }
 
   async readRedeem(programId) {
@@ -128,4 +234,38 @@ export class AdminService {
 
 function normalizeKey(value) {
   return String(value || '').toLowerCase();
+}
+
+function factoryDocumentPrefix(config) {
+  return config.storeBackend === 'postgres' && config.databaseDocumentId && config.databaseDocumentId !== 'main'
+    ? `${config.databaseDocumentId}:`
+    : '';
+}
+
+function factoryDocumentIds(config) {
+  const prefix = factoryDocumentPrefix(config);
+  return [
+    `${prefix}factory:factory-live`,
+    `${prefix}factory:factory-programs`,
+    `${prefix}factory:factory-past`,
+    `${prefix}factory:balance-keeper`,
+  ];
+}
+
+function factoryResetDocumentId(config) {
+  return `${factoryDocumentPrefix(config)}factory:factory-reset-request`;
+}
+
+function factoryStateFiles(config) {
+  return [
+    'factory-live.json',
+    'factory-programs.json',
+    'factory-past.json',
+  ].map((name) => path.join(config.stateDir, name));
+}
+
+function httpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
 }

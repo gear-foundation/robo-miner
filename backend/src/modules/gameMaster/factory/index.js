@@ -47,6 +47,8 @@ function stateFilePath(name) {
 const liveFilePath = () => stateFilePath('factory-live.json');
 const pastFilePath = () => stateFilePath('factory-past.json');
 const registryFilePath = () => stateFilePath('gamemaster.json');
+const programsFilePath = () => stateFilePath('factory-programs.json');
+const resetRequestFilePath = () => stateFilePath('factory-reset-request.json');
 const RESTORABLE_LIVE = new Set([WORLD.OPEN, WORLD.ACTIVE, WORLD.FINISHED]);
 
 async function readJson(file, fallback = null) {
@@ -246,6 +248,7 @@ const factory = createFactory({
     const snapshot = await driver.archiveSnapshot(world);
     return archives.save(world, snapshot);
   },
+  onResetRequest: useChain ? consumeFactoryResetRequest : null,
 });
 
 // Agent-facing discovery: the single address agents scan for current matches.
@@ -298,7 +301,7 @@ function createWorldRegistry() {
 }
 
 async function recoverLiveFromPool(live, env) {
-  const pool = await readJson(stateFilePath('factory-programs.json'), {});
+  const pool = await readJson(programsFilePath(), {});
   const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
   const known = new Set(live.map((world) => String(world.programId || '').toLowerCase()).filter(Boolean));
   const missing = programs.filter((programId) => !known.has(String(programId).toLowerCase()));
@@ -349,6 +352,31 @@ async function recoverLiveFromPool(live, env) {
     console.warn(`[factory] recovered ${recovered.length} live world(s) from factory-programs pool`);
   }
   return [...live, ...recovered];
+}
+
+async function consumeFactoryResetRequest() {
+  const request = await readJson(resetRequestFilePath(), null);
+  if (!request || request.status !== 'pending') return false;
+  if (request.network && request.network !== chainEnv.network) return false;
+
+  const now = new Date().toISOString();
+  console.warn(`[factory] reset requested id=${request.id || '-'} scope=${request.scope || '-'} — clearing factory state`);
+  await writeJson(liveFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
+  await writeJson(pastFilePath(), { schemaVersion: 1, updatedAt: now, worlds: [] });
+  await writeJson(programsFilePath(), { schemaVersion: 1, updatedAt: now, codeId: null, programs: [] });
+  await documentStore?.deleteMany?.([`${documentPrefix}factory:balance-keeper`]);
+  await writeJson(resetRequestFilePath(), {
+    ...request,
+    status: 'applied',
+    appliedAt: now,
+  });
+
+  console.warn('[factory] reset applied — exiting so the process supervisor restarts with an empty pool');
+  setTimeout(() => {
+    driver.disconnect?.();
+    process.exit(0);
+  }, 50);
+  return true;
 }
 
 function nextWorldNumber(worlds) {

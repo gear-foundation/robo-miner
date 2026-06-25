@@ -22,9 +22,12 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     const agents = w.agents ?? 0;
     const maxAgents = w.capAgents ?? 0;
     const canRegister = JOINABLE_STATUSES.has(status) && agents < maxAgents;
+    const sessionKey = w.archiveId || `${w.id}-s${w.sessionId ?? 0}`;
+    const archiveId = status === 'archived' ? sessionKey : (w.archiveId || null);
     return {
-      id: w.id,
-      sessionKey: w.archiveId || `${w.id}-s${w.sessionId ?? 0}`,
+      id: status === 'archived' ? sessionKey : w.id,
+      worldId: w.id,
+      sessionKey,
       programId: w.programId,
       status, // open | active | archived
       phase: status,
@@ -44,8 +47,8 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
       sessionAutofinish: Boolean(cfg.sessionAutofinish),
       finishedAt: w.finishedAt || null,
       archivedAt: w.archivedAt || null,
-      archiveId: w.archiveId || null,
-      archiveUrl: w.archiveUrl || (w.archiveId ? `/archives/${encodeURIComponent(w.archiveId)}` : null),
+      archiveId,
+      archiveUrl: w.archiveUrl || (archiveId ? `/archives/${encodeURIComponent(archiveId)}` : null),
     };
   };
 

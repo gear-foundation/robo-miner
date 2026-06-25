@@ -82,6 +82,139 @@ test('factory recycles an active world when the contract session is already fini
   assert.ok(liveSnapshots.some((snapshot) => snapshot.some((item) => item.status === WORLD.FINISHED)));
 });
 
+test('factory reopens a restored finished world when the contract session is already created', async () => {
+  let now = 1500;
+  let archived = false;
+  let recycled = false;
+  let provisioned = false;
+  const world = makeWorld({
+    id: 'w001',
+    status: WORLD.FINISHED,
+    programId: '0x1111111111111111111111111111111111111111',
+    seed: '177285300',
+    mapHash: 'old-map',
+    sessionId: 1,
+    agents: 10,
+    owners: ['0x01', '0x02'],
+    createdAt: now - 500,
+    openedAt: now - 400,
+    lastJoinAt: now - 350,
+    startedAt: now - 300,
+    finishedAt: now - 100,
+    archivedAt: null,
+    archiveId: null,
+    archiveUrl: null,
+  });
+
+  const factory = createFactory({
+    config: {
+      poolSize: 1,
+      baseWorlds: 0,
+      lobbyMode: true,
+      lobbyMin: 1,
+      lobbyCap: 10,
+      autoStartAtMin: true,
+      lobbyTimeoutMs: 0,
+      autoStartOnTimeout: false,
+      sessionAutofinish: false,
+      sessionMs: 30 * 60 * 1000,
+      recycle: true,
+      pastLimit: 50,
+      tickMs: 5,
+    },
+    clock: () => {
+      now += 100;
+      return now;
+    },
+    log: () => {},
+    initialLive: [world],
+    driver: {
+      async pollSession() {
+        return { sessionId: 2, seed: 987654321, status: 0, actionSeq: 0 };
+      },
+      async pollAgents() {
+        return [];
+      },
+      async archiveSnapshot() {
+        archived = true;
+        throw new Error('restored open world must not be archived');
+      },
+      async recycle() {
+        recycled = true;
+        throw new Error('restored open world must not be recycled');
+      },
+      async provision() {
+        provisioned = true;
+        throw new Error('restored open world should satisfy the pool');
+      },
+      ensureBalance() {},
+    },
+    onLive: async () => {},
+    onPast: async () => {},
+  });
+
+  await factory.start();
+  await waitFor(() => factory.worlds().some((item) => item.id === 'w001' && item.status === WORLD.OPEN));
+  factory.stop();
+
+  const [current] = factory.worlds();
+  assert.equal(current.status, WORLD.OPEN);
+  assert.equal(current.sessionId, 2);
+  assert.equal(current.seed, '987654321');
+  assert.equal(current.agents, 0);
+  assert.deepEqual(current.owners, []);
+  assert.equal(current.finishedAt, null);
+  assert.equal(archived, false);
+  assert.equal(recycled, false);
+  assert.equal(provisioned, false);
+});
+
+test('factory reset hook stops the tick before provisioning or publishing', async () => {
+  let provisioned = false;
+  let published = false;
+  let resetHandled = false;
+  const factory = createFactory({
+    config: {
+      poolSize: 1,
+      baseWorlds: 1,
+      lobbyMode: true,
+      lobbyMin: 1,
+      lobbyCap: 10,
+      autoStartAtMin: true,
+      lobbyTimeoutMs: 0,
+      autoStartOnTimeout: false,
+      sessionAutofinish: false,
+      sessionMs: 0,
+      recycle: true,
+      pastLimit: 50,
+      tickMs: 5,
+    },
+    log: () => {},
+    onResetRequest: async () => {
+      resetHandled = true;
+      return true;
+    },
+    publish: async () => {
+      published = true;
+    },
+    driver: {
+      async provision() {
+        provisioned = true;
+        throw new Error('provision must not run during reset');
+      },
+      ensureBalance() {},
+    },
+  });
+
+  await factory.start();
+  await sleep(20);
+  factory.stop();
+
+  assert.equal(resetHandled, true);
+  assert.equal(provisioned, false);
+  assert.equal(published, false);
+});
+
 test('factory recycles a finished active world before provisioning a replacement', async () => {
   let now = 2000;
   let recycled = false;

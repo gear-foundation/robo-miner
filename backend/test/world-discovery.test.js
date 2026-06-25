@@ -205,6 +205,81 @@ test('factory publisher preserves session and archive metadata in registry', asy
   assert.equal(archived.archivedAt, '2026-06-23T11:41:00.000Z');
 });
 
+test('factory publisher gives stale archived worlds a non-colliding archive id', async () => {
+  const store = new MemoryStore();
+  const registry = new WorldRegistryService({
+    store,
+    config: {
+      ...CONFIG,
+      sessionMs: 1800000,
+      factoryLobbyMin: 1,
+      factoryLobbyCap: 10,
+      factorySessionAutofinish: false,
+    },
+    now: () => new Date('2026-06-23T13:00:00.000Z'),
+  });
+  const publisher = createRegistryPublisher({
+    cfg: {
+      lobbyMin: 1,
+      lobbyCap: 10,
+      sessionMs: 1800000,
+      sessionAutofinish: false,
+    },
+    env: {
+      adminKey: '0xadmin',
+      network: 'mainnet',
+      router: '0xrouter',
+    },
+    now: () => Date.parse('2026-06-23T13:00:00.000Z'),
+    worldRegistry: registry,
+  });
+
+  await publisher.publish([
+    {
+      id: 'w001',
+      status: 'open',
+      programId: '0x1111111111111111111111111111111111111111',
+      seed: '42',
+      mapHash: 'hash',
+      sessionId: 2,
+      agents: 0,
+      owners: [],
+      createdAt: Date.parse('2026-06-23T12:00:00.000Z'),
+      openedAt: Date.parse('2026-06-23T12:30:00.000Z'),
+    },
+    {
+      id: 'w001',
+      status: 'archived',
+      programId: '0x1111111111111111111111111111111111111111',
+      seed: '41',
+      mapHash: 'old-hash',
+      sessionId: 1,
+      agents: 10,
+      owners: ['0xowner'],
+      createdAt: Date.parse('2026-06-23T11:00:00.000Z'),
+      openedAt: Date.parse('2026-06-23T11:05:00.000Z'),
+      startedAt: Date.parse('2026-06-23T11:10:00.000Z'),
+      finishedAt: Date.parse('2026-06-23T11:40:00.000Z'),
+      archivedAt: Date.parse('2026-06-23T11:41:00.000Z'),
+      archiveId: null,
+      archiveUrl: null,
+    },
+  ]);
+
+  const manifest = await registry.getManifest();
+  const live = manifest.active.find((world) => world.id === 'w001');
+  const archived = manifest.past.find((world) => world.id === 'w001-s1');
+
+  assert.equal(manifest.active.length, 1);
+  assert.equal(manifest.past.length, 1);
+  assert.equal(live.status, 'waiting_agents');
+  assert.equal(live.sessionId, 2);
+  assert.equal(archived.worldId, 'w001');
+  assert.equal(archived.archiveId, 'w001-s1');
+  assert.equal(archived.archiveUrl, '/archives/w001-s1');
+  assert.equal(archived.sessionId, 1);
+});
+
 class MemoryStore {
   constructor(initial = {}) {
     this.db = normalizeDb(initial);

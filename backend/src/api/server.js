@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { createVaraEthChain } from '../chain/varaEth.js';
 import { loadConfig } from '../config/index.js';
-import { createStore } from '../db/store.js';
+import { createDocumentStore, createStore } from '../db/store.js';
 import { EventBus } from './eventBus.js';
 import { streamEvents, wantsEventStream } from './eventStream.js';
 import { withAgentName } from '../modules/agentNames.js';
@@ -42,12 +42,6 @@ const dryRunRental = new DiggerRentalService({
   store,
   chain: null,
   config,
-});
-const adminService = new AdminService({
-  store,
-  config,
-  chainFactory: () => createVaraEthChain(config),
-  logger: createLogger('admin'),
 });
 const socialVerifier = new SocialVerifierService({
   store,
@@ -97,6 +91,13 @@ function bundleFor(networkParam) {
       registry: new WorldRegistryService({ store: netStore, config: netConfig }),
       diggerRegistry: new DiggerRegistryService({ store: netStore, config: netConfig }),
       leaderboardService: new LeaderboardService({ store: netStore, config: netConfig }),
+      adminService: new AdminService({
+        store: netStore,
+        config: netConfig,
+        chainFactory: () => createVaraEthChain(netConfig),
+        documentStore: createDocumentStore(netConfig),
+        logger: createLogger(`admin:${network}`),
+      }),
     };
     bundleCache.set(network, bundle);
   }
@@ -126,6 +127,7 @@ const server = http.createServer(async (req, res) => {
     const registry = net.registry;
     const diggerRegistry = net.diggerRegistry;
     const leaderboardService = net.leaderboardService;
+    const adminService = net.adminService;
     if (url.pathname.startsWith('/api/admin/') && !authorizedAdmin(req)) {
       logger.warn('admin.unauthorized', { method: req.method, path: url.pathname });
       return json(res, 401, { error: 'unauthorized' });
@@ -302,6 +304,19 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/admin/rental/clear-failed') {
       logger.warn('admin.rental.clear_failed');
       return json(res, 200, await adminService.clearFailedRentalRequests());
+    }
+    if (req.method === 'POST' && url.pathname === '/api/admin/testnet/reset') {
+      const body = await readJsonBody(req);
+      const testnetAdmin = bundleFor('testnet').adminService;
+      logger.warn('admin.testnet.reset', {
+        scope: body.scope || 'all',
+        restartFactory: body.restartFactory ?? true,
+      });
+      return json(res, 202, await testnetAdmin.resetTestnetState({
+        scope: body.scope || 'all',
+        confirm: body.confirm || '',
+        restartFactory: body.restartFactory ?? true,
+      }));
     }
     if (req.method === 'GET' && url.pathname === '/api/admin/redeem') {
       const programId = url.searchParams.get('program') || config.redeemProgramIds[0];

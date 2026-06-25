@@ -20,6 +20,10 @@ const STATUS_MAP = {
 
 const iso = (ms) => (ms ? new Date(ms).toISOString() : null);
 
+function archiveIdFor(world) {
+  return `${world.id}-s${world.sessionId ?? 0}`;
+}
+
 export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now = Date.now, worldRegistry = null }) {
   const dir = path.isAbsolute(stateDir) ? stateDir : path.resolve(ROOT, stateDir);
   const file = path.join(dir, 'gamemaster.json');
@@ -29,7 +33,10 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
   function toRecord(world, ts) {
     const startsAt = world.startedAt ?? world.openedAt ?? world.createdAt;
     const status = STATUS_MAP[world.status] || world.status;
-    const id = status === 'archived' && world.archiveId ? world.archiveId : world.id;
+    const archiveId = status === 'archived'
+      ? (world.archiveId || archiveIdFor(world))
+      : (world.archiveId || null);
+    const id = status === 'archived' ? archiveId : world.id;
     return {
       schemaVersion: 1,
       id,
@@ -62,8 +69,8 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       chain: { startedAt: iso(world.startedAt), finishedAt: iso(world.finishedAt) },
       finishedAt: iso(world.finishedAt),
       archivedAt: iso(world.archivedAt),
-      archiveId: world.archiveId || null,
-      archiveUrl: world.archiveUrl || null,
+      archiveId,
+      archiveUrl: world.archiveUrl || (status === 'archived' && archiveId ? `/archives/${encodeURIComponent(archiveId)}` : null),
     };
   }
 

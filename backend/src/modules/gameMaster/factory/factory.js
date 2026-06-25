@@ -8,6 +8,8 @@
 import { WORLD, newWorld, syncWorldCounter, decideStart, worldView } from './world.js';
 
 const POOL_STATUSES = [WORLD.PROVISIONING, WORLD.OPEN, WORLD.ACTIVE];
+const SESSION_CREATED = 0;
+const SESSION_ACTIVE = 1;
 const SESSION_FINISHED = 2;
 
 export function createFactory({
@@ -21,6 +23,7 @@ export function createFactory({
   onLive = null, // persist callback whenever the live pool changes
   onPast = null, // persist callback whenever the past list changes
   onArchive = null, // persist a frozen chain snapshot before a program is recycled
+  onResetRequest = null, // optional operator reset hook; returns true after handling
 }) {
   const cfg = config;
   syncWorldCounter(initialLive);
@@ -179,6 +182,45 @@ export function createFactory({
     }
   }
 
+  async function recoverFinishedWorldFromChain(world) {
+    if (typeof driver.pollSession !== 'function') return false;
+    const session = await driver.pollSession(world);
+    if (session?.sessionId != null) world.sessionId = session.sessionId;
+    if (session?.seed != null) world.seed = String(session.seed);
+    const status = Number(session?.status);
+    if (status === SESSION_FINISHED) return false;
+    if (status !== SESSION_CREATED && status !== SESSION_ACTIVE) return false;
+
+    let owners = null;
+    if (typeof driver.pollAgents === 'function') {
+      owners = await driver.pollAgents(world);
+    }
+    if (Array.isArray(owners)) {
+      world.owners = owners;
+      world.agents = owners.length;
+    } else if (Number.isFinite(Number(owners))) {
+      world.agents = Number(owners);
+    } else if (status === SESSION_CREATED) {
+      world.owners = [];
+      world.agents = 0;
+    }
+
+    const now = clock();
+    world.status = status === SESSION_ACTIVE ? WORLD.ACTIVE : WORLD.OPEN;
+    world.openedAt = status === SESSION_CREATED ? now : (world.openedAt || now);
+    world.lastJoinAt = world.openedAt;
+    world.startedAt = status === SESSION_ACTIVE ? (world.startedAt || now) : null;
+    world.finishedAt = null;
+    world.archivedAt = null;
+    world.archiveId = null;
+    world.archiveUrl = null;
+    world.eligibleManualStart = false;
+    world.startReason = null;
+    log(`[factory]   ${world.id} restored from contract session status=${status} session=${world.sessionId}`);
+    await persistLive();
+    return true;
+  }
+
   async function recycleWorld(world) {
     const archived = await archiveFinishedWorld(world);
     if (!archived) return;
@@ -215,6 +257,16 @@ export function createFactory({
   }
 
   async function tick() {
+    if (onResetRequest) {
+      try {
+        if (await onResetRequest()) {
+          running = false;
+          return;
+        }
+      } catch (error) {
+        log(`[factory] reset request error: ${error?.message || error}`);
+      }
+    }
     for (const world of active()) {
       if (world.status === WORLD.OPEN) {
         driver.ensureBalance?.(world); // proactive top-up so the open world stays fundable
@@ -224,6 +276,7 @@ export function createFactory({
         await tickActive(world);
       }
       if (world.status === WORLD.FINISHED) {
+        if (await recoverFinishedWorldFromChain(world)) continue;
         await recycleWorld(world);
       }
     }

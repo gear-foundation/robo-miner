@@ -133,6 +133,17 @@ export class PostgresDocumentStore {
     );
   }
 
+  async deleteMany(ids) {
+    await this.ready();
+    const uniqueIds = [...new Set((ids || []).filter(Boolean).map(String))];
+    if (!uniqueIds.length) return [];
+    const result = await this.pool.query(
+      `DELETE FROM ${this.tableName()} WHERE id = ANY($1::text[]) RETURNING id`,
+      [uniqueIds],
+    );
+    return result.rows.map((row) => row.id);
+  }
+
   tableName() {
     return `${ident(this.schema)}.backend_documents`;
   }

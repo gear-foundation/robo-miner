@@ -321,10 +321,11 @@ export async function connectDiggerWorldChain(env) {
   // how the factory previously leaked funded-but-uninitialized programs). Idempotent.
   // Ported from contracts/scripts/reload-program.ts (the tested reference).
   async function initializeProgram(programId) {
-    const deadline = Date.now() + Number(env.timeoutMs || 180000);
+    const timeoutMs = Number(env.timeoutMs || 180000);
+    const visibleDeadline = Date.now() + timeoutMs;
     // 1. Wait through the post-creation registration window until state is readable.
     let state = null;
-    while (Date.now() < deadline) {
+    while (Date.now() < visibleDeadline) {
       try { state = await readProgramState(programId); break; }
       catch { await sleep(2000); }
     }
@@ -336,7 +337,8 @@ export async function connectDiggerWorldChain(env) {
     const tx = await mirror.sendMessage(sails.ctors.Create.encodePayload(), 0n);
     await tx.send();
     await tx.getReceipt();
-    while (Date.now() < deadline) {
+    const initDeadline = Date.now() + timeoutMs;
+    while (Date.now() < initDeadline) {
       try {
         if (isProgramInitialized(await readProgramState(programId))) return;
       } catch { /* transient — keep polling */ }

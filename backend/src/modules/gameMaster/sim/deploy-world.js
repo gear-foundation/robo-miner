@@ -20,12 +20,19 @@ console.log('[deploy] code validated:', codeId);
 console.log('[deploy] creating + funding program…');
 const programId = await c.createProgram(codeId, BigInt(env.topUp));
 console.log('[deploy] program created:', programId, '— initializing Create()…');
-await c.sendAdmin(programId, c.encode.create());
+await c.initializeProgram(programId);
 
 let m = null;
-for (let i = 0; i < 6 && !m; i += 1) {
-  const cand = generateMap(randomSeed(), { contractSurface: env.contractSurface });
+const explicitSeed = process.env.DIGGER_SEED;
+if (explicitSeed != null && explicitSeed !== '') {
+  const seed = Number(explicitSeed);
+  const cand = generateMap(seed, { contractSurface: env.contractSurface });
   if (cand.valid) m = cand;
+} else {
+  for (let i = 0; i < 6 && !m; i += 1) {
+    const cand = generateMap(randomSeed(), { contractSurface: env.contractSurface });
+    if (cand.valid) m = cand;
+  }
 }
 if (!m) { console.error('[deploy] could not generate a valid map'); process.exit(1); }
 console.log(`[deploy] uploading map seed=${m.seed} hash=${gridHash(m.map)}…`);

@@ -21,14 +21,14 @@ contract DiggerL1Adapter {
         uint256 payout;
     }
 
-    uint256 public constant VARA_UNIT = 1_000_000_000_000;
-    uint256 public constant SCRST_RATE = 66 * VARA_UNIT;
-    uint256 public constant BCRST_RATE = 330 * VARA_UNIT;
-    uint256 public constant HCRST_RATE = 1650 * VARA_UNIT;
-
     address public immutable owner;
     IDiggerResVmtMirror public immutable resVmtMirror;
     IDiggerRedeemMirror public immutable redeemMirror;
+
+    uint256 public immutable varaUnit;
+    uint256 public immutable scrstRate;
+    uint256 public immutable bcrstRate;
+    uint256 public immutable hcrstRate;
 
     ResourceToken public immutable scrst;
     ResourceToken public immutable bcrst;
@@ -56,20 +56,35 @@ contract DiggerL1Adapter {
     error DuplicateMessage();
     error InsufficientReserve();
     error TransferFailed();
+    error ZeroRate();
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(address resVmtMirror_, address redeemMirror_) {
+    constructor(
+        address resVmtMirror_,
+        address redeemMirror_,
+        uint256 varaUnit_,
+        uint256 scrstRate_,
+        uint256 bcrstRate_,
+        uint256 hcrstRate_
+    ) {
         if (resVmtMirror_ == address(0) || redeemMirror_ == address(0)) {
             revert ZeroAddress();
+        }
+        if (varaUnit_ == 0 || scrstRate_ == 0 || bcrstRate_ == 0 || hcrstRate_ == 0) {
+            revert ZeroRate();
         }
 
         owner = msg.sender;
         resVmtMirror = IDiggerResVmtMirror(resVmtMirror_);
         redeemMirror = IDiggerRedeemMirror(redeemMirror_);
+        varaUnit = varaUnit_;
+        scrstRate = scrstRate_;
+        bcrstRate = bcrstRate_;
+        hcrstRate = hcrstRate_;
 
         scrst = new ResourceToken("Digger SCRST", "SCRST", address(this));
         bcrst = new ResourceToken("Digger BCRST", "BCRST", address(this));
@@ -116,8 +131,9 @@ contract DiggerL1Adapter {
         emit RedeemRequested(messageId, msg.sender, scrstAmount, bcrstAmount, hcrstAmount, payout);
     }
 
-    function quoteRedeem(uint128 scrstAmount, uint128 bcrstAmount, uint128 hcrstAmount) public pure returns (uint256) {
-        return uint256(scrstAmount) * SCRST_RATE + uint256(bcrstAmount) * BCRST_RATE + uint256(hcrstAmount) * HCRST_RATE;
+    function quoteRedeem(uint128 scrstAmount, uint128 bcrstAmount, uint128 hcrstAmount) public view returns (uint256) {
+        return uint256(scrstAmount) * scrstRate * varaUnit + uint256(bcrstAmount) * bcrstRate * varaUnit
+            + uint256(hcrstAmount) * hcrstRate * varaUnit;
     }
 
     function withdrawClaim() external {

@@ -197,6 +197,153 @@ async fn active_session_still_accepts_late_registration() {
 }
 
 #[tokio::test]
+async fn admin_can_update_chest_dynamite_chance() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-chest-config").await;
+
+    let default_chance: sails_rs::Result<u32, sails_rs::String> =
+        world.admin().chest_dynamite_chance_bps().await.unwrap();
+    assert_eq!(
+        default_chance,
+        Ok(digger_world_app::DEFAULT_CHEST_DYNAMITE_CHANCE_BPS)
+    );
+
+    let updated: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(2_500)
+        .await
+        .unwrap();
+    assert_eq!(updated, Ok(2_500));
+
+    let read_back: sails_rs::Result<u32, sails_rs::String> =
+        world.admin().chest_dynamite_chance_bps().await.unwrap();
+    assert_eq!(read_back, Ok(2_500));
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    assert_eq!(config.expect("config query should succeed")[9], 2_500);
+
+    let rejected: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(digger_world_app::PROBABILITY_BASIS_POINTS + 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected,
+        Err("chest dynamite chance must be at most 100%".into())
+    );
+
+    let unauthorized: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(500)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized, Err("caller is not admin".into()));
+}
+
+#[tokio::test]
+async fn create_accepts_initial_world_config() {
+    let (env, code_id) = create_env();
+    let config = (
+        (
+            digger_world_app::MAP_WIDTH,
+            digger_world_app::MAP_HEIGHT,
+            100,
+            77,
+            19,
+            4,
+            1,
+            35,
+            7,
+            2_500,
+        ),
+        (2, 1, 2, 5, 1, 10),
+    );
+
+    let world =
+        deploy_world_program_with_config(&env, code_id, "world-custom-config", config).await;
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    assert_eq!(
+        config,
+        Ok(vec![
+            digger_world_app::MAP_WIDTH,
+            digger_world_app::MAP_HEIGHT,
+            100,
+            77,
+            19,
+            4,
+            1,
+            35,
+            7,
+            2_500,
+            2,
+            1,
+            2,
+            5,
+            1,
+            10,
+        ])
+    );
+}
+
+#[tokio::test]
+async fn admin_can_update_ladder_exchange_rate() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-ladder-rate").await;
+
+    let default_rate: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.admin().ladder_exchange_rate().await.unwrap();
+    assert_eq!(
+        default_rate,
+        Ok(vec![
+            digger_world_app::DEFAULT_LADDER_SCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_SCRST_LADDER_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_BCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_HCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_HCRST_LADDER_AMOUNT,
+        ])
+    );
+
+    let updated: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(2, 1, 2, 5, 1, 15)
+        .await
+        .unwrap();
+    assert_eq!(updated, Ok(vec![2, 1, 2, 5, 1, 15]));
+
+    let read_back: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.admin().ladder_exchange_rate().await.unwrap();
+    assert_eq!(read_back, Ok(vec![2, 1, 2, 5, 1, 15]));
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    let config = config.expect("config query should succeed");
+    assert_eq!(&config[10..16], &[2, 1, 2, 5, 1, 15]);
+
+    let rejected: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(0, 1, 2, 5, 1, 15)
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected,
+        Err("ladder SCRST resource amount must be greater than zero".into())
+    );
+
+    let unauthorized: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(2, 1, 2, 5, 1, 15)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized, Err("caller is not admin".into()));
+}
+
+#[tokio::test]
 async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
     let (env, code_id) = create_env();
     let world = deploy_world_program(&env, code_id, "world-resource-trade").await;
@@ -255,7 +402,10 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
         .await
         .unwrap();
     let agent_after_trade = traded.expect("resource trade should succeed");
-    assert_eq!(agent_after_trade[4], (STARTING_LADDERS + 1) as u128);
+    assert_eq!(
+        agent_after_trade[4],
+        (STARTING_LADDERS + digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT) as u128
+    );
     assert_eq!(agent_after_trade[9], 0);
 
     assert_eq!(
@@ -268,8 +418,8 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
                 0,
                 1,
                 0,
-                1,
-                STARTING_LADDERS + 1,
+                digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
+                STARTING_LADDERS + digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
             )
         )
     );
@@ -365,8 +515,18 @@ async fn deploy_world_program(
     code_id: CodeId,
     salt: &str,
 ) -> sails_rs::client::Actor<::digger_world_client::DiggerWorldClientProgram, GtestEnv> {
+    deploy_world_program_with_config(env, code_id, salt, digger_world_app::default_40x64_input())
+        .await
+}
+
+async fn deploy_world_program_with_config(
+    env: &GtestEnv,
+    code_id: CodeId,
+    salt: &str,
+    config: digger_world_app::WorldConfigInput,
+) -> sails_rs::client::Actor<::digger_world_client::DiggerWorldClientProgram, GtestEnv> {
     env.deploy::<::digger_world_client::DiggerWorldClientProgram>(code_id, salt.as_bytes().to_vec())
-        .create()
+        .create(config)
         .await
         .unwrap()
 }

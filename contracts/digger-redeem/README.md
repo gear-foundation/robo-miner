@@ -8,7 +8,7 @@ This contract is the VARA redeem reserve and the player-facing exchange entrypoi
 
 - redeem rate config is required constructor configuration: `vara_unit`, `scrst_rate`, `bcrst_rate`, `hcrst_rate`;
 - `vara_unit` is the number of minimal units in `1` display VARA. On Vara.eth this is normally `1_000_000_000_000`;
-- resource rates are stored as display VARA values, for example `66`, `330`, `1650`;
+- resource rates are stored as display VARA values supplied at init, for example `6`, `30`, `150`;
 - an admin-funded VARA reserve through `redeem.deposit_reserve` (`payable`);
 - direct VARA transfers to the program id are also counted as reserve on the next call;
 - `redeem.redeem(scrst, bcrst, hcrst)`, called by the player with the RES amount they want to exchange;
@@ -25,7 +25,7 @@ The user-facing flow is:
 5. `digger-redeem` locks the calculated VARA payout and sends `vmt.burn_for_redeem` to `digger-res-vmt`.
 6. `digger-res-vmt` checks and burns the player's RES VMT balances.
 7. `digger-res-vmt` calls `confirm_redeem` after a successful burn, or `cancel_redeem` if the burn fails.
-8. `digger-redeem` pays fixed-rate VARA only after `confirm_redeem`.
+8. `digger-redeem` pays configured-rate VARA only after `confirm_redeem`.
 
 ### Roles
 
@@ -35,14 +35,18 @@ The user-facing flow is:
 
 ### Rates And Reserve
 
-Rates and `vara_unit` are constructor configuration:
+Rates and `vara_unit` are constructor configuration. The contract has no
+hardcoded economic default for resource rates; deployments must pass the chosen
+values into `Create`.
 
-| Config | Value |
+Example:
+
+| Config | Example value |
 | --- | ---: |
 | `vara_unit` | `1000000000000` |
-| `SCRST` rate | `66` |
-| `BCRST` rate | `330` |
-| `HCRST` rate | `1650` |
+| `SCRST` rate | `6` |
+| `BCRST` rate | `30` |
+| `HCRST` rate | `150` |
 
 The payout formula is:
 
@@ -53,8 +57,8 @@ payout =
   + hcrst * hcrst_rate * vara_unit
 ```
 
-For example, `redeem(20, 0, 0)` with the SCRST rate above pays
-`20 * 66 * 1000000000000 = 1320000000000000`, which displays as `1320 VARA`.
+For example, `redeem(20, 0, 0)` with the SCRST example rate above pays
+`20 * 6 * 1000000000000 = 120000000000000`, which displays as `120 VARA`.
 
 `deposit_reserve()` is payable and increases the program's available VARA reserve. Direct transfers to the program id are also counted on the next reserve sync.
 

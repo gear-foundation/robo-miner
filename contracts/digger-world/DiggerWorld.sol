@@ -1,6 +1,33 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 
+struct DiggerWorldBaseConfig {
+    uint32 width;
+    uint32 height;
+    uint32 totalResources;
+    uint32 scrstResources;
+    uint32 bcrstResources;
+    uint32 hcrstResources;
+    uint32 startingHp;
+    uint32 startingLadders;
+    uint32 backpackCapacity;
+    uint32 chestDynamiteChanceBps;
+}
+
+struct DiggerWorldLadderExchangeRate {
+    uint32 ladderScrstResourceAmount;
+    uint32 ladderScrstLadderAmount;
+    uint32 ladderBcrstResourceAmount;
+    uint32 ladderBcrstLadderAmount;
+    uint32 ladderHcrstResourceAmount;
+    uint32 ladderHcrstLadderAmount;
+}
+
+struct DiggerWorldConfig {
+    DiggerWorldBaseConfig base;
+    DiggerWorldLadderExchangeRate ladderExchangeRate;
+}
+
 interface IDiggerWorld {
     event AgentDied(uint64, uint8[32], uint32, uint32, uint32);
 
@@ -36,7 +63,7 @@ interface IDiggerWorld {
 
     event SessionStarted(uint64);
 
-    function create(bool _callReply) external returns (bytes32 messageId);
+    function create(bool _callReply, DiggerWorldConfig calldata config) external returns (bytes32 messageId);
 
     function worldAgentOf(bool _callReply, address owner) external returns (bytes32 messageId);
 
@@ -72,13 +99,29 @@ interface IDiggerWorld {
 
     function adminAdmin(bool _callReply) external returns (bytes32 messageId);
 
+    function adminChestDynamiteChanceBps(bool _callReply) external returns (bytes32 messageId);
+
     function adminFinishSession(bool _callReply) external returns (bytes32 messageId);
 
     function adminKill(bool _callReply, address inheritor) external returns (bytes32 messageId);
 
+    function adminLadderExchangeRate(bool _callReply) external returns (bytes32 messageId);
+
     function adminResetMap(bool _callReply, uint64 seed) external returns (bytes32 messageId);
 
     function adminResourceVmt(bool _callReply) external returns (bytes32 messageId);
+
+    function adminSetChestDynamiteChanceBps(bool _callReply, uint32 chestDynamiteChanceBps) external returns (bytes32 messageId);
+
+    function adminSetLadderExchangeRate(
+        bool _callReply,
+        uint32 ladderScrstResourceAmount,
+        uint32 ladderScrstLadderAmount,
+        uint32 ladderBcrstResourceAmount,
+        uint32 ladderBcrstLadderAmount,
+        uint32 ladderHcrstResourceAmount,
+        uint32 ladderHcrstLadderAmount
+    ) external returns (bytes32 messageId);
 
     function adminSetResourceVmt(bool _callReply, address resourceVmt) external returns (bytes32 messageId);
 
@@ -88,7 +131,7 @@ interface IDiggerWorld {
 }
 
 contract DiggerWorldAbi is IDiggerWorld {
-    function create(bool _callReply) external returns (bytes32 messageId) {}
+    function create(bool _callReply, DiggerWorldConfig calldata config) external returns (bytes32 messageId) {}
 
     function worldAgentOf(bool _callReply, address owner) external returns (bytes32 messageId) {}
 
@@ -124,13 +167,29 @@ contract DiggerWorldAbi is IDiggerWorld {
 
     function adminAdmin(bool _callReply) external returns (bytes32 messageId) {}
 
+    function adminChestDynamiteChanceBps(bool _callReply) external returns (bytes32 messageId) {}
+
     function adminFinishSession(bool _callReply) external returns (bytes32 messageId) {}
 
     function adminKill(bool _callReply, address inheritor) external returns (bytes32 messageId) {}
 
+    function adminLadderExchangeRate(bool _callReply) external returns (bytes32 messageId) {}
+
     function adminResetMap(bool _callReply, uint64 seed) external returns (bytes32 messageId) {}
 
     function adminResourceVmt(bool _callReply) external returns (bytes32 messageId) {}
+
+    function adminSetChestDynamiteChanceBps(bool _callReply, uint32 chestDynamiteChanceBps) external returns (bytes32 messageId) {}
+
+    function adminSetLadderExchangeRate(
+        bool _callReply,
+        uint32 ladderScrstResourceAmount,
+        uint32 ladderScrstLadderAmount,
+        uint32 ladderBcrstResourceAmount,
+        uint32 ladderBcrstLadderAmount,
+        uint32 ladderHcrstResourceAmount,
+        uint32 ladderHcrstLadderAmount
+    ) external returns (bytes32 messageId) {}
 
     function adminSetResourceVmt(bool _callReply, address resourceVmt) external returns (bytes32 messageId) {}
 
@@ -176,13 +235,21 @@ interface IDiggerWorldCallbacks {
 
     function replyOn_adminAdmin(bytes32 messageId, address reply) external;
 
+    function replyOn_adminChestDynamiteChanceBps(bytes32 messageId, uint32 reply) external;
+
     function replyOn_adminFinishSession(bytes32 messageId, uint128[] calldata reply) external;
 
     function replyOn_adminKill(bytes32 messageId) external;
 
+    function replyOn_adminLadderExchangeRate(bytes32 messageId, uint32[] calldata reply) external;
+
     function replyOn_adminResetMap(bytes32 messageId, uint128[] calldata reply) external;
 
     function replyOn_adminResourceVmt(bytes32 messageId, address reply) external;
+
+    function replyOn_adminSetChestDynamiteChanceBps(bytes32 messageId, uint32 reply) external;
+
+    function replyOn_adminSetLadderExchangeRate(bytes32 messageId, uint32[] calldata reply) external;
 
     function replyOn_adminSetResourceVmt(bytes32 messageId, address reply) external;
 
@@ -285,6 +352,10 @@ contract DiggerWorldCaller is IDiggerWorldCallbacks {
         // TODO: implement this
     }
 
+    function replyOn_adminChestDynamiteChanceBps(bytes32 messageId, uint32 reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
     function replyOn_adminFinishSession(bytes32 messageId, uint128[] calldata reply) external onlyVaraEthProgram {
         // TODO: implement this
     }
@@ -293,11 +364,23 @@ contract DiggerWorldCaller is IDiggerWorldCallbacks {
         // TODO: implement this
     }
 
+    function replyOn_adminLadderExchangeRate(bytes32 messageId, uint32[] calldata reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
     function replyOn_adminResetMap(bytes32 messageId, uint128[] calldata reply) external onlyVaraEthProgram {
         // TODO: implement this
     }
 
     function replyOn_adminResourceVmt(bytes32 messageId, address reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
+    function replyOn_adminSetChestDynamiteChanceBps(bytes32 messageId, uint32 reply) external onlyVaraEthProgram {
+        // TODO: implement this
+    }
+
+    function replyOn_adminSetLadderExchangeRate(bytes32 messageId, uint32[] calldata reply) external onlyVaraEthProgram {
         // TODO: implement this
     }
 

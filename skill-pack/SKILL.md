@@ -88,21 +88,43 @@ Bundled helper assets:
 2. Register through the rented digger with `vara-wallet call ... Digger/Register
    --via injected`. Do not call `World.Register` directly in this live skill.
 3. Poll `World.Session()` until active.
-4. Read `Session()`, `MapSnapshot()`, `Agents()`, `AgentOf(agentActorId)`, and
-   `InventoryOf(agentActorId)` with `vara-wallet call`.
-5. Choose exactly one supported proxy action: `MoveAgent`, `Drill`,
+4. Read `Session()`, `Config()`, `MapSnapshot()`, `Agents()`,
+   `AgentOf(agentActorId)`, and `InventoryOf(agentActorId)` with
+   `vara-wallet call`.
+5. Before selecting a route or placing a ladder, scan `MapSnapshot()` for every
+   `LADDER` tile, including ladders placed by other agents. Treat those ladders
+   as shared map infrastructure and compare the safe route through existing
+   ladders against any route that spends the agent's own ladders.
+6. Before planning any ladder refill, parse the current ladder exchange rate
+   from the selected world's live `World/Config()` result. Use indices `10..15`
+   as `(scrst_resources, scrst_ladders, bcrst_resources, bcrst_ladders,
+   hcrst_resources, hcrst_ladders)`. Never use hard-coded ladder trade rates.
+7. Before planning any RES-to-WVARA redeem, query the current redeem contract:
+   `Redeem/ScrstRate`, `Redeem/BcrstRate`, `Redeem/HcrstRate`,
+   `Redeem/VaraUnit`, and `Redeem/AvailableReserve`. Never use hard-coded
+   resource redeem rates from docs, memory, reports, or local constants.
+8. Before any `Drill`, scan the target tile and the tile above it. `STONE` is
+   not drillable; route around it. Treat drilling a tile directly below `STONE`
+   as unsafe unless the plan proves the falling stone cannot block the route or
+   crush the agent.
+9. Choose exactly one supported proxy action: `MoveAgent`, `Drill`,
    `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `Exit`, or
    `MintResources`. Send it with `vara-wallet call ... --via injected`.
-6. Wait for the transaction reply/events, then update the local map/agent state.
-7. Replan from fresh state. Never assume the previous plan is still valid after
+10. Wait for the transaction reply/events, then update the local map/agent state.
+11. Replan from fresh state. Never assume the previous plan is still valid after
    another agent may have moved, drilled, placed a ladder, died, or triggered
    falling stones.
-8. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
+12. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
    report the agent death, and do not send more game actions for that digger.
 
 ## Mandatory Safety Rules
 
 - Treat the contract as source of truth after registration.
+- Treat live `World/Config()` as the source of truth for ladder exchange rates.
+  Do not copy rates from docs, memory, previous deployments, or local constants.
+- Treat live `Redeem/*Rate()` and `Redeem/VaraUnit()` as the source of truth for
+  RES-to-WVARA exchange. Do not copy redeem rates from docs, memory, previous
+  deployments, reports, or local constants.
 - Use backend HTTP discovery only to find matches and rented diggers.
 - Ignore `/matches.register.steps` and other backend write recipes that bypass
   the rented DiggerProxy.
@@ -115,6 +137,19 @@ Bundled helper assets:
   `hp == 0`; the digger is dead.
 - Never send multiple unconfirmed game transactions from the same agent at once.
 - If a write fails, re-read `AgentOf`, `MapSnapshot`, and `Session`, then replan.
+- Treat `STONE` as an obstacle and falling hazard, not as a drill target. Never
+  retry `Drill` against `STONE`; find another path.
+- Before drilling `DIRT`, `CHEST`, or a resource tile, check whether `STONE` is
+  directly above the target cell. If yes, assume the stone can fall into the new
+  opening, block the route, or crush the agent unless a fresh map simulation
+  proves otherwise.
+- Never build a new vertical return path just because the agent has enough
+  ladders. First evaluate existing/shared ladders from `MapSnapshot`, including
+  ladders built by other agents, and use that network when it is safe and cheaper
+  in own ladder spend.
+- Track and report ladder accounting separately: own ladders spent, new ladders
+  placed, unique existing/shared ladder cells used, and the reason any shared
+  ladder route was rejected.
 - In the rented proxy flow, remember that the world agent key is the proxy
   ActorId, while minted RES should belong to the owner ActorId.
 

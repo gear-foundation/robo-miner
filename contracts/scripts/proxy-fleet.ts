@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -34,6 +34,7 @@ import { unwrapInjectedPromise } from "./injected-reply.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
+const REPO_ROOT = path.resolve(ROOT, "..");
 
 loadEnv({ path: path.join(ROOT, ".env"), quiet: true });
 
@@ -52,6 +53,7 @@ const PROXY_IDL_PATH = process.env.DIGGER_PROXY_IDL_PATH || path.join(ROOT, "tar
 const WORLD_IDL_PATH = process.env.DIGGER_WORLD_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_world.idl");
 const ENV_PATH = path.join(ROOT, ".env");
 const ZERO_HASH = `0x${"0".repeat(64)}` as Hex;
+let fleetTxLogPath: string | null = null;
 
 const SESSION_ACTIVE = 1n;
 const AGENT_ACTIVE = 1n;
@@ -86,6 +88,7 @@ type CliArgs = {
   create?: string;
   steps?: string;
   maxRounds?: string;
+  targetResources?: string;
   goldStrategy?: GoldStrategy;
   topUp?: string;
   ethRpc?: string;
@@ -211,6 +214,9 @@ Options:
   --gold-and-surface
                     Mine one HCRST and carry it back to surface via ladders.
   --surface-carried Carry current backpack resources back to surface and bank them.
+  --target-resources N
+                    Mine one proxy at a time until each selected proxy has N
+                    total banked resources, surfacing carried resources first.
   --gold-strategy   HCRST strategy: round-robin or nearest. Default round-robin.
   --max-rounds      Safety limit for --until-gold. Rounds for round-robin, moves for nearest. Default 200.
   --proxy-indexes   One-based proxy indexes to play, comma-separated. Example: 2,5.
@@ -243,6 +249,9 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--max-rounds":
         args.maxRounds = next();
+        break;
+      case "--target-resources":
+        args.targetResources = next();
         break;
       case "--gold-strategy": {
         const value = next();
@@ -748,7 +757,11 @@ function tileAt(map: number[], x: number, y: number): number {
 }
 
 function isDrillable(tile: number): boolean {
-  return [TILE_DIRT, TILE_STONE, TILE_CHEST, TILE_RESOURCE_SCRST, TILE_RESOURCE_BCRST, TILE_RESOURCE_HCRST].includes(tile);
+  return [TILE_DIRT, TILE_CHEST, TILE_RESOURCE_SCRST, TILE_RESOURCE_BCRST, TILE_RESOURCE_HCRST].includes(tile);
+}
+
+function isRoutinePathDrillable(tile: number): boolean {
+  return [TILE_DIRT, TILE_RESOURCE_SCRST, TILE_RESOURCE_BCRST, TILE_RESOURCE_HCRST].includes(tile);
 }
 
 function isResourceTile(tile: number): boolean {
@@ -757,6 +770,10 @@ function isResourceTile(tile: number): boolean {
 
 function isTraversable(tile: number): boolean {
   return [TILE_EMPTY, TILE_LADDER, TILE_SURFACE].includes(tile);
+}
+
+function isStrictUpwardMoveAllowed(currentTile: number, targetTile: number): boolean {
+  return currentTile === TILE_LADDER && (targetTile === TILE_LADDER || targetTile === TILE_SURFACE);
 }
 
 function tileName(tile: number): string {
@@ -825,7 +842,7 @@ function verticalPathCanBeOpened(agent: AgentView, map: number[], targetY: numbe
   for (let y = agent.y + 1; y <= targetY; y += 1) {
     const tile = tileAt(map, agent.x, y);
     if (tile < 0) return false;
-    if (!isTraversable(tile) && !isDrillable(tile)) return false;
+    if (!isTraversable(tile) && !isRoutinePathDrillable(tile)) return false;
   }
   return true;
 }
@@ -835,7 +852,7 @@ function horizontalPathCanBeOpened(map: number[], fromX: number, toX: number, y:
   for (let x = fromX + step; step > 0 ? x <= toX : x >= toX; x += step) {
     const tile = tileAt(map, x, y);
     if (tile < 0) return false;
-    if (!isTraversable(tile) && !isDrillable(tile)) return false;
+    if (!isTraversable(tile) && !isRoutinePathDrillable(tile)) return false;
   }
   return true;
 }
@@ -902,7 +919,7 @@ function planSideLookaheadAction(
           `(offset ${resource.horizontalDistance}); next tile ${tileName(tile)}; ${ladderBudgetReason(agent, resource.y)}`;
 
     if (isTraversable(tile)) return { fn: "MoveAgent", direction: resource.direction, target, reason, resource };
-    if (isDrillable(tile)) return { fn: "Drill", direction: resource.direction, target, reason, resource };
+    if (isRoutinePathDrillable(tile)) return { fn: "Drill", direction: resource.direction, target, reason, resource };
     return null;
   }
 
@@ -914,8 +931,12 @@ function planSideLookaheadAction(
     `descend toward side-lookahead ${tileName(resource.tile)} at ${resource.x},${resource.y} ` +
     `(depth +${resource.depth}); ${ladderBudgetReason(agent, resource.y)}`;
 
+  if (tile === TILE_EMPTY) {
+    if (agent.ladders <= 0) return null;
+    return { fn: "PlaceLadder", direction: DIR_DOWN, target, reason: `${reason}; place ladder before descent`, resource };
+  }
   if (isTraversable(tile)) return { fn: "MoveAgent", direction: DIR_DOWN, target, reason, resource };
-  if (isDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `${reason}; shaft tile ${tileName(tile)}`, resource };
+  if (isRoutinePathDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `${reason}; shaft tile ${tileName(tile)}`, resource };
   return null;
 }
 
@@ -948,7 +969,7 @@ function canTraverseInSearch(map: number[], fromX: number, fromY: number, direct
   if (direction !== DIR_UP) return true;
 
   const currentTile = tileAt(map, fromX, fromY);
-  return currentTile === TILE_LADDER || targetTile === TILE_LADDER;
+  return isStrictUpwardMoveAllowed(currentTile, targetTile);
 }
 
 function canOpenPathInSearch(map: number[], direction: number): boolean {
@@ -1025,7 +1046,7 @@ function planNearestResourceAction(agent: AgentView, map: number[], allowedTiles
         continue;
       }
 
-      if (isDrillable(tile) && canOpenPathInSearch(map, direction)) {
+      if (isRoutinePathDrillable(tile) && canOpenPathInSearch(map, direction)) {
         queue.push({ ...next, distance });
       }
     }
@@ -1049,8 +1070,28 @@ function planNearestResourceAction(agent: AgentView, map: number[], allowedTiles
     `distance ${candidate.distance}, score ${candidate.score}; first tile ${tileName(firstTile)}; ` +
     ladderBudgetReason(agent, candidate.y);
 
+  if (candidate.first.direction === DIR_DOWN && firstTile === TILE_EMPTY) {
+    if (agent.ladders <= 0) return null;
+    return { fn: "PlaceLadder", direction: candidate.first.direction, target, reason: `${reason}; place ladder before descent` };
+  }
+  if (candidate.first.direction === DIR_UP) {
+    const currentTile = tileAt(map, agent.x, agent.y);
+    if (isStrictUpwardMoveAllowed(currentTile, firstTile)) return { fn: "MoveAgent", direction: candidate.first.direction, target, reason };
+    if (currentTile === TILE_EMPTY && agent.ladders > 0) {
+      return {
+        fn: "PlaceLadder",
+        direction: DIR_CURRENT,
+        target: { x: agent.x, y: agent.y },
+        reason: `${reason}; place current ladder before upward return`,
+      };
+    }
+    if (currentTile === TILE_LADDER && firstTile === TILE_EMPTY && agent.ladders > 0) {
+      return { fn: "PlaceLadder", direction: candidate.first.direction, target, reason: `${reason}; place target ladder before climb` };
+    }
+    return null;
+  }
   if (isTraversable(firstTile)) return { fn: "MoveAgent", direction: candidate.first.direction, target, reason };
-  if (isDrillable(firstTile)) return { fn: "Drill", direction: candidate.first.direction, target, reason };
+  if (isRoutinePathDrillable(firstTile)) return { fn: "Drill", direction: candidate.first.direction, target, reason };
   return null;
 }
 
@@ -1065,7 +1106,9 @@ function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
     const target = targetOf(agent, direction);
     if (!target) continue;
     const tile = tileAt(map, target.x, target.y);
-    if (isResourceTile(tile)) return { fn: "Drill", direction, target, reason: `drill adjacent ${tileName(tile)}` };
+    if (isResourceTile(tile) && tileAt(map, target.x, target.y - 1) !== TILE_STONE) {
+      return { fn: "Drill", direction, target, reason: `drill adjacent ${tileName(tile)}` };
+    }
   }
 
   const sideLookahead = planSideLookaheadAction(agent, map);
@@ -1078,7 +1121,11 @@ function chooseAction(agent: AgentView, map: number[]): PlannedAction | null {
   if (target && canPlanAtDepth(agent, target.y)) {
     const tile = tileAt(map, target.x, target.y);
     const depthReason = `; ${ladderBudgetReason(agent, target.y)}`;
-    if (isDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `drill ${tileName(tile)}${depthReason}` };
+    if (isRoutinePathDrillable(tile)) return { fn: "Drill", direction: DIR_DOWN, target, reason: `drill ${tileName(tile)}${depthReason}` };
+    if (tile === TILE_EMPTY) {
+      if (agent.ladders <= 0) return null;
+      return { fn: "PlaceLadder", direction: DIR_DOWN, target, reason: `place ladder before descent into ${tileName(tile)}${depthReason}` };
+    }
     if (isTraversable(tile)) return { fn: "MoveAgent", direction: DIR_DOWN, target, reason: `move into ${tileName(tile)}${depthReason}` };
   }
 
@@ -1205,15 +1252,28 @@ function chooseSurfaceAction(agent: AgentView, map: number[]): PlannedAction | n
 
   if (targetUp) {
     const targetTile = tileAt(map, targetUp.x, targetUp.y);
-    if (
-      isTraversable(targetTile) &&
-      (currentTile === TILE_LADDER || targetTile === TILE_LADDER)
-    ) {
+    if (isStrictUpwardMoveAllowed(currentTile, targetTile)) {
       return {
         fn: "MoveAgent",
         direction: DIR_UP,
         target: targetUp,
         reason: `move up toward surface through ${tileName(targetTile)}`,
+      };
+    }
+    if (currentTile === TILE_LADDER && targetTile === TILE_EMPTY && agent.ladders > 0) {
+      return {
+        fn: "PlaceLadder",
+        direction: DIR_UP,
+        target: targetUp,
+        reason: `place upper ladder at ${targetUp.x},${targetUp.y} before climbing`,
+      };
+    }
+    if (currentTile === TILE_LADDER && isRoutinePathDrillable(targetTile)) {
+      return {
+        fn: "Drill",
+        direction: DIR_UP,
+        target: targetUp,
+        reason: `open upward return path through ${tileName(targetTile)}`,
       };
     }
   }
@@ -1253,7 +1313,7 @@ function chooseSurfaceAction(agent: AgentView, map: number[]): PlannedAction | n
   const target = targetUp;
   if (!target) return null;
   const targetTile = tileAt(map, target.x, target.y);
-  if (isTraversable(targetTile)) {
+  if (isStrictUpwardMoveAllowed(currentTile, targetTile)) {
     return {
       fn: "MoveAgent",
       direction: DIR_UP,
@@ -1261,7 +1321,15 @@ function chooseSurfaceAction(agent: AgentView, map: number[]): PlannedAction | n
       reason: `move up toward surface through ${tileName(targetTile)}`,
     };
   }
-  if (isDrillable(targetTile)) {
+  if (targetTile === TILE_EMPTY && agent.ladders > 0) {
+    return {
+      fn: "PlaceLadder",
+      direction: DIR_UP,
+      target,
+      reason: `place upper ladder at ${target.x},${target.y} before climbing`,
+    };
+  }
+  if (isRoutinePathDrillable(targetTile)) {
     return {
       fn: "Drill",
       direction: DIR_UP,
@@ -1307,7 +1375,7 @@ function planHorizontalActionToX(agent: AgentView, map: number[], targetX: numbe
   const tile = tileAt(map, target.x, target.y);
   const fullReason = `${reason}; next ${tileName(tile)} at ${target.x},${target.y}`;
   if (isTraversable(tile)) return { fn: "MoveAgent", direction, target, reason: fullReason };
-  if (isDrillable(tile)) return { fn: "Drill", direction, target, reason: fullReason };
+  if (isRoutinePathDrillable(tile)) return { fn: "Drill", direction, target, reason: fullReason };
   return null;
 }
 
@@ -1502,7 +1570,8 @@ async function executeProxyAction(
     },
     hcrst: { before: agent.inventoryHcrst.toString(), after: after.inventoryHcrst.toString() },
   });
-  console.log("[fleet:tx]", JSON.stringify({
+  const txRow = {
+    at: new Date().toISOString(),
     proxy,
     action: action.fn,
     direction: action.direction ?? null,
@@ -1544,7 +1613,11 @@ async function executeProxyAction(
       },
       ladders: after.ladders,
     },
-  }));
+  };
+  console.log("[fleet:tx]", JSON.stringify(txRow));
+  if (fleetTxLogPath) {
+    await appendFile(fleetTxLogPath, `${JSON.stringify(txRow)}\n`, "utf8");
+  }
   return { before: agent, after, action, injectedReply };
 }
 
@@ -1684,6 +1757,95 @@ function bankedTotal(agent: AgentView): bigint {
   return agent.bankedScrst + agent.bankedBcrst + agent.bankedHcrst;
 }
 
+function totalResources(agent: AgentView): bigint {
+  return bankedTotal(agent) + carriedTotal(agent);
+}
+
+async function mineResourcesToTarget(
+  connection: Connection,
+  proxySails: SailsProgram,
+  worldSails: SailsProgram,
+  worldProgramId: Address,
+  proxy: Address,
+  targetResources: bigint,
+  validatorMode: ValidatorMode,
+  promiseTimeoutMs: number,
+  timeoutMs: number,
+  queryTimeoutMs: number,
+  maxRounds: number,
+) {
+  let agent = await readAgent(connection, worldSails, worldProgramId, proxy, queryTimeoutMs);
+
+  for (let move = 1; move <= maxRounds; move += 1) {
+    const banked = bankedTotal(agent);
+    const carried = carriedTotal(agent);
+    if (banked >= targetResources && carried === 0n) {
+      console.log("[fleet:target-complete]", {
+        proxy,
+        move: move - 1,
+        targetResources: targetResources.toString(),
+        final: agentSummary(agent),
+      });
+      return { complete: true, agent, move: move - 1 };
+    }
+
+    const map = await readMap(connection, worldSails, worldProgramId, queryTimeoutMs);
+    const phase = totalResources(agent) >= targetResources ? "surface" : "mine";
+    const action = phase === "surface"
+      ? chooseSurfaceAction(agent, map)
+      : chooseAction(agent, map);
+
+    if (!action) {
+      console.log("[fleet:target-stop]", {
+        proxy,
+        move,
+        phase,
+        targetResources: targetResources.toString(),
+        reason: phase === "surface" ? "no surface return action" : "no mining action",
+        agent: agentSummary(agent),
+        totalResources: totalResources(agent).toString(),
+      });
+      return { complete: false, agent, move };
+    }
+
+    console.log("[fleet:target-step]", {
+      proxy,
+      move,
+      phase,
+      targetResources: targetResources.toString(),
+      totalResources: totalResources(agent).toString(),
+      action: action.fn,
+      direction: action.direction,
+      target: action.target,
+      reason: action.reason,
+      before: agentSummary(agent),
+    });
+
+    const result = await executeProxyAction(
+      connection,
+      proxySails,
+      worldSails,
+      worldProgramId,
+      proxy,
+      agent,
+      action,
+      validatorMode,
+      promiseTimeoutMs,
+      timeoutMs,
+    );
+    agent = result.after;
+  }
+
+  console.log("[fleet:target-timeout]", {
+    proxy,
+    maxRounds,
+    targetResources: targetResources.toString(),
+    agent: agentSummary(agent),
+    totalResources: totalResources(agent).toString(),
+  });
+  return { complete: false, agent, move: maxRounds };
+}
+
 async function returnCarriedToSurface(
   connection: Connection,
   proxySails: SailsProgram,
@@ -1801,8 +1963,9 @@ async function main() {
   const createCount = args.noDeploy ? 0 : parseNonNegativeInt(args.create, 9, "--create");
   const goldAndSurface = Boolean(args.goldAndSurface);
   const surfaceCarried = Boolean(args.surfaceCarried);
+  const targetResources = args.targetResources ? BigInt(parsePositiveInt(args.targetResources, 0, "--target-resources")) : null;
   const untilGold = Boolean(args.untilGold || goldAndSurface);
-  const steps = args.noPlay || untilGold || surfaceCarried ? 0 : parseNonNegativeInt(args.steps, 2, "--steps");
+  const steps = args.noPlay || untilGold || surfaceCarried || targetResources !== null ? 0 : parseNonNegativeInt(args.steps, 2, "--steps");
   const maxRounds = parsePositiveInt(args.maxRounds, 200, "--max-rounds");
   const timeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_EVENT_TIMEOUT_MS"], "DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), 180_000, "--timeout-ms");
   const promiseTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_PROMISE_TIMEOUT_MS"], "DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), 60_000, "--promise-timeout-ms");
@@ -1817,6 +1980,9 @@ async function main() {
   if (goldStrategy !== "round-robin" && goldStrategy !== "nearest") throw new Error("gold strategy must be round-robin or nearest");
 
   const [proxySails, worldSails] = await Promise.all([loadSails(PROXY_IDL_PATH), loadSails(WORLD_IDL_PATH)]);
+  const logDir = path.join(REPO_ROOT, "measurements");
+  await mkdir(logDir, { recursive: true });
+  fleetTxLogPath = path.join(logDir, `hoodi-ethexe-proxy-fleet-session7-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`);
   const connection = await connect(args, timeoutMs);
   try {
     console.log("[fleet:start]", {
@@ -1828,11 +1994,13 @@ async function main() {
       untilGold,
       goldAndSurface,
       surfaceCarried,
+      targetResources: targetResources?.toString() ?? null,
       goldStrategy,
       maxRounds,
       validatorMode,
       topUp: topUp.toString(),
       startSession: Boolean(args.startSession),
+      txLogPath: fleetTxLogPath,
     });
 
     const codeState = await connection.api.eth.router.codeState(codeId);
@@ -1863,7 +2031,23 @@ async function main() {
       await ensureSessionActive(connection, worldSails, worldProgramId, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
     }
 
-    if (surfaceCarried && !args.noPlay) {
+    if (targetResources !== null && !args.noPlay) {
+      for (const proxy of playProxies) {
+        await mineResourcesToTarget(
+          connection,
+          proxySails,
+          worldSails,
+          worldProgramId,
+          proxy,
+          targetResources,
+          validatorMode,
+          promiseTimeoutMs,
+          timeoutMs,
+          queryTimeoutMs,
+          maxRounds,
+        );
+      }
+    } else if (surfaceCarried && !args.noPlay) {
       for (const proxy of playProxies) {
         await returnCarriedToSurface(
           connection,

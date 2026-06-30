@@ -45,9 +45,6 @@ const DEFAULTS = {
   DIGGER_PROMISE_TIMEOUT_MS: "60000",
   DIGGER_ECONOMY_TOP_UP: "100000000000000",
   VARA_UNIT: "1000000000000",
-  SCRST_RATE: "66",
-  BCRST_RATE: "330",
-  HCRST_RATE: "1650",
 } as const;
 
 const RES_IDL_PATH = path.join(ROOT, "target/wasm32-gear/release/digger_res_vmt.idl");
@@ -80,6 +77,7 @@ type CliArgs = {
   promiseTimeoutMs?: string;
   dryRun?: boolean;
   skipBuild?: boolean;
+  resOnly?: boolean;
   skipResInit?: boolean;
   skipRedeemInit?: boolean;
   skipLink?: boolean;
@@ -128,18 +126,20 @@ Inputs:
   --top-up               Initial executable balance for each created program.
   --reserve-top-up       Native value sent to redeem.deposit_reserve.
   --vara-unit            Minimal units per 1 display VARA. Defaults to ${DEFAULTS.VARA_UNIT}.
-  --scrst-rate           Display VARA per SCRST. Defaults to ${DEFAULTS.SCRST_RATE}.
-  --bcrst-rate           Display VARA per BCRST. Defaults to ${DEFAULTS.BCRST_RATE}.
-  --hcrst-rate           Display VARA per HCRST. Defaults to ${DEFAULTS.HCRST_RATE}.
+  --scrst-rate           Display VARA per SCRST. Required for redeem Create unless SCRST_RATE is set.
+  --bcrst-rate           Display VARA per BCRST. Required for redeem Create unless BCRST_RATE is set.
+  --hcrst-rate           Display VARA per HCRST. Required for redeem Create unless HCRST_RATE is set.
   --smoke                Mint 1/1/1 RES to signer, then redeem it. Requires signer to be a minter and reserve to be funded.
   --no-smoke             Skip smoke even if --reserve-top-up is set.
   --manifest             Output manifest path. Defaults to deployments/digger-economy-<timestamp>.json.
   --skip-build           Do not run cargo build --release before checking artifacts.
+  --res-only             Create/init only digger-res-vmt with redeem_contract=0x0.
   --dry-run              Resolve inputs and print plan without sending txs.
 
 Environment:
   PRIVATE_KEY, ETHEREUM_RPC, VARA_ETH_RPC, ROUTER_ADDRESS
   DIGGER_RES_VMT_CODE_ID, DIGGER_REDEEM_CODE_ID
+  VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE
   DIGGER_ECONOMY_TOP_UP, DIGGER_REDEEM_RESERVE_TOP_UP
 `);
 }
@@ -228,6 +228,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "--skip-build":
         args.skipBuild = true;
         break;
+      case "--res-only":
+        args.resOnly = true;
+        break;
       case "--skip-res-init":
         args.skipResInit = true;
         break;
@@ -295,6 +298,37 @@ function parseU128(value: string | undefined, name: string): string {
   const raw = requireValue(value, name);
   if (!/^\d+$/.test(raw)) throw new Error(`${name} must be an unsigned integer`);
   return raw;
+}
+
+type RedeemRates = {
+  scrst: string;
+  bcrst: string;
+  hcrst: string;
+};
+
+function resolveRedeemRates(args: CliArgs, required: boolean): RedeemRates | undefined {
+  const rawRates = {
+    scrst: args.scrstRate || envValue("SCRST_RATE"),
+    bcrst: args.bcrstRate || envValue("BCRST_RATE"),
+    hcrst: args.hcrstRate || envValue("HCRST_RATE"),
+  };
+
+  const provided = Object.values(rawRates).some((rate) => rate !== undefined);
+  if (!required && !provided) return undefined;
+
+  const missing: string[] = [];
+  if (!rawRates.scrst) missing.push("--scrst-rate or SCRST_RATE");
+  if (!rawRates.bcrst) missing.push("--bcrst-rate or BCRST_RATE");
+  if (!rawRates.hcrst) missing.push("--hcrst-rate or HCRST_RATE");
+  if (missing.length > 0) {
+    throw new Error(`redeem rates are required for Create: ${missing.join(", ")}`);
+  }
+
+  return {
+    scrst: parseU128(rawRates.scrst, "SCRST_RATE"),
+    bcrst: parseU128(rawRates.bcrst, "BCRST_RATE"),
+    hcrst: parseU128(rawRates.hcrst, "HCRST_RATE"),
+  };
 }
 
 function runCommand(command: string, args: string[], cwd: string): Promise<void> {
@@ -541,30 +575,34 @@ async function main() {
 
   const topUp = parseAmount(args.topUp || envValue("DIGGER_ECONOMY_TOP_UP") || DEFAULTS.DIGGER_ECONOMY_TOP_UP, "DIGGER_ECONOMY_TOP_UP");
   const reserveTopUp = parseAmount(args.reserveTopUp || envValue("DIGGER_REDEEM_RESERVE_TOP_UP"), "DIGGER_REDEEM_RESERVE_TOP_UP");
-  const varaUnit = parseU128(args.varaUnit || envValue("VARA_UNIT") || DEFAULTS.VARA_UNIT, "VARA_UNIT");
-  const rates = {
-    scrst: parseU128(args.scrstRate || envValue("SCRST_RATE") || DEFAULTS.SCRST_RATE, "SCRST_RATE"),
-    bcrst: parseU128(args.bcrstRate || envValue("BCRST_RATE") || DEFAULTS.BCRST_RATE, "BCRST_RATE"),
-    hcrst: parseU128(args.hcrstRate || envValue("HCRST_RATE") || DEFAULTS.HCRST_RATE, "HCRST_RATE"),
-  };
+  const resOnly = Boolean(args.resOnly);
+  const shouldInitRedeem = !args.skipRedeemInit && !resOnly;
+  if (resOnly && args.smoke) {
+    throw new Error("--smoke is not supported with --res-only");
+  }
+  const rates = resolveRedeemRates(args, shouldInitRedeem);
+  const hasVaraUnitInput = Boolean(args.varaUnit || envValue("VARA_UNIT"));
+  const varaUnit = shouldInitRedeem || hasVaraUnitInput || rates
+    ? parseU128(args.varaUnit || envValue("VARA_UNIT") || DEFAULTS.VARA_UNIT, "VARA_UNIT")
+    : undefined;
 
   await buildArtifacts(Boolean(args.skipBuild));
   checkArtifacts();
 
   const resSails = await loadSails(RES_IDL_PATH);
-  const redeemSails = await loadSails(REDEEM_IDL_PATH);
+  const redeemSails = resOnly ? undefined : await loadSails(REDEEM_IDL_PATH);
   if (!resSails.ctors?.Create) throw new Error("res-vmt IDL does not contain Create constructor");
-  if (!redeemSails.ctors?.Create) throw new Error("redeem IDL does not contain Create constructor");
+  if (!resOnly && !redeemSails?.ctors?.Create) throw new Error("redeem IDL does not contain Create constructor");
   const smoke = Boolean(args.smoke && !args.noSmoke);
 
   console.log("[economy] prepared", {
     topUp: topUp.toString(),
     reserveTopUp: reserveTopUp.toString(),
-    rates,
-    varaUnit: varaUnit.toString(),
+    redeemConfig: rates && varaUnit ? { varaUnit: varaUnit.toString(), rates } : "existing redeem config",
     smoke,
     skipBuild: Boolean(args.skipBuild),
     dryRun: Boolean(args.dryRun),
+    resOnly,
   });
   if (args.dryRun) return;
 
@@ -579,29 +617,41 @@ async function main() {
     const resCodeId = args.resProgram
       ? normalizeHex32(await connection.api.eth.router.programCodeId(normalizeAddress(args.resProgram, "--res-program")), "res program code id")
       : await ensureCodeValidated(connection.api, { name: "res-vmt", codeIdEnv: "DIGGER_RES_VMT_CODE_ID", wasmPath: RES_WASM_PATH }, args.resCodeId, timeoutMs);
-    const redeemCodeId = args.redeemProgram
-      ? normalizeHex32(await connection.api.eth.router.programCodeId(normalizeAddress(args.redeemProgram, "--redeem-program")), "redeem program code id")
-      : await ensureCodeValidated(connection.api, { name: "redeem", codeIdEnv: "DIGGER_REDEEM_CODE_ID", wasmPath: REDEEM_WASM_PATH }, args.redeemCodeId, timeoutMs);
+    const redeemCodeId = resOnly
+      ? null
+      : args.redeemProgram
+        ? normalizeHex32(await connection.api.eth.router.programCodeId(normalizeAddress(args.redeemProgram, "--redeem-program")), "redeem program code id")
+        : await ensureCodeValidated(connection.api, { name: "redeem", codeIdEnv: "DIGGER_REDEEM_CODE_ID", wasmPath: REDEEM_WASM_PATH }, args.redeemCodeId, timeoutMs);
 
     const resProgram = args.resProgram
       ? normalizeAddress(args.resProgram, "--res-program")
       : await createProgram(connection.api, "res-vmt", resCodeId, topUp);
-    const redeemProgram = args.redeemProgram
-      ? normalizeAddress(args.redeemProgram, "--redeem-program")
-      : await createProgram(connection.api, "redeem", redeemCodeId, topUp);
+    const redeemProgram = resOnly
+      ? null
+      : args.redeemProgram
+        ? normalizeAddress(args.redeemProgram, "--redeem-program")
+        : await createProgram(connection.api, "redeem", redeemCodeId!, topUp);
 
     if (!args.skipResInit) {
       const createRes = resSails.ctors.Create.encodePayload(ZERO_ACTOR, initialMinterActor) as Hex;
       await sendMirrorMessage(connection.api, resProgram, "res.create", createRes, 0n, promiseTimeoutMs);
     }
 
-    if (!args.skipRedeemInit) {
-      const createRedeem = redeemSails.ctors.Create.encodePayload(actorIdFromAddress(resProgram), varaUnit, rates.scrst, rates.bcrst, rates.hcrst) as Hex;
-      await sendMirrorMessage(connection.api, redeemProgram, "redeem.create", createRedeem, 0n, promiseTimeoutMs);
+    if (!args.skipRedeemInit && !resOnly) {
+      const activeRedeemSails = redeemSails;
+      const activeRedeemProgram = redeemProgram;
+      if (!activeRedeemSails || !activeRedeemProgram) throw new Error("redeem program is required unless --res-only is set");
+      if (!varaUnit || !rates) throw new Error("redeem Create requires vara unit and rates");
+      const createCtor = activeRedeemSails.ctors?.Create;
+      if (!createCtor) throw new Error("redeem IDL does not contain Create constructor");
+      const createRedeem = createCtor.encodePayload(actorIdFromAddress(resProgram), varaUnit, rates.scrst, rates.bcrst, rates.hcrst) as Hex;
+      await sendMirrorMessage(connection.api, activeRedeemProgram, "redeem.create", createRedeem, 0n, promiseTimeoutMs);
     }
 
-    if (!args.skipLink) {
-      const setRedeem = resSails.services.Admin.functions.SetRedeemContract.encodePayload(actorIdFromAddress(redeemProgram)) as Hex;
+    if (!args.skipLink && !resOnly) {
+      const activeRedeemProgram = redeemProgram;
+      if (!activeRedeemProgram) throw new Error("redeem program is required unless --res-only is set");
+      const setRedeem = resSails.services.Admin.functions.SetRedeemContract.encodePayload(actorIdFromAddress(activeRedeemProgram)) as Hex;
       await sendMirrorMessage(connection.api, resProgram, "res.set_redeem_contract", setRedeem, 0n, promiseTimeoutMs);
     }
 
@@ -612,18 +662,25 @@ async function main() {
     }
 
     if (reserveTopUp > 0n) {
-      const deposit = redeemSails.services.Redeem.functions.DepositReserve.encodePayload() as Hex;
-      await sendMirrorMessage(connection.api, redeemProgram, "redeem.deposit_reserve", deposit, reserveTopUp, promiseTimeoutMs);
+      if (resOnly) throw new Error("--reserve-top-up is not supported with --res-only");
+      const activeRedeemSails = redeemSails;
+      const activeRedeemProgram = redeemProgram;
+      if (!activeRedeemSails || !activeRedeemProgram) throw new Error("redeem program is required for --reserve-top-up");
+      const deposit = activeRedeemSails.services.Redeem.functions.DepositReserve.encodePayload() as Hex;
+      await sendMirrorMessage(connection.api, activeRedeemProgram, "redeem.deposit_reserve", deposit, reserveTopUp, promiseTimeoutMs);
     }
 
     if (smoke) {
       if (initialMinter.toLowerCase() !== connection.accountAddress.toLowerCase() && !extraMinters.some((m) => m.toLowerCase() === connection.accountAddress.toLowerCase())) {
         throw new Error("--smoke requires signer to be configured as an initial or extra minter");
       }
+      const activeRedeemSails = redeemSails;
+      const activeRedeemProgram = redeemProgram;
+      if (!activeRedeemSails || !activeRedeemProgram) throw new Error("redeem program is required for --smoke");
       const mint = resSails.services.Vmt.functions.MintResources.encodePayload(actorIdFromAddress(connection.accountAddress), "1", "1", "1") as Hex;
       await sendMirrorMessage(connection.api, resProgram, "smoke.res.mint_resources", mint, 0n, promiseTimeoutMs);
-      const redeem = redeemSails.services.Redeem.functions.Redeem.encodePayload("1", "1", "1") as Hex;
-      await sendMirrorMessage(connection.api, redeemProgram, "smoke.redeem.redeem", redeem, 0n, promiseTimeoutMs);
+      const redeem = activeRedeemSails.services.Redeem.functions.Redeem.encodePayload("1", "1", "1") as Hex;
+      await sendMirrorMessage(connection.api, activeRedeemProgram, "smoke.redeem.redeem", redeem, 0n, promiseTimeoutMs);
     }
 
     const manifestPath = args.manifest || `deployments/digger-economy-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
@@ -639,18 +696,20 @@ async function main() {
         extraMinters,
         extraMinterActors,
         redeemContract: redeemProgram,
-        redeemContractActor: actorIdFromAddress(redeemProgram),
+        redeemContractActor: redeemProgram ? actorIdFromAddress(redeemProgram) : null,
       },
-      redeem: {
-        programId: redeemProgram,
-        actorId: actorIdFromAddress(redeemProgram),
-        codeId: redeemCodeId,
-        resContract: resProgram,
-        resContractActor: actorIdFromAddress(resProgram),
-        varaUnit: varaUnit.toString(),
-        rates,
-        reserveTopUp: reserveTopUp.toString(),
-      },
+      redeem: redeemProgram
+        ? {
+            programId: redeemProgram,
+            actorId: actorIdFromAddress(redeemProgram),
+            codeId: redeemCodeId,
+            resContract: resProgram,
+            resContractActor: actorIdFromAddress(resProgram),
+            varaUnit: varaUnit?.toString() ?? null,
+            rates: rates ?? null,
+            reserveTopUp: reserveTopUp.toString(),
+          }
+        : null,
       smoke,
     };
     await writeManifest(manifestPath, manifest);

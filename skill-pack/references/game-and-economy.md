@@ -61,6 +61,68 @@ Agent status:
   ladder.
 - Backpack capacity is currently `10`; when full, return to surface.
 
+## Stone-Aware Safe Routing
+
+Treat `STONE` as both an obstacle and a dynamic hazard:
+
+- `STONE` is not drillable. Do not send `Drill` into a stone tile, and do not
+  retry that action after a failed reply.
+- Before drilling `DIRT`, `CHEST`, `SCRST`, `BCRST`, or `HCRST`, inspect the
+  tile directly above the target. If that tile is `STONE`, opening the target
+  cell can make the stone fall into the new opening.
+- A falling stone can either block the planned corridor or crush the agent if
+  the agent's gravity target is in the falling path. A plan that ignores this is
+  unsafe even if the target tile itself is drillable.
+- For pathfinding, model `STONE` as blocked, `CHEST` as blocked unless the user
+  explicitly accepts chest risk, and a drillable cell under `STONE` as unsafe
+  unless a local gravity simulation proves the fall is harmless.
+- If a `Drill` succeeds but the next `MoveAgent` fails, immediately refresh
+  `MapSnapshot`; a stone may have fallen into the cell that was just opened.
+
+Safe resource routes should be planned as a graph, not as a straight line:
+
+1. Refresh `MapSnapshot` and `AgentOf`.
+2. Mark traversable cells: `EMPTY`, `LADDER`, and `SURFACE`.
+3. Mark drillable cells: `DIRT`, resources, and deliberately accepted `CHEST`
+   cells.
+4. Exclude `STONE` and lava/death tiles.
+5. Penalize or exclude any drillable cell with `STONE` directly above it.
+6. Include the return-to-surface path and required ladder placements before
+   mining high-value resources.
+7. Prefer a route that spends more actions but preserves a safe return path over
+   a cheaper route that can be blocked by falling stone.
+
+## Shared Ladder Planning
+
+All `LADDER` tiles in `MapSnapshot` are usable map infrastructure, even when a
+different agent placed them. A planner must account for those shared ladders
+before spending the current agent's own ladders.
+
+Before any `PlaceLadder` action or return-to-surface plan:
+
+1. Extract every existing `LADDER` tile from the fresh `MapSnapshot`.
+2. Build a safe route that uses the existing ladder network, including horizontal
+   travel to reach another agent's shaft when that is cheaper.
+3. Build the direct/new-ladder route, such as a local vertical return shaft.
+4. Compare the plans by safety first, then by current agent ladder spend.
+5. Choose the shared-ladder route whenever it is safe and spends fewer own
+   ladders.
+
+Do not choose a local vertical ascent only because the digger has enough ladders
+to build it. Use that route only when it is cheaper, safer, or the shared
+network is unreachable after checking the map.
+
+For reports and metrics, separate:
+
+- own ladders spent by this agent;
+- new ladders placed by this agent;
+- unique existing/shared ladder cells used;
+- existing/shared ladder route rejected reason;
+- resources mined before and after using shared ladders.
+
+If the planner cannot model shared ladders, mark the plan incomplete and replan
+instead of executing a ladder-heavy route.
+
 ## Resource Strategy
 
 Approximate value weights:
@@ -80,16 +142,41 @@ New ladders come from two places:
 1. **Chest:** drill `CHEST` for a chance to gain `10` ladders. This can also
    contain dynamite and kill the agent, so use it as a risk/reward option.
 2. **Surface trade:** bring resources to `y=0`, call `Surface()` to bank them,
-   then trade banked resources for ladders when the proxy/world IDL supports
-   `TradeResourcesForLadders(scrst,bcrst,hcrst)`.
+   read the current ladder exchange rate from the selected world's live
+   `World/Config()`, then trade banked resources for ladders when the proxy/world
+   IDL supports `TradeResourcesForLadders(scrst,bcrst,hcrst)`.
 
-Surface ladder trade rates:
+Never use hard-coded ladder trade rates. Before deciding whether resources are
+worth trading for ladders, query the current world:
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/Config --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
+```
+
+Parse the returned config vector as:
 
 ```text
-5 SCRST -> 1 ladder
-1 BCRST -> 1 ladder
-1 HCRST -> 5 ladders
+config[10] = SCRST resource amount
+config[11] = SCRST ladder amount
+config[12] = BCRST resource amount
+config[13] = BCRST ladder amount
+config[14] = HCRST resource amount
+config[15] = HCRST ladder amount
 ```
+
+The ladder calculation is:
+
+```text
+SCRST ladders = (scrst / config[10]) * config[11]
+BCRST ladders = (bcrst / config[12]) * config[13]
+HCRST ladders = (hcrst / config[14]) * config[15]
+```
+
+Each non-zero resource amount passed to `TradeResourcesForLadders` must be a
+multiple of its configured resource amount. If `World/Config()` has fewer than
+16 values, the selected world uses an older interface: report that live ladder
+rates are unavailable and ask before assuming a legacy rate.
 
 Do not assume an agent with `0` ladders is dead or permanently stuck. It may
 still be able to find a chest or return to surface and trade banked resources.
@@ -168,24 +255,24 @@ Before redeeming:
 4. Call `Redeem/Redeem(scrst,bcrst,hcrst)` with `vara-wallet --via injected`
    only for amounts the owner actually holds and the reserve can cover.
 
-Current intended rates:
-
-```text
-SCRST: 66 VARA
-BCRST: 330 VARA
-HCRST: 1650 VARA
-```
-
-Rates are multiplied by `Redeem.VaraUnit()` on-chain.
+Rates are deployment configuration, not skill constants. Read
+`Redeem.ScrstRate()`, `Redeem.BcrstRate()`, `Redeem.HcrstRate()`, and
+`Redeem.VaraUnit()` from the current redeem contract before estimating payout.
 
 ## Multiplayer Awareness
 
 Up to 10 agents can play the same world. Other agents may alter your target
 path, take a resource, place ladders, trigger stone movement, die, or exit.
+Their ladders can also make your route cheaper, so treat every existing ladder
+as potentially reusable unless the refreshed map proves it unreachable.
 
 For a robust autonomous loop:
 
 - Keep a local map projection, but refresh after each confirmed action.
+- Treat `STONE` as blocked and re-run stone-aware pathfinding before each
+  `Drill`.
+- Before placing a ladder or surfacing, compare the route through all existing
+  ladders against the route that spends new ladders.
 - Consume events when available, especially `TileDrilled`, `StoneMoved`,
   `LadderPlaced`, `AgentMoved`, and `AgentDied`.
 - Treat event stream as acceleration, not final truth.

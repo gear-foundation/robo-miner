@@ -22,7 +22,7 @@ async fn proxy_registers_and_trades_ladders_through_world_route() {
             world_code,
             b"proxy-world-route".to_vec(),
         )
-        .create()
+        .create(digger_world_app::default_40x64_input())
         .await
         .unwrap();
 
@@ -116,7 +116,10 @@ async fn proxy_registers_and_trades_ladders_through_world_route() {
     let agent_after_trade: sails_rs::Result<Vec<u128>, sails_rs::String> =
         world.world().agent_of(proxy.id()).await.unwrap();
     let agent_after_trade = agent_after_trade.expect("proxy agent should remain registered");
-    assert_eq!(agent_after_trade[4], STARTING_LADDERS + 1);
+    assert_eq!(
+        agent_after_trade[4],
+        STARTING_LADDERS + digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT as u128
+    );
     assert_eq!(agent_after_trade[9], 0);
 
     let proxy_status: sails_rs::Result<Vec<u128>, sails_rs::String> =

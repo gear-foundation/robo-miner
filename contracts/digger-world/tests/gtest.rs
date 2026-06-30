@@ -197,6 +197,153 @@ async fn active_session_still_accepts_late_registration() {
 }
 
 #[tokio::test]
+async fn admin_can_update_chest_dynamite_chance() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-chest-config").await;
+
+    let default_chance: sails_rs::Result<u32, sails_rs::String> =
+        world.admin().chest_dynamite_chance_bps().await.unwrap();
+    assert_eq!(
+        default_chance,
+        Ok(digger_world_app::DEFAULT_CHEST_DYNAMITE_CHANCE_BPS)
+    );
+
+    let updated: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(2_500)
+        .await
+        .unwrap();
+    assert_eq!(updated, Ok(2_500));
+
+    let read_back: sails_rs::Result<u32, sails_rs::String> =
+        world.admin().chest_dynamite_chance_bps().await.unwrap();
+    assert_eq!(read_back, Ok(2_500));
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    assert_eq!(config.expect("config query should succeed")[9], 2_500);
+
+    let rejected: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(digger_world_app::PROBABILITY_BASIS_POINTS + 1)
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected,
+        Err("chest dynamite chance must be at most 100%".into())
+    );
+
+    let unauthorized: sails_rs::Result<u32, sails_rs::String> = world
+        .admin()
+        .set_chest_dynamite_chance_bps(500)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized, Err("caller is not admin".into()));
+}
+
+#[tokio::test]
+async fn create_accepts_initial_world_config() {
+    let (env, code_id) = create_env();
+    let config = (
+        (
+            digger_world_app::MAP_WIDTH,
+            digger_world_app::MAP_HEIGHT,
+            100,
+            77,
+            19,
+            4,
+            1,
+            35,
+            7,
+            2_500,
+        ),
+        (2, 1, 2, 5, 1, 10),
+    );
+
+    let world =
+        deploy_world_program_with_config(&env, code_id, "world-custom-config", config).await;
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    assert_eq!(
+        config,
+        Ok(vec![
+            digger_world_app::MAP_WIDTH,
+            digger_world_app::MAP_HEIGHT,
+            100,
+            77,
+            19,
+            4,
+            1,
+            35,
+            7,
+            2_500,
+            2,
+            1,
+            2,
+            5,
+            1,
+            10,
+        ])
+    );
+}
+
+#[tokio::test]
+async fn admin_can_update_ladder_exchange_rate() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-ladder-rate").await;
+
+    let default_rate: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.admin().ladder_exchange_rate().await.unwrap();
+    assert_eq!(
+        default_rate,
+        Ok(vec![
+            digger_world_app::DEFAULT_LADDER_SCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_SCRST_LADDER_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_BCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_HCRST_RESOURCE_AMOUNT,
+            digger_world_app::DEFAULT_LADDER_HCRST_LADDER_AMOUNT,
+        ])
+    );
+
+    let updated: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(2, 1, 2, 5, 1, 15)
+        .await
+        .unwrap();
+    assert_eq!(updated, Ok(vec![2, 1, 2, 5, 1, 15]));
+
+    let read_back: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.admin().ladder_exchange_rate().await.unwrap();
+    assert_eq!(read_back, Ok(vec![2, 1, 2, 5, 1, 15]));
+
+    let config: sails_rs::Result<Vec<u32>, sails_rs::String> =
+        world.world().config().await.unwrap();
+    let config = config.expect("config query should succeed");
+    assert_eq!(&config[10..16], &[2, 1, 2, 5, 1, 15]);
+
+    let rejected: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(0, 1, 2, 5, 1, 15)
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected,
+        Err("ladder SCRST resource amount must be greater than zero".into())
+    );
+
+    let unauthorized: sails_rs::Result<Vec<u32>, sails_rs::String> = world
+        .admin()
+        .set_ladder_exchange_rate(2, 1, 2, 5, 1, 15)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized, Err("caller is not admin".into()));
+}
+
+#[tokio::test]
 async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
     let (env, code_id) = create_env();
     let world = deploy_world_program(&env, code_id, "world-resource-trade").await;
@@ -255,7 +402,10 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
         .await
         .unwrap();
     let agent_after_trade = traded.expect("resource trade should succeed");
-    assert_eq!(agent_after_trade[4], (STARTING_LADDERS + 1) as u128);
+    assert_eq!(
+        agent_after_trade[4],
+        (STARTING_LADDERS + digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT) as u128
+    );
     assert_eq!(agent_after_trade[9], 0);
 
     assert_eq!(
@@ -268,11 +418,96 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
                 0,
                 1,
                 0,
-                1,
-                STARTING_LADDERS + 1,
+                digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
+                STARTING_LADDERS + digger_world_app::DEFAULT_LADDER_BCRST_LADDER_AMOUNT,
             )
         )
     );
+}
+
+#[tokio::test]
+async fn agent_cannot_climb_from_gap_into_ladder_without_current_ladder() {
+    let (env, code_id) = create_env();
+    let world = deploy_world_program(&env, code_id, "world-ladder-gap").await;
+
+    let uploaded: sails_rs::Result<Vec<u128>, sails_rs::String> = world
+        .admin()
+        .upload_map(TEST_SEED, map_with_ladder_gap_above_spawn())
+        .await
+        .unwrap();
+    assert_eq!(uploaded, Ok(vec![1, TEST_SEED as u128, 0, 0]));
+
+    let mut world_service = world.world();
+    let registered: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .register(PLAYER_ID.into())
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert!(registered.is_ok());
+
+    let started: sails_rs::Result<Vec<u128>, sails_rs::String> =
+        world.admin().start_session().await.unwrap();
+    assert_eq!(
+        started,
+        Ok(vec![
+            1,
+            TEST_SEED as u128,
+            digger_world_app::SESSION_ACTIVE as u128,
+            0
+        ])
+    );
+
+    let down_to_ladder: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .move_agent(digger_world_app::DIR_DOWN)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    let agent = down_to_ladder.expect("agent should step down onto first ladder");
+    assert_eq!(agent[1], CHEST_X as u128);
+    assert_eq!(agent[2], 1);
+
+    let down_to_gap: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .move_agent(digger_world_app::DIR_DOWN)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    let agent = down_to_gap.expect("agent should stand in the empty gap below the ladder");
+    assert_eq!(agent[1], CHEST_X as u128);
+    assert_eq!(agent[2], 2);
+
+    let skipped_ladder: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .move_agent(digger_world_app::DIR_UP)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(
+        skipped_ladder,
+        Err("upward movement requires a ladder".into())
+    );
+    let agent_after_rejected_move: sails_rs::Result<Vec<u128>, sails_rs::String> =
+        world_service.agent_of(PLAYER_ID.into()).await.unwrap();
+    let agent =
+        agent_after_rejected_move.expect("agent should remain registered after rejected climb");
+    assert_eq!(agent[1], CHEST_X as u128);
+    assert_eq!(agent[2], 2);
+
+    let placed_current: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .place_ladder(digger_world_app::DIR_CURRENT)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    let agent = placed_current.expect("agent should fill the current gap with a ladder");
+    assert_eq!(agent[4], (STARTING_LADDERS - 1) as u128);
+
+    let climbed_after_filling_gap: sails_rs::Result<Vec<u128>, sails_rs::String> = world_service
+        .move_agent(digger_world_app::DIR_UP)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    let agent =
+        climbed_after_filling_gap.expect("agent should climb once the current cell is a ladder");
+    assert_eq!(agent[1], CHEST_X as u128);
+    assert_eq!(agent[2], 1);
 }
 
 async fn deploy_world_program(
@@ -280,8 +515,18 @@ async fn deploy_world_program(
     code_id: CodeId,
     salt: &str,
 ) -> sails_rs::client::Actor<::digger_world_client::DiggerWorldClientProgram, GtestEnv> {
+    deploy_world_program_with_config(env, code_id, salt, digger_world_app::default_40x64_input())
+        .await
+}
+
+async fn deploy_world_program_with_config(
+    env: &GtestEnv,
+    code_id: CodeId,
+    salt: &str,
+    config: digger_world_app::WorldConfigInput,
+) -> sails_rs::client::Actor<::digger_world_client::DiggerWorldClientProgram, GtestEnv> {
     env.deploy::<::digger_world_client::DiggerWorldClientProgram>(code_id, salt.as_bytes().to_vec())
-        .create()
+        .create(config)
         .await
         .unwrap()
 }
@@ -322,6 +567,20 @@ fn map_with_spawn_resource(resource_tile: u8) -> Vec<u32> {
 
     place_resources(&mut map, digger_world_app::TILE_RESOURCE_SCRST, 77);
     place_resources(&mut map, digger_world_app::TILE_RESOURCE_BCRST, 18);
+    place_resources(&mut map, digger_world_app::TILE_RESOURCE_HCRST, 4);
+    map
+}
+
+fn map_with_ladder_gap_above_spawn() -> Vec<u32> {
+    let mut map = vec![digger_world_app::TILE_DIRT as u32; digger_world_app::MAP_CELLS];
+    for x in 0..digger_world_app::MAP_WIDTH {
+        map[map_index(x, 0)] = digger_world_app::TILE_SURFACE as u32;
+    }
+    map[map_index(CHEST_X, 1)] = digger_world_app::TILE_LADDER as u32;
+    map[map_index(CHEST_X, 2)] = digger_world_app::TILE_EMPTY as u32;
+
+    place_resources(&mut map, digger_world_app::TILE_RESOURCE_SCRST, 77);
+    place_resources(&mut map, digger_world_app::TILE_RESOURCE_BCRST, 19);
     place_resources(&mut map, digger_world_app::TILE_RESOURCE_HCRST, 4);
     map
 }

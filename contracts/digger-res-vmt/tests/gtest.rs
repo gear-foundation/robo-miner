@@ -535,7 +535,7 @@ async fn deploy_redeem_program(
         code_id,
         salt.as_bytes().to_vec(),
     )
-    .create(ActorId::zero(), 1_000_000_000_000, 66, 330, 1650)
+    .create(ActorId::zero(), 1_000_000_000_000, 6, 30, 150)
     .await
     .unwrap()
 }

@@ -156,7 +156,7 @@ pub(crate) fn ensure_move_allowed(
         return Err("target tile is not traversable".into());
     }
     if direction == DIR_UP {
-        let climbs_to_ladder = target_tile == TILE_LADDER;
+        let climbs_to_ladder = current_tile == TILE_LADDER && target_tile == TILE_LADDER;
         let exits_to_surface = current_tile == TILE_LADDER && target_tile == TILE_SURFACE;
         if !climbs_to_ladder && !exits_to_surface {
             return Err("upward movement requires a ladder".into());
@@ -197,15 +197,22 @@ pub(crate) fn chest_outcome(
     session_seed: u64,
     x: u32,
     y: u32,
+    dynamite_chance_bps: u32,
 ) -> ChestOutcome {
     let time_bucket = block_timestamp / 2;
     let coord_mix = (x as u64) ^ ((y as u64) << 1) ^ (((x as u64).saturating_add(y as u64)) << 4);
-    let roll = time_bucket ^ session_seed ^ coord_mix ^ (coord_mix >> 3) ^ (time_bucket >> 5);
+    let mut roll = time_bucket ^ session_seed.rotate_left(17) ^ coord_mix;
+    roll ^= coord_mix >> 3;
+    roll ^= time_bucket >> 5;
+    roll ^= roll >> 33;
+    roll = roll.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    roll ^= roll >> 33;
 
-    if roll & 1 == 0 {
-        ChestOutcome::Ladders
-    } else {
+    let chance = dynamite_chance_bps.min(PROBABILITY_BASIS_POINTS);
+    if (roll % PROBABILITY_BASIS_POINTS as u64) < chance as u64 {
         ChestOutcome::Dynamite
+    } else {
+        ChestOutcome::Ladders
     }
 }
 
@@ -559,8 +566,12 @@ mod tests {
             ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_EMPTY),
             Err("upward movement requires a ladder".into())
         );
-        assert!(ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_LADDER).is_ok());
+        assert_eq!(
+            ensure_move_allowed(DIR_UP, TILE_EMPTY, TILE_LADDER),
+            Err("upward movement requires a ladder".into())
+        );
         assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_SURFACE).is_ok());
+        assert!(ensure_move_allowed(DIR_UP, TILE_LADDER, TILE_LADDER).is_ok());
     }
 
     #[test]
@@ -612,21 +623,43 @@ mod tests {
 
     #[test]
     fn chest_outcome_is_deterministic_but_timestamp_sensitive() {
-        let first = chest_outcome(42, 777, 5, 9);
-        assert_eq!(chest_outcome(42, 777, 5, 9), first);
-        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 778, 5, 9));
-        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 777, 6, 9));
+        let chance = DEFAULT_CHEST_DYNAMITE_CHANCE_BPS;
+        let first = chest_outcome(42, 777, 5, 9, chance);
+        assert_eq!(chest_outcome(42, 777, 5, 9, chance), first);
 
         let mut saw_dynamite = false;
         let mut saw_ladders = false;
-        for timestamp in 1..=32 {
-            match chest_outcome(timestamp, 777, 5, 9) {
+        for timestamp in 1..=1_000 {
+            match chest_outcome(timestamp, 777, 5, 9, chance) {
                 ChestOutcome::Dynamite => saw_dynamite = true,
                 ChestOutcome::Ladders => saw_ladders = true,
             }
         }
         assert!(saw_dynamite);
         assert!(saw_ladders);
+    }
+
+    #[test]
+    fn chest_outcome_respects_configured_chance_boundaries() {
+        assert_eq!(chest_outcome(42, 777, 5, 9, 0), ChestOutcome::Ladders);
+        assert_eq!(
+            chest_outcome(42, 777, 5, 9, PROBABILITY_BASIS_POINTS),
+            ChestOutcome::Dynamite
+        );
+    }
+
+    #[test]
+    fn chest_outcome_default_chance_is_near_ten_percent() {
+        let mut dynamite = 0u32;
+        for timestamp in 1..=10_000 {
+            if chest_outcome(timestamp, 777, 5, 9, DEFAULT_CHEST_DYNAMITE_CHANCE_BPS)
+                == ChestOutcome::Dynamite
+            {
+                dynamite = dynamite.saturating_add(1);
+            }
+        }
+
+        assert!((500..=1_500).contains(&dynamite));
     }
 
     #[test]

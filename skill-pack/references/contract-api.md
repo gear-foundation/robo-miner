@@ -191,8 +191,9 @@ Redeem.CancelRedeem(redeemId)
 Redeem.ConfirmRedeem(redeemId)
 ```
 
-Rates are multiplied by `VaraUnit()`. Current intended rates are
-`SCRST=66`, `BCRST=330`, `HCRST=1650`.
+Rates are multiplied by `VaraUnit()`. Do not hardcode redeem rates in an
+agent; read `ScrstRate()`, `BcrstRate()`, `HcrstRate()`, and `VaraUnit()` from
+the current redeem contract before calculating whether an exchange is worth it.
 
 ## `vara-wallet` Examples
 
@@ -205,10 +206,24 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/Session --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/Config --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/AgentOf --args "[\"$agentActorId\"]" --idl "$ROBO_MINER_WORLD_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/MapSnapshot --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
+```
+
+`World/Config` is the source of truth for live ladder exchange rates. Parse:
+
+```text
+config[10] = SCRST resource amount
+config[11] = SCRST ladder amount
+config[12] = BCRST resource amount
+config[13] = BCRST ladder amount
+config[14] = HCRST resource amount
+config[15] = HCRST ladder amount
 ```
 
 Send rented DiggerProxy writes through `vara-wallet` Vara.eth injected calls:

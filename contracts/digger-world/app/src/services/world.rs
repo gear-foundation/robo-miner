@@ -135,6 +135,7 @@ impl WorldService<'_> {
                 state.session.seed,
                 x,
                 y,
+                state.config.chest_dynamite_chance_bps,
             ))
         } else {
             None
@@ -399,8 +400,10 @@ impl WorldService<'_> {
             return Err("agent is not on the surface".into());
         }
 
+        let config = state.config.clone();
         let mut preview = agent_before.clone();
-        let ladders_added = preview.trade_banked_resources_for_ladders(scrst, bcrst, hcrst)?;
+        let ladders_added =
+            preview.trade_banked_resources_for_ladders(scrst, bcrst, hcrst, &config)?;
         let session_id = state.session.session_id;
         let action_seq = next_action_seq(&mut state);
         let agent = state
@@ -408,7 +411,7 @@ impl WorldService<'_> {
             .get_mut(&caller)
             .expect("agent was checked before mutation");
         agent
-            .trade_banked_resources_for_ladders(scrst, bcrst, hcrst)
+            .trade_banked_resources_for_ladders(scrst, bcrst, hcrst, &config)
             .expect("resource trade was checked before mutation");
         agent.last_action_seq = action_seq;
 

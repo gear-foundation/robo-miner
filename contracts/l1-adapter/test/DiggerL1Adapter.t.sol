@@ -17,6 +17,9 @@ contract DiggerL1AdapterTest {
 
     address private constant USER = address(0xA11CE);
     uint256 private constant VARA_UNIT = 1_000_000_000_000;
+    uint256 private constant SCRST_RATE = 6;
+    uint256 private constant BCRST_RATE = 30;
+    uint256 private constant HCRST_RATE = 150;
     MockDiggerResVmtMirror private resMirror;
     MockDiggerRedeemMirror private redeemMirror;
     DiggerL1Adapter private adapter;
@@ -35,10 +38,16 @@ contract DiggerL1AdapterTest {
     function setUp() public {
         resMirror = new MockDiggerResVmtMirror();
         redeemMirror = new MockDiggerRedeemMirror();
-        adapter = new DiggerL1Adapter(address(resMirror), address(redeemMirror));
+        adapter = new DiggerL1Adapter(
+            address(resMirror), address(redeemMirror), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE
+        );
         resMirror.setAdapter(address(adapter));
         redeemMirror.setAdapter(address(adapter));
         vm.deal(address(adapter), 10_000 ether);
+    }
+
+    function testQuoteRedeemUsesConstructorRates() public view {
+        assertEq(adapter.quoteRedeem(2, 3, 1), (2 * SCRST_RATE + 3 * BCRST_RATE + HCRST_RATE) * VARA_UNIT);
     }
 
     function testMintIsPendingUntilVmtCallback() public {
@@ -219,10 +228,12 @@ contract DiggerL1AdapterTest {
     }
 
     function testRedeemCannotOverReserveVault() public {
-        DiggerL1Adapter thinAdapter = new DiggerL1Adapter(address(resMirror), address(redeemMirror));
+        DiggerL1Adapter thinAdapter = new DiggerL1Adapter(
+            address(resMirror), address(redeemMirror), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE
+        );
         resMirror.setAdapter(address(thinAdapter));
         redeemMirror.setAdapter(address(thinAdapter));
-        vm.deal(address(thinAdapter), 65 * VARA_UNIT);
+        vm.deal(address(thinAdapter), (SCRST_RATE - 1) * VARA_UNIT);
 
         bytes32 messageId = thinAdapter.requestMint(USER, 1, 0, 0);
         resMirror.succeed(messageId);
@@ -234,10 +245,18 @@ contract DiggerL1AdapterTest {
 
     function testConstructorRejectsZeroAddresses() public {
         vm.expectRevert(DiggerL1Adapter.ZeroAddress.selector);
-        new DiggerL1Adapter(address(0), address(redeemMirror));
+        new DiggerL1Adapter(address(0), address(redeemMirror), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE);
 
         vm.expectRevert(DiggerL1Adapter.ZeroAddress.selector);
-        new DiggerL1Adapter(address(resMirror), address(0));
+        new DiggerL1Adapter(address(resMirror), address(0), VARA_UNIT, SCRST_RATE, BCRST_RATE, HCRST_RATE);
+    }
+
+    function testConstructorRejectsZeroRates() public {
+        vm.expectRevert(DiggerL1Adapter.ZeroRate.selector);
+        new DiggerL1Adapter(address(resMirror), address(redeemMirror), 0, SCRST_RATE, BCRST_RATE, HCRST_RATE);
+
+        vm.expectRevert(DiggerL1Adapter.ZeroRate.selector);
+        new DiggerL1Adapter(address(resMirror), address(redeemMirror), VARA_UNIT, 0, BCRST_RATE, HCRST_RATE);
     }
 
     function _mintToUser(uint128 scrstAmount, uint128 bcrstAmount, uint128 hcrstAmount) private {

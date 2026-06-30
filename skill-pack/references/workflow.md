@@ -189,6 +189,26 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$redeemProgramId" Redeem/AvailableReserve \
   --args '[]' \
   --idl "$ROBO_MINER_REDEEM_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/VaraUnit \
+  --args '[]' \
+  --idl "$ROBO_MINER_REDEEM_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/ScrstRate \
+  --args '[]' \
+  --idl "$ROBO_MINER_REDEEM_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/BcrstRate \
+  --args '[]' \
+  --idl "$ROBO_MINER_REDEEM_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/HcrstRate \
+  --args '[]' \
+  --idl "$ROBO_MINER_REDEEM_IDL"
 ```
 
 If either fallback read fails or decodes against the wrong service, stop before
@@ -455,6 +475,9 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/Session --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/Config --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/AgentOf --args "[\"$agentActorId\"]" --idl "$ROBO_MINER_WORLD_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
@@ -463,6 +486,34 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$worldId" World/MapSnapshot --args '[]' --idl "$ROBO_MINER_WORLD_IDL"
 ```
+
+Before selecting the next action, scan the fresh `MapSnapshot` for all
+`LADDER` tiles. These are shared infrastructure, including ladders placed by
+other agents. For every resource route and every return-to-surface route,
+compare:
+
+- a route that reaches and uses existing/shared ladders;
+- a direct route that spends this agent's own ladders;
+- a mixed route that spends only the minimum own ladders needed to connect to
+  the existing ladder network.
+
+Prefer the safe route with the lowest current-agent ladder spend. Do not build a
+new vertical return shaft only because the agent has enough ladders; first prove
+that using existing/shared ladders is worse or unreachable. Record
+`own_ladders_spent`, `new_ladders_placed`, `unique_existing_ladder_cells_used`,
+and `shared_ladder_route_rejected_reason` in the run notes.
+
+Also run a stone-safety pass before every planned `Drill`:
+
+- `STONE` is not drillable. If the target tile is `STONE`, reject that action and
+  replan around it.
+- If the target tile is drillable but the tile directly above it is `STONE`,
+  treat the action as unsafe unless a fresh local gravity simulation proves that
+  the falling stone will not block the route or crush the agent.
+- If `StoneMoved` appears in events, or a move into a just-drilled cell fails,
+  discard the route and refresh `MapSnapshot`, `AgentOf`, and `Session`.
+- For high-value resources, validate both the path to the resource and the path
+  back to surface before mining it.
 
 Send exactly one `vara-wallet` action through the DiggerProxy. Directions are
 `0 up`, `1 right`, `2 down`, `3 left`, and `4 current` for `PlaceLadder` only:
@@ -535,9 +586,36 @@ When carried inventory should be banked:
 1. Return to surface (`World.AgentOf(agentActorId).result[2] === 0`).
 2. Call `Digger/Surface` with `vara-wallet`.
 3. If ladders are low and banked resources are available, prefer the safe
-   surface refill before mint/redeem. Use `Digger/TradeResourcesForLadders`
+   surface refill before mint/redeem. Before choosing `scrst,bcrst,hcrst`,
+   query the selected world's live `World/Config()` and parse the current ladder
+   exchange rate from indices `10..15`. Use `Digger/TradeResourcesForLadders`
    only when the installed `digger_proxy.idl` exposes that method. Do not call
    `World/TradeResourcesForLadders` directly in the live proxy workflow.
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$worldId" World/Config \
+  --args '[]' \
+  --idl "$ROBO_MINER_WORLD_IDL"
+```
+
+Config indices for ladder exchange:
+
+```text
+10: SCRST resource amount
+11: SCRST ladder amount
+12: BCRST resource amount
+13: BCRST ladder amount
+14: HCRST resource amount
+15: HCRST ladder amount
+```
+
+Calculate expected ladders as `(resources / resource_amount) * ladder_amount`
+for each resource. Each non-zero resource amount sent to
+`TradeResourcesForLadders` must be a multiple of the matching configured
+resource amount. If `World/Config()` returns fewer than 16 values, report that
+the live world does not expose current ladder rates and ask before assuming a
+legacy rate.
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
@@ -548,14 +626,6 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --args "[$scrst,$bcrst,$hcrst]" \
   --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
   --via injected
-```
-
-Trade rates:
-
-```text
-5 SCRST -> 1 ladder
-1 BCRST -> 1 ladder
-1 HCRST -> 5 ladders
 ```
 
 4. If banked resources are still non-zero and should be monetized, call:
@@ -599,6 +669,9 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$redeemProgramId" Redeem/AvailableReserve --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  call "$redeemProgramId" Redeem/VaraUnit --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$redeemProgramId" Redeem/ScrstRate --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
@@ -607,6 +680,18 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   call "$redeemProgramId" Redeem/HcrstRate --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
 ```
+
+Compute payout only from this live redeem config:
+
+```text
+payout =
+  scrst * ScrstRate() * VaraUnit()
+  + bcrst * BcrstRate() * VaraUnit()
+  + hcrst * HcrstRate() * VaraUnit()
+```
+
+Do not use hard-coded redeem rates from docs, memory, earlier deployments, or
+reports. Re-query the redeem contract after a redeploy or admin rate update.
 
 If balances and reserve allow redeeming, approve the redeem contract once if
 needed:

@@ -19,6 +19,7 @@ use crate::{
     state::WorldState,
 };
 
+pub use config::{WorldConfigInput, default_40x64_input};
 pub use constants::*;
 pub use events::{AdminEvents, WorldEvents};
 
@@ -28,8 +29,8 @@ pub struct Program {
 
 #[program]
 impl Program {
-    pub fn create() -> Self {
-        let config = WorldConfig::default_40x64();
+    pub fn create(config: WorldConfigInput) -> Self {
+        let config = WorldConfig::from_input(config);
         ensure_supported_config(&config).expect("unsupported world config");
         Self {
             state: RefCell::new(WorldState::new(Syscall::message_source(), config)),

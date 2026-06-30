@@ -57,9 +57,10 @@ user
 
 On Mirror error, the adapter re-mints the burned wrapper tokens to the user and unreserves the payout.
 
-Payouts use the same unit scale as `digger-redeem`: `VARA_UNIT = 1_000_000_000_000`.
-The adapter quote for `1 SCRST` is `66 * VARA_UNIT`, so `replyOn_redeemRedeem`
-matches the Vara.eth redeem callback.
+Payouts use the same unit scale and rates as the deployed `digger-redeem`
+program. Pass `varaUnit`, `scrstRate`, `bcrstRate`, and `hcrstRate` into the
+adapter constructor from the same config used for `digger-redeem.Create`; this
+keeps `quoteRedeem` aligned with `replyOn_redeemRedeem`.
 
 ### Current Spike Boundary
 
@@ -106,7 +107,8 @@ Run this before treating the spike as network-ready:
 
 1. Deploy or attach the current `digger-res-vmt` and `digger-redeem` programs.
 2. Regenerate Solidity wrappers from the exact deployed IDLs and confirm the adapter still compiles.
-3. Deploy `DiggerL1Adapter` with the real RES VMT Mirror and redeem Mirror.
+3. Deploy `DiggerL1Adapter` with the real RES VMT Mirror, redeem Mirror, and
+   the live redeem `varaUnit/scrstRate/bcrstRate/hcrstRate` values.
 4. Configure `digger-res-vmt` so the Mirror-side actor used by the adapter can mint to the adapter actor.
 5. Configure `digger-redeem` with the deployed RES VMT program and fund its VARA reserve.
 6. Call `requestMint`, wait for `replyOn_vmtMintResources`, and verify:

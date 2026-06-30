@@ -223,7 +223,10 @@ failure and wait for backend refill or operator action. Do not call world
 
 If the owner wallet is short on WVARA but the agent has banked resources, use
 the player settlement flow from `workflow.md` to `Surface`, `MintResources`, and
-`Redeem`.
+`Redeem`. Before estimating payout or choosing redeem amounts, query the live
+redeem contract for `Redeem/ScrstRate`, `Redeem/BcrstRate`,
+`Redeem/HcrstRate`, `Redeem/VaraUnit`, and `Redeem/AvailableReserve`; never use
+hard-coded resource-to-WVARA rates.
 
 ## Minimum Wallet Checklist
 

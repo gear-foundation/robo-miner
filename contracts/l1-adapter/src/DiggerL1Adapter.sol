@@ -22,9 +22,9 @@ contract DiggerL1Adapter {
     }
 
     uint256 public constant VARA_UNIT = 1_000_000_000_000;
-    uint256 public constant SCRST_RATE = 66 * VARA_UNIT;
-    uint256 public constant BCRST_RATE = 330 * VARA_UNIT;
-    uint256 public constant HCRST_RATE = 1650 * VARA_UNIT;
+    uint256 public constant SCRST_RATE = 6 * VARA_UNIT;
+    uint256 public constant BCRST_RATE = 30 * VARA_UNIT;
+    uint256 public constant HCRST_RATE = 150 * VARA_UNIT;
 
     address public immutable owner;
     IDiggerResVmtMirror public immutable resVmtMirror;

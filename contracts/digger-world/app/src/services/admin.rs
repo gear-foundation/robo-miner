@@ -1,6 +1,9 @@
 use sails_rs::{cell::RefCell, gstd::exec, prelude::*};
 
 use crate::{
+    config::{
+        LadderExchangeRate, ensure_supported_ladder_exchange_rate, ladder_exchange_rate_view,
+    },
     constants::{SESSION_ACTIVE, SESSION_CREATED, SESSION_FINISHED},
     events::AdminEvents,
     map::{ensure_map_loaded, generate_map, validate_uploaded_map},
@@ -153,5 +156,64 @@ impl AdminService<'_> {
     #[export(unwrap_result)]
     pub fn resource_vmt(&self) -> Result<ActorId, String> {
         Ok(self.state.borrow().resource_vmt)
+    }
+
+    #[export(unwrap_result)]
+    pub fn chest_dynamite_chance_bps(&self) -> Result<u32, String> {
+        Ok(self.state.borrow().config.chest_dynamite_chance_bps)
+    }
+
+    #[export(unwrap_result)]
+    pub fn set_chest_dynamite_chance_bps(
+        &mut self,
+        chest_dynamite_chance_bps: u32,
+    ) -> Result<u32, String> {
+        let caller = Syscall::message_source();
+        let mut state = self.state.borrow_mut();
+
+        ensure_admin(&state, caller)?;
+        if chest_dynamite_chance_bps > 10_000 {
+            return Err("chest dynamite chance must be <= 10000 bps".into());
+        }
+        state.config.chest_dynamite_chance_bps = chest_dynamite_chance_bps;
+
+        Ok(chest_dynamite_chance_bps)
+    }
+
+    #[export(unwrap_result)]
+    pub fn ladder_exchange_rate(&self) -> Result<Vec<u32>, String> {
+        Ok(ladder_exchange_rate_view(
+            &self.state.borrow().config.ladder_exchange_rate,
+        ))
+    }
+
+    #[export(unwrap_result)]
+    pub fn set_ladder_exchange_rate(
+        &mut self,
+        ladder_scrst_resource_amount: u32,
+        ladder_scrst_ladder_amount: u32,
+        ladder_bcrst_resource_amount: u32,
+        ladder_bcrst_ladder_amount: u32,
+        ladder_hcrst_resource_amount: u32,
+        ladder_hcrst_ladder_amount: u32,
+    ) -> Result<Vec<u32>, String> {
+        let caller = Syscall::message_source();
+        let mut state = self.state.borrow_mut();
+
+        ensure_admin(&state, caller)?;
+        let rate = LadderExchangeRate::from_raw(
+            ladder_scrst_resource_amount,
+            ladder_scrst_ladder_amount,
+            ladder_bcrst_resource_amount,
+            ladder_bcrst_ladder_amount,
+            ladder_hcrst_resource_amount,
+            ladder_hcrst_ladder_amount,
+        );
+        ensure_supported_ladder_exchange_rate(&rate)?;
+        state.config.ladder_exchange_rate = rate;
+
+        Ok(ladder_exchange_rate_view(
+            &state.config.ladder_exchange_rate,
+        ))
     }
 }

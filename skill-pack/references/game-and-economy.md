@@ -86,9 +86,9 @@ New ladders come from two places:
 Surface ladder trade rates:
 
 ```text
-5 SCRST -> 1 ladder
-1 BCRST -> 1 ladder
-1 HCRST -> 5 ladders
+1 SCRST -> 2 ladders
+1 BCRST -> 4 ladders
+1 HCRST -> 12 ladders
 ```
 
 Do not assume an agent with `0` ladders is dead or permanently stuck. It may
@@ -171,9 +171,9 @@ Before redeeming:
 Current intended rates:
 
 ```text
-SCRST: 66 VARA
-BCRST: 330 VARA
-HCRST: 1650 VARA
+SCRST: 6 VARA
+BCRST: 30 VARA
+HCRST: 150 VARA
 ```
 
 Rates are multiplied by `Redeem.VaraUnit()` on-chain.

@@ -1,6 +1,9 @@
 use sails_rs::prelude::*;
 
-use crate::{config::WorldConfig, constants::*};
+use crate::{
+    config::{LadderExchangeRate, WorldConfig},
+    constants::*,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Agent {
@@ -60,8 +63,9 @@ impl Agent {
         scrst: u32,
         bcrst: u32,
         hcrst: u32,
+        rate: &LadderExchangeRate,
     ) -> Result<u32, String> {
-        let ladders_added = ladders_for_resources(scrst, bcrst, hcrst)?;
+        let ladders_added = ladders_for_resources(scrst, bcrst, hcrst, rate)?;
         if self.banked_scrst < scrst {
             return Err("not enough banked SCRST".into());
         }
@@ -81,17 +85,31 @@ impl Agent {
     }
 }
 
-pub(crate) fn ladders_for_resources(scrst: u32, bcrst: u32, hcrst: u32) -> Result<u32, String> {
+pub(crate) fn ladders_for_resources(
+    scrst: u32,
+    bcrst: u32,
+    hcrst: u32,
+    rate: &LadderExchangeRate,
+) -> Result<u32, String> {
     if scrst == 0 && bcrst == 0 && hcrst == 0 {
         return Err("no resources selected".into());
     }
-    if scrst % LADDER_SCRST_COST != 0 {
-        return Err("SCRST must be traded in batches of five".into());
+    if scrst % rate.scrst_resource_amount != 0 {
+        return Err("SCRST must be traded in the configured ladder batch size".into());
+    }
+    if bcrst % rate.bcrst_resource_amount != 0 {
+        return Err("BCRST must be traded in the configured ladder batch size".into());
+    }
+    if hcrst % rate.hcrst_resource_amount != 0 {
+        return Err("HCRST must be traded in the configured ladder batch size".into());
     }
 
-    let scrst_ladders = scrst / LADDER_SCRST_COST;
-    let bcrst_ladders = bcrst.saturating_mul(LADDER_BCRST_REWARD);
-    let hcrst_ladders = hcrst.saturating_mul(LADDER_HCRST_REWARD);
+    let scrst_ladders =
+        (scrst / rate.scrst_resource_amount).saturating_mul(rate.scrst_ladder_amount);
+    let bcrst_ladders =
+        (bcrst / rate.bcrst_resource_amount).saturating_mul(rate.bcrst_ladder_amount);
+    let hcrst_ladders =
+        (hcrst / rate.hcrst_resource_amount).saturating_mul(rate.hcrst_ladder_amount);
     let ladders = scrst_ladders
         .saturating_add(bcrst_ladders)
         .saturating_add(hcrst_ladders);
@@ -162,25 +180,29 @@ mod tests {
 
     #[test]
     fn resources_trade_for_ladders_at_configured_rates() {
-        assert_eq!(ladders_for_resources(5, 0, 0), Ok(1));
-        assert_eq!(ladders_for_resources(0, 1, 0), Ok(1));
-        assert_eq!(ladders_for_resources(0, 0, 1), Ok(5));
-        assert_eq!(ladders_for_resources(10, 2, 1), Ok(9));
+        let rate = LadderExchangeRate::default_rates();
+        assert_eq!(ladders_for_resources(1, 0, 0, &rate), Ok(2));
+        assert_eq!(ladders_for_resources(0, 1, 0, &rate), Ok(4));
+        assert_eq!(ladders_for_resources(0, 0, 1, &rate), Ok(12));
+        assert_eq!(ladders_for_resources(4, 2, 1, &rate), Ok(28));
     }
 
     #[test]
     fn trading_banked_resources_spends_resources_and_adds_ladders() {
         let config = WorldConfig::default_40x64();
         let mut agent = Agent::new(ActorId::zero(), 2, &config);
-        agent.banked_scrst = 5;
+        agent.banked_scrst = 4;
         agent.banked_bcrst = 1;
         agent.banked_hcrst = 1;
 
-        assert_eq!(agent.trade_banked_resources_for_ladders(5, 1, 1), Ok(7));
+        assert_eq!(
+            agent.trade_banked_resources_for_ladders(4, 1, 1, &config.ladder_exchange_rate),
+            Ok(24)
+        );
         assert_eq!(agent.banked_scrst, 0);
         assert_eq!(agent.banked_bcrst, 0);
         assert_eq!(agent.banked_hcrst, 0);
-        assert_eq!(agent.ladders_remaining, config.starting_ladders + 7);
+        assert_eq!(agent.ladders_remaining, config.starting_ladders + 24);
     }
 
     #[test]
@@ -190,15 +212,11 @@ mod tests {
         agent.banked_scrst = 4;
 
         assert_eq!(
-            ladders_for_resources(0, 0, 0),
+            ladders_for_resources(0, 0, 0, &config.ladder_exchange_rate),
             Err("no resources selected".into())
         );
         assert_eq!(
-            agent.trade_banked_resources_for_ladders(4, 0, 0),
-            Err("SCRST must be traded in batches of five".into())
-        );
-        assert_eq!(
-            agent.trade_banked_resources_for_ladders(5, 0, 0),
+            agent.trade_banked_resources_for_ladders(5, 0, 0, &config.ladder_exchange_rate),
             Err("not enough banked SCRST".into())
         );
     }

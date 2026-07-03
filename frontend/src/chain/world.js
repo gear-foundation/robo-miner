@@ -6,7 +6,7 @@
 //
 // Program: DiggerWorld   ctor Create()
 //   service World@0xc63310d77006e90d  — the spatial game
-//   service Admin@0x5acb75662050b164  — session/map lifecycle
+//   service Admin@0x04d3929195a07a15  — session/map lifecycle
 //
 // NOTE — this World program is LEAN: the only agent actions are register / move /
 // drill / place_ladder / surface / exit / mint_resources / trade_resources.

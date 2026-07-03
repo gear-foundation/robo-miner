@@ -135,6 +135,7 @@ impl WorldService<'_> {
                 state.session.seed,
                 x,
                 y,
+                state.config.chest_dynamite_chance_bps,
             ))
         } else {
             None
@@ -400,7 +401,13 @@ impl WorldService<'_> {
         }
 
         let mut preview = agent_before.clone();
-        let ladders_added = preview.trade_banked_resources_for_ladders(scrst, bcrst, hcrst)?;
+        let ladder_exchange_rate = state.config.ladder_exchange_rate.clone();
+        let ladders_added = preview.trade_banked_resources_for_ladders(
+            scrst,
+            bcrst,
+            hcrst,
+            &ladder_exchange_rate,
+        )?;
         let session_id = state.session.session_id;
         let action_seq = next_action_seq(&mut state);
         let agent = state
@@ -408,7 +415,7 @@ impl WorldService<'_> {
             .get_mut(&caller)
             .expect("agent was checked before mutation");
         agent
-            .trade_banked_resources_for_ladders(scrst, bcrst, hcrst)
+            .trade_banked_resources_for_ladders(scrst, bcrst, hcrst, &ladder_exchange_rate)
             .expect("resource trade was checked before mutation");
         agent.last_action_seq = action_seq;
 

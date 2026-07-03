@@ -15,9 +15,12 @@ pub const TILE_SURFACE: u8 = 20;
 pub const CHEST_OUTCOME_DYNAMITE: u32 = 1;
 pub const CHEST_OUTCOME_LADDERS: u32 = 2;
 pub const CHEST_LADDER_REWARD: u32 = 10;
-pub const LADDER_SCRST_COST: u32 = 5;
-pub const LADDER_BCRST_REWARD: u32 = 1;
-pub const LADDER_HCRST_REWARD: u32 = 5;
+pub const LADDER_SCRST_COST: u32 = 1;
+// Generous ladder exchange (colleague rec) at redeem rates 6/30/150 WVARA:
+//   1 SCRST -> 2 ladders, 1 BCRST -> 4 ladders, 1 HCRST -> 12 ladders.
+pub const LADDER_SCRST_REWARD: u32 = 2;
+pub const LADDER_BCRST_REWARD: u32 = 4;
+pub const LADDER_HCRST_REWARD: u32 = 12;
 
 pub const RESOURCE_SCRST: u32 = 1;
 pub const RESOURCE_BCRST: u32 = 2;

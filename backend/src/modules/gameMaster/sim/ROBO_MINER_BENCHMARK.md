@@ -224,7 +224,7 @@ REPORT="$REPORT" node --input-type=module <<'NODE'
 import { readFileSync } from 'node:fs';
 const report = JSON.parse(readFileSync(process.env.REPORT, 'utf8'));
 const valueUnits = ([s, b, h]) => s + b * 5 + h * 25;
-const valueVara = ([s, b, h]) => s * 66 + b * 330 + h * 1650;
+const valueVara = ([s, b, h]) => s * 6 + b * 30 + h * 150;
 const banked = report.after.banked;
 const carried = report.after.carried;
 const mined = [
@@ -270,20 +270,20 @@ NODE
 Resource value assumptions:
 
 ```txt
-SCRST = 66 VARA = 1 value unit
-BCRST = 330 VARA = 5 value units
-HCRST = 1650 VARA = 25 value units
+SCRST = 6 VARA = 1 value unit
+BCRST = 30 VARA = 5 value units
+HCRST = 150 VARA = 25 value units
 ```
 
 Ladder trade opportunity cost:
 
 ```txt
-5 SCRST -> 1 ladder
-1 BCRST -> 1 ladder
-1 HCRST -> 5 ladders
+1 SCRST -> 2 ladders
+1 BCRST -> 4 ladders
+1 HCRST -> 12 ladders
 ```
 
-So one bought ladder costs roughly `330 VARA` of resource opportunity value.
+So one bought ladder costs roughly `30 VARA` of resource opportunity value.
 
 ## 9. Summarize L1 validator gas
 

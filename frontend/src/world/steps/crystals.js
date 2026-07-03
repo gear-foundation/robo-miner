@@ -5,7 +5,7 @@
 // deeper = rarer/more valuable. Counts scale with map area so other sizes keep
 // the same density. Digger hazards now come from contract-resolved chests.
 //
-// Economy (redeem VARA): SCRST 66 · BCRST 330 · HCRST 1650  (see config.js).
+// Economy (redeem VARA): SCRST 6 · BCRST 30 · HCRST 150  (see config.js).
 
 import { BLOCK } from '../../config.js';
 import { DIMS } from '../dims.js';

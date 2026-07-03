@@ -834,9 +834,9 @@ mod tests {
     use super::*;
 
     const VARA_UNIT: u128 = 1_000_000_000_000;
-    const SCRST_RATE: u128 = 66;
-    const BCRST_RATE: u128 = 330;
-    const HCRST_RATE: u128 = 1650;
+    const SCRST_RATE: u128 = 6;
+    const BCRST_RATE: u128 = 30;
+    const HCRST_RATE: u128 = 150;
 
     #[test]
     fn calculates_configured_resource_payout() {
@@ -849,7 +849,7 @@ mod tests {
         )
         .expect("payout");
 
-        assert_eq!(payout, (2 * 66 + 3 * 330 + 1650) * VARA_UNIT);
+        assert_eq!(payout, (2 * SCRST_RATE + 3 * BCRST_RATE + HCRST_RATE) * VARA_UNIT);
     }
 
     #[test]
@@ -868,7 +868,7 @@ mod tests {
 
     #[test]
     fn detects_payout_overflow() {
-        let error = calculate_payout(VARA_UNIT, &Rates::new(66, 330, 1650), u128::MAX, 0, 0)
+        let error = calculate_payout(VARA_UNIT, &Rates::new(SCRST_RATE, BCRST_RATE, HCRST_RATE), u128::MAX, 0, 0)
             .expect_err("must fail");
 
         assert_eq!(error, "SCRST payout overflow");

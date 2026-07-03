@@ -197,15 +197,19 @@ pub(crate) fn chest_outcome(
     session_seed: u64,
     x: u32,
     y: u32,
+    dynamite_chance_bps: u32,
 ) -> ChestOutcome {
+    if dynamite_chance_bps == 0 {
+        return ChestOutcome::Ladders;
+    }
     let time_bucket = block_timestamp / 2;
     let coord_mix = (x as u64) ^ ((y as u64) << 1) ^ (((x as u64).saturating_add(y as u64)) << 4);
     let roll = time_bucket ^ session_seed ^ coord_mix ^ (coord_mix >> 3) ^ (time_bucket >> 5);
 
-    if roll & 1 == 0 {
-        ChestOutcome::Ladders
-    } else {
+    if roll % 10_000 < dynamite_chance_bps as u64 {
         ChestOutcome::Dynamite
+    } else {
+        ChestOutcome::Ladders
     }
 }
 
@@ -612,15 +616,13 @@ mod tests {
 
     #[test]
     fn chest_outcome_is_deterministic_but_timestamp_sensitive() {
-        let first = chest_outcome(42, 777, 5, 9);
-        assert_eq!(chest_outcome(42, 777, 5, 9), first);
-        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 778, 5, 9));
-        assert_ne!(chest_outcome(42, 777, 5, 9), chest_outcome(42, 777, 6, 9));
+        let first = chest_outcome(42, 777, 5, 9, 1000);
+        assert_eq!(chest_outcome(42, 777, 5, 9, 1000), first);
 
         let mut saw_dynamite = false;
         let mut saw_ladders = false;
-        for timestamp in 1..=32 {
-            match chest_outcome(timestamp, 777, 5, 9) {
+        for timestamp in 1..=512 {
+            match chest_outcome(timestamp, 777, 5, 9, 1000) {
                 ChestOutcome::Dynamite => saw_dynamite = true,
                 ChestOutcome::Ladders => saw_ladders = true,
             }

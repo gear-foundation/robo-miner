@@ -553,9 +553,9 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 Trade rates:
 
 ```text
-5 SCRST -> 1 ladder
-1 BCRST -> 1 ladder
-1 HCRST -> 5 ladders
+1 SCRST -> 2 ladders
+1 BCRST -> 4 ladders
+1 HCRST -> 12 ladders
 ```
 
 4. If banked resources are still non-zero and should be monetized, call:

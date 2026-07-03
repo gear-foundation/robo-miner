@@ -1,6 +1,7 @@
 import { generateAgentName } from '../agentNames.js';
+import { DEFAULT_REDEEM_RATES } from '../../config/networks.js';
 
-const DEFAULT_RATES = { scrst: 66, bcrst: 330, hcrst: 1650 };
+const DEFAULT_RATES = DEFAULT_REDEEM_RATES;
 const METRICS = new Set(['live', 'banked', 'minted']);
 
 export class LeaderboardService {

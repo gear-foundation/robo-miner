@@ -48,7 +48,7 @@ service World@0xc63310d77006e90d {
     }
 }
 
-service Admin@0x5acb75662050b164 {
+service Admin@0x04d3929195a07a15 {
     events {
         Killed([u8; 32]),
         MapGenerated(u64, u64),
@@ -59,11 +59,17 @@ service Admin@0x5acb75662050b164 {
     functions {
         @query
         Admin() -> ActorId throws String;
+        @query
+        ChestDynamiteChanceBps() -> u32 throws String;
         FinishSession() -> [u128] throws String;
         Kill(inheritor: ActorId) throws String;
+        @query
+        LadderExchangeRate() -> [u32] throws String;
         ResetMap(seed: u64) -> [u128] throws String;
         @query
         ResourceVmt() -> ActorId throws String;
+        SetChestDynamiteChanceBps(chest_dynamite_chance_bps: u32) -> u32 throws String;
+        SetLadderExchangeRate(ladder_scrst_resource_amount: u32, ladder_scrst_ladder_amount: u32, ladder_bcrst_resource_amount: u32, ladder_bcrst_ladder_amount: u32, ladder_hcrst_resource_amount: u32, ladder_hcrst_ladder_amount: u32) -> [u32] throws String;
         SetResourceVmt(resource_vmt: ActorId) -> ActorId throws String;
         StartSession() -> [u128] throws String;
         UploadMap(seed: u64, map: [u32]) -> [u128] throws String;
@@ -72,10 +78,10 @@ service Admin@0x5acb75662050b164 {
 
 program DiggerWorldClient {
     constructors {
-        Create();
+        Create(config: ((u32, u32, u32, u32, u32, u32, u32, u32, u32, u32), (u32, u32, u32, u32, u32, u32)));
     }
     services {
         World@0xc63310d77006e90d,
-        Admin@0x5acb75662050b164,
+        Admin@0x04d3929195a07a15,
     }
 }

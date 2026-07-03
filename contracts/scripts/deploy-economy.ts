@@ -45,9 +45,9 @@ const DEFAULTS = {
   DIGGER_PROMISE_TIMEOUT_MS: "60000",
   DIGGER_ECONOMY_TOP_UP: "100000000000000",
   VARA_UNIT: "1000000000000",
-  SCRST_RATE: "66",
-  BCRST_RATE: "330",
-  HCRST_RATE: "1650",
+  SCRST_RATE: "6",
+  BCRST_RATE: "30",
+  HCRST_RATE: "150",
 } as const;
 
 const RES_IDL_PATH = path.join(ROOT, "target/wasm32-gear/release/digger_res_vmt.idl");

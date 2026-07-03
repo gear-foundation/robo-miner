@@ -14,7 +14,7 @@ mod state;
 use sails_rs::{cell::RefCell, prelude::*};
 
 use crate::{
-    config::{WorldConfig, ensure_supported_config},
+    config::{RawWorldConfig, WorldConfig, ensure_supported_config},
     services::{AdminService, WorldService},
     state::WorldState,
 };
@@ -28,8 +28,8 @@ pub struct Program {
 
 #[program]
 impl Program {
-    pub fn create() -> Self {
-        let config = WorldConfig::default_40x64();
+    pub fn create(config: RawWorldConfig) -> Self {
+        let config = WorldConfig::from_raw(config);
         ensure_supported_config(&config).expect("unsupported world config");
         Self {
             state: RefCell::new(WorldState::new(Syscall::message_source(), config)),

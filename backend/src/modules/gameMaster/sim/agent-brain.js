@@ -9,7 +9,7 @@
 //
 // STONE is treated as an obstacle for the test brain. Chests are drillable, but
 // their outcome is contract-resolved (ladders or dynamite), so the planner only
-// treats them as optional route openings.
+// opens them deliberately as a ladder-rescue play, never as a random path tile.
 
 export const MAP_WIDTH = 40;
 export const MAP_HEIGHT = 64;
@@ -34,6 +34,7 @@ const tileAt = (map, x, y) => map[idx(x, y)] ?? TILE.EMPTY;
 const isResource = (t) => t === TILE.SCRST || t === TILE.BCRST || t === TILE.HCRST;
 const isDrillable = (t) => t === TILE.DIRT || t === TILE.CHEST || isResource(t); // NOT stone (undrillable)
 const isTraversable = (t) => t === TILE.EMPTY || t === TILE.SURFACE || t === TILE.LADDER;
+const isUnsafeDrillTarget = (map, x, y) => tileAt(map, x, y - 1) === TILE.STONE;
 
 const RESOURCE_VALUE = {
   [TILE.SCRST]: 1,
@@ -53,19 +54,20 @@ const BASE_PROFILE = {
   depthWeight: 0.015,
   returnLoad: 1,
   ladderBuffer: 1,
+  chestRiskLoad: 2,
   resourceWeights: {},
 };
 
 const PROFILE_PRESETS = [
   { name: 'balanced', valueWeight: 0.35, depthWeight: 0.015, returnLoad: 1, ladderBuffer: 1 },
-  { name: 'sprinter', valueWeight: 0.05, depthWeight: 0, returnLoad: 0.8, ladderBuffer: 2 },
-  { name: 'scrst-harvester', valueWeight: 0.15, depthWeight: 0.01, returnLoad: 0.9, ladderBuffer: 1, resourceWeights: { [TILE.SCRST]: 6 } },
+  { name: 'sprinter', valueWeight: 0.05, depthWeight: 0, returnLoad: 1, ladderBuffer: 2 },
+  { name: 'scrst-harvester', valueWeight: 0.15, depthWeight: 0.01, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.SCRST]: 6 } },
   { name: 'bcrst-hunter', valueWeight: 0.45, depthWeight: 0.02, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.BCRST]: 10 } },
   { name: 'hcrst-hunter', valueWeight: 0.75, depthWeight: 0.025, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.HCRST]: 18 } },
   { name: 'deep-scout', valueWeight: 0.25, depthWeight: 0.08, returnLoad: 1, ladderBuffer: 1 },
-  { name: 'cautious', valueWeight: 0.2, depthWeight: 0.005, returnLoad: 0.6, ladderBuffer: 4 },
+  { name: 'cautious', valueWeight: 0.2, depthWeight: 0.005, returnLoad: 1, ladderBuffer: 4 },
   { name: 'greedy', valueWeight: 0.9, depthWeight: 0.03, returnLoad: 1, ladderBuffer: 0 },
-  { name: 'mid-value', valueWeight: 0.5, depthWeight: 0.015, returnLoad: 0.8, ladderBuffer: 2, resourceWeights: { [TILE.BCRST]: 8, [TILE.HCRST]: 6 } },
+  { name: 'mid-value', valueWeight: 0.5, depthWeight: 0.015, returnLoad: 1, ladderBuffer: 2, resourceWeights: { [TILE.BCRST]: 8, [TILE.HCRST]: 6 } },
   { name: 'rare-or-deep', valueWeight: 0.65, depthWeight: 0.06, returnLoad: 1, ladderBuffer: 1, resourceWeights: { [TILE.HCRST]: 10 } },
 ];
 
@@ -99,18 +101,27 @@ function targetPosition(x, y, dir) {
 
 // Can the agent advance from (x,y) in `dir`? Pathfinding may drill a soft tile
 // first, then move into it; never through stone/resource without an explicit
-// drill step. Up requires a ladder at current/target.
-function canMoveInto(map, x, y, dir) {
+// drill step. Chests are excluded by default because opening one can kill the
+// agent; rescue planning opts into them explicitly.
+function canMoveInto(map, x, y, dir, { allowChest = false } = {}) {
   const t = targetPosition(x, y, dir);
   if (!t) return false;
   const cur = tileAt(map, x, y);
   const tgt = tileAt(map, t.x, t.y);
   if (tgt === TILE.STONE || isResource(tgt)) return false;
-  if (dir.name === 'up' && cur !== TILE.LADDER && tgt !== TILE.LADDER) return false;
+  if (tgt === TILE.CHEST && !allowChest) return false;
+  if (isDrillable(tgt) && isUnsafeDrillTarget(map, t.x, t.y)) return false;
+  if (dir.name === 'up' && tgt === TILE.SURFACE && cur !== TILE.LADDER && cur !== TILE.EMPTY) {
+    return false;
+  }
   return isTraversable(tgt) || isDrillable(tgt);
 }
 
-const movementCost = (t) => (isTraversable(t) ? 1 : isDrillable(t) ? 2 : Number.POSITIVE_INFINITY);
+const movementCost = (t, { allowChest = false } = {}) => {
+  if (isTraversable(t)) return 1;
+  if (t === TILE.CHEST && !allowChest) return Number.POSITIVE_INFINITY;
+  return isDrillable(t) ? 2 : Number.POSITIVE_INFINITY;
+};
 
 function reconstructPath(previous, startIndex, endIndex) {
   const path = [];
@@ -127,7 +138,7 @@ function reconstructPath(previous, startIndex, endIndex) {
 
 // Dijkstra over the map (drilling through dirt costs 2, walking costs 1) to every
 // cell, then the cheapest stand-next-to-a-resource plan, sorted by cost.
-function findResourcePlans(agent, map, targetResource) {
+function findStandPlans(agent, map, isTarget, targetResource) {
   const cells = MAP_WIDTH * MAP_HEIGHT;
   const start = idx(agent.x, agent.y);
   const dist = new Array(cells).fill(Number.POSITIVE_INFINITY);
@@ -157,7 +168,7 @@ function findResourcePlans(agent, map, targetResource) {
   for (let y = 0; y < MAP_HEIGHT; y += 1) {
     for (let x = 0; x < MAP_WIDTH; x += 1) {
       const tile = tileAt(map, x, y);
-      if (!isResource(tile)) continue;
+      if (!isTarget(tile)) continue;
       if (targetResource != null && tile !== targetResource) continue;
       for (const rd of DIRECTIONS) {
         const standX = x - rd.dx;
@@ -173,6 +184,14 @@ function findResourcePlans(agent, map, targetResource) {
   }
   plans.sort((a, b) => a.cost - b.cost);
   return plans;
+}
+
+function findResourcePlans(agent, map, targetResource) {
+  return findStandPlans(agent, map, isResource, targetResource);
+}
+
+function findChestPlans(agent, map) {
+  return findStandPlans(agent, map, (tile) => tile === TILE.CHEST, TILE.CHEST);
 }
 
 // BFS to the surface (y=0) over ALREADY-OPEN tiles only (empty/surface/ladder).
@@ -210,7 +229,8 @@ function requiredLaddersForPath(agent, map, path) {
     if (!t) return Number.POSITIVE_INFINITY;
     const cur = tileAt(map, x, y);
     const tgt = tileAt(map, t.x, t.y);
-    if (dir.name === 'up' && cur !== TILE.LADDER && tgt !== TILE.LADDER) needed += 1;
+    if (dir.name === 'up' && tgt === TILE.SURFACE && cur !== TILE.LADDER) needed += 1;
+    else if (dir.name === 'up' && tgt !== TILE.LADDER && tgt !== TILE.SURFACE) needed += 1;
     x = t.x; y = t.y;
   }
   return needed;
@@ -251,12 +271,35 @@ function returnSafeAfter(agent, map, action) {
   return { safe: ret.laddersNeeded <= sim.agent.ladders, laddersNeeded: ret.laddersNeeded };
 }
 
-function plannedActionForDirection(agent, map, dir) {
+function plannedActionForDirection(agent, map, dir, { allowChest = false } = {}) {
   const target = targetPosition(agent.x, agent.y, dir);
   if (!target) return null;
-  if (!canMoveInto(map, agent.x, agent.y, dir)) return null;
   const tile = tileAt(map, target.x, target.y);
-  if (isDrillable(tile)) return { fn: 'drill', dir, target, tile };
+  if (isResource(tile)) {
+    if (isUnsafeDrillTarget(map, target.x, target.y)) return null;
+    return { fn: 'drill', dir, target, tile };
+  }
+  if (!canMoveInto(map, agent.x, agent.y, dir, { allowChest })) return null;
+  const current = tileAt(map, agent.x, agent.y);
+  if (dir.name === 'up') {
+    if (tile === TILE.SURFACE) {
+      if (current === TILE.LADDER) return { fn: 'move', dir, target, tile };
+      if (current === TILE.EMPTY && agent.ladders > 0) {
+        return { fn: 'placeLadder', dir: CURRENT, target: { x: agent.x, y: agent.y }, tile: current };
+      }
+      return null;
+    }
+    if (tile === TILE.EMPTY) {
+      if (agent.ladders <= 0) return null;
+      return { fn: 'placeLadder', dir, target, tile };
+    }
+    if (tile === TILE.LADDER) return { fn: 'move', dir, target, tile };
+  }
+  if (tile === TILE.CHEST && !allowChest) return null;
+  if (isDrillable(tile)) {
+    if (isUnsafeDrillTarget(map, target.x, target.y)) return null;
+    return { fn: 'drill', dir, target, tile };
+  }
   if (!isTraversable(tile)) return null;
   return { fn: 'move', dir, target, tile };
 }
@@ -274,17 +317,21 @@ function returnSafeForPlan(agent, map, plan) {
     a = sim.agent; m = sim.map;
     return true;
   };
+  const advance = (dir) => {
+    for (let guard = 0; guard < 4; guard += 1) {
+      const action = plannedActionForDirection(a, m, dir);
+      if (!action) return false;
+      if (!step(action)) return false;
+      if (action.fn === 'move') return true;
+    }
+    return false;
+  };
   for (const dir of plan.path) {
-    const first = plannedActionForDirection(a, m, dir);
-    if (!first) return false;
-    if (first.fn === 'drill' && !step(first)) return false;
-    const move = plannedActionForDirection(a, m, dir);
-    if (!move || move.fn !== 'move') return false;
-    if (!step(move)) return false;
+    if (!advance(dir)) return false;
   }
   const t = targetPosition(a.x, a.y, plan.resourceDirection);
   if (!t || t.x !== plan.resource.x || t.y !== plan.resource.y) return false;
-  if (!isResource(tileAt(m, t.x, t.y))) return false;
+    if (!isResource(tileAt(m, t.x, t.y)) || isUnsafeDrillTarget(m, t.x, t.y)) return false;
   if (!step({ fn: 'drill', dir: plan.resourceDirection, target: t, tile: tileAt(m, t.x, t.y) })) return false;
   const fin = surfaceReturnPlan(a, m);
   return Boolean(fin && fin.laddersNeeded <= a.ladders);
@@ -292,12 +339,10 @@ function returnSafeForPlan(agent, map, plan) {
 
 function chooseMineAction(agent, map, plan) {
   const dir = plan.path[0] ?? plan.resourceDirection;
-  const target = targetPosition(agent.x, agent.y, dir);
-  if (!target) return null;
-  const tile = tileAt(map, target.x, target.y);
-  if (isDrillable(tile)) return { fn: 'drill', dir, target, tile, resource: isResource(tile) ? plan.resource : undefined };
-  if (!isTraversable(tile)) return null;
-  return { fn: 'move', dir, target, tile };
+  const action = plannedActionForDirection(agent, map, dir);
+  if (!action) return null;
+  if (isResource(action.tile)) action.resource = plan.resource;
+  return action;
 }
 
 function resourcePriority(profile, tile) {
@@ -327,6 +372,30 @@ function findReturnSafeMineAction(agent, map, profile) {
   return null;
 }
 
+function findChestRescueAction(agent, map, profile, { force = false } = {}) {
+  if (!force && carried(agent) > profile.chestRiskLoad) return null;
+  const plans = findChestPlans(agent, map)
+    .map((plan) => ({
+      ...plan,
+      score: plan.cost + carried(agent) * 5 + Math.max(0, agent.y - plan.resource.y) * 0.2,
+    }))
+    .sort((a, b) => a.score - b.score || a.cost - b.cost);
+
+  for (const plan of plans) {
+    const dir = plan.path[0] ?? plan.resourceDirection;
+    const action = plannedActionForDirection(agent, map, dir, { allowChest: true });
+    if (!action) continue;
+    action.plan = {
+      profile: profile.name,
+      target: 'chest-rescue',
+      score: Number(plan.score.toFixed(3)),
+      forced: force,
+    };
+    return action;
+  }
+  return null;
+}
+
 // One climb-toward-surface step: at y=0 bank; else place a ladder under our feet
 // when an up-move needs it, otherwise step along the open path to the surface.
 function chooseSurfaceAction(agent, map) {
@@ -338,8 +407,11 @@ function chooseSurfaceAction(agent, map) {
   if (!target) return null;
   const cur = tileAt(map, agent.x, agent.y);
   const tgt = tileAt(map, target.x, target.y);
-  if (dir.name === 'up' && cur !== TILE.LADDER && tgt !== TILE.LADDER) {
+  if (dir.name === 'up' && tgt === TILE.SURFACE && cur !== TILE.LADDER) {
     return { fn: 'placeLadder', dir: CURRENT, target: { x: agent.x, y: agent.y } };
+  }
+  if (dir.name === 'up' && tgt === TILE.EMPTY) {
+    return { fn: 'placeLadder', dir, target };
   }
   return { fn: 'move', dir, target, tile: tgt };
 }
@@ -366,6 +438,8 @@ export function decideAction(agent, map, state = {}) {
     } else {
       const action = chooseSurfaceAction(agent, map);
       if (action) return { action, mode };
+      const rescue = findChestRescueAction(agent, map, profile, { force: true });
+      if (rescue) return { action: rescue, mode: 'mine' };
       // No open path up (shouldn't happen if we kept return-safety) → try to dig.
     }
   }
@@ -374,8 +448,18 @@ export function decideAction(agent, map, state = {}) {
   const safe = findReturnSafeMineAction(agent, map, profile);
   if (safe) return { action: safe, mode: 'mine' };
 
-  // Nothing return-safe: if carrying, go bank; else nudge downward to open the map.
-  if (carried(agent) > 0) return { action: chooseSurfaceAction(agent, map), mode: 'surface' };
+  // Nothing return-safe: if carrying, bank when possible; if not possible, a
+  // nearby chest is the only realistic way to recover ladders.
+  if (carried(agent) > 0) {
+    const surface = chooseSurfaceAction(agent, map);
+    if (surface) return { action: surface, mode: 'surface' };
+    const rescue = findChestRescueAction(agent, map, profile, { force: true });
+    if (rescue) return { action: rescue, mode: 'mine' };
+  }
+  const rescue = findChestRescueAction(agent, map, profile, {
+    force: agent.ladders <= profile.ladderBuffer,
+  });
+  if (rescue) return { action: rescue, mode: 'mine' };
   const down = plannedActionForDirection(agent, map, DIRECTIONS[2]);
   if (down && returnSafeAfter(agent, map, down).safe) return { action: down, mode: 'mine' };
   return { action: null, mode };

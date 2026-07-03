@@ -528,16 +528,16 @@ Metrics:
 - `minted`: resources minted into RES. Best for confirmed economy accounting.
 
 Leaderboard score uses display VARA rates:
-`SCRST * 66 + BCRST * 330 + HCRST * 1650`.
+`SCRST * 6 + BCRST * 30 + HCRST * 150`.
 
 The on-chain redeem contract stores `vara_unit` separately from display rates.
 For live redeem initialization use:
 
 ```txt
 VARA_UNIT=1000000000000
-SCRST_RATE=66
-BCRST_RATE=330
-HCRST_RATE=1650
+SCRST_RATE=6
+BCRST_RATE=30
+HCRST_RATE=150
 ```
 
 ## Pre-Merge Smoke

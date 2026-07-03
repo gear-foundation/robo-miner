@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cloneWorldConfig, DEFAULT_WORLD_CONFIG } from '../config/networks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_IDL = path.join(__dirname, 'diggerWorld.idl');
@@ -82,6 +83,12 @@ function assertSuccessfulReply(reply, label) {
   if (!code || SUCCESS_REPLY_CODES.has(String(code))) return;
   const message = printableReplyPayload(reply.payload);
   throw new Error(`${label} failed: replyCode=${code}${message ? ` ${message}` : ''}`);
+}
+
+function createPayload(sails, worldConfig) {
+  const create = sails.ctors.Create;
+  if (!create?.args || create.args.length === 0) return create.encodePayload();
+  return create.encodePayload(cloneWorldConfig(worldConfig || DEFAULT_WORLD_CONFIG));
 }
 
 export async function connectDiggerWorldChain(env) {
@@ -334,7 +341,7 @@ export async function connectDiggerWorldChain(env) {
 
     // 2. Send Create() through the Mirror, then wait until the program reports initialized.
     const mirror = mirrorFor(programId);
-    const tx = await mirror.sendMessage(sails.ctors.Create.encodePayload(), 0n);
+    const tx = await mirror.sendMessage(createPayload(sails, env.worldConfig), 0n);
     await tx.send();
     await tx.getReceipt();
     const initDeadline = Date.now() + timeoutMs;
@@ -369,7 +376,7 @@ export async function connectDiggerWorldChain(env) {
     isProgramInitialized,
     initializeProgram,
     encode: {
-      create: () => sails.ctors.Create.encodePayload(),
+      create: () => createPayload(sails, env.worldConfig),
       uploadMap: (seed, tiles) => admin.UploadMap.encodePayload(seed, tiles),
       startSession: () => admin.StartSession.encodePayload(),
       finishSession: () => admin.FinishSession.encodePayload(),

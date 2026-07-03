@@ -214,6 +214,9 @@ type Args = {
   proxy?: string;
   vmt?: string;
   redeem?: string;
+  scrstRate?: string;
+  bcrstRate?: string;
+  hcrstRate?: string;
   ethRpc?: string;
   varaRpc?: string;
   router?: string;
@@ -222,6 +225,8 @@ type Args = {
   queryTimeoutMs?: string;
   validatorMode?: ValidatorMode;
   noConfigure?: boolean;
+  setRates?: boolean;
+  ratesOnly?: boolean;
 };
 
 type Connection = {
@@ -250,6 +255,15 @@ function parseArgs(argv: string[]): Args {
       case "--redeem":
         args.redeem = next();
         break;
+      case "--scrst-rate":
+        args.scrstRate = next();
+        break;
+      case "--bcrst-rate":
+        args.bcrstRate = next();
+        break;
+      case "--hcrst-rate":
+        args.hcrstRate = next();
+        break;
       case "--eth-rpc":
         args.ethRpc = next();
         break;
@@ -276,6 +290,13 @@ function parseArgs(argv: string[]): Args {
       }
       case "--no-configure":
         args.noConfigure = true;
+        break;
+      case "--set-rates":
+        args.setRates = true;
+        break;
+      case "--rates-only":
+        args.ratesOnly = true;
+        args.setRates = true;
         break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
@@ -341,6 +362,14 @@ function varaProviderFor(url: string, timeoutMs: number) {
 function parsePositiveInt(value: string | undefined, fallback: string, name: string): number {
   const parsed = Number(value ?? fallback);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${name} must be positive`);
+  return parsed;
+}
+
+function parsePositiveU128(value: string | undefined, fallback: string, name: string): bigint {
+  const raw = value ?? fallback;
+  if (!/^[0-9]+$/.test(raw)) throw new Error(`${name} must be an unsigned integer`);
+  const parsed = BigInt(raw);
+  if (parsed <= 0n) throw new Error(`${name} must be greater than zero`);
   return parsed;
 }
 
@@ -461,19 +490,19 @@ async function main() {
   const queryTimeoutMs = parsePositiveInt(args.queryTimeoutMs, DEFAULTS.DIGGER_QUERY_TIMEOUT_MS, "--query-timeout-ms");
   const validatorMode = (args.validatorMode || envValue("DIGGER_VALIDATOR_MODE") || DEFAULTS.DIGGER_VALIDATOR_MODE) as ValidatorMode;
 
-  const proxyProgramId = normalizeAddress(args.proxy || requireValue(envValue("DIGGER_PROXY_PROGRAM_ID"), "DIGGER_PROXY_PROGRAM_ID"), "proxy");
-  const vmtProgramId = normalizeAddress(
-    requireValue(args.vmt || envValue("DIGGER_RESOURCE_VMT"), "DIGGER_RESOURCE_VMT"),
-    "vmt",
-  );
   const redeemProgramId = normalizeAddress(
     requireValue(args.redeem || envValue("DIGGER_REDEEM_PROGRAM_ID"), "DIGGER_REDEEM_PROGRAM_ID"),
     "redeem",
   );
-  const proxyActor = actorIdFromAddress(proxyProgramId);
-  const accountActor = actorIdFromAddress(normalizeAddress(envValue("ACCOUNT_ADDRESS") || "0xee98b6381b0a6a18a4a4e6d74355b015319a6809", "account"));
-  const vmtActor = actorIdFromAddress(vmtProgramId);
   const redeemActor = actorIdFromAddress(redeemProgramId);
+  const proxyProgramId = args.ratesOnly
+    ? undefined
+    : normalizeAddress(args.proxy || requireValue(envValue("DIGGER_PROXY_PROGRAM_ID"), "DIGGER_PROXY_PROGRAM_ID"), "proxy");
+  const vmtProgramId = args.ratesOnly
+    ? undefined
+    : normalizeAddress(requireValue(args.vmt || envValue("DIGGER_RESOURCE_VMT"), "DIGGER_RESOURCE_VMT"), "vmt");
+  const proxyActor = proxyProgramId ? actorIdFromAddress(proxyProgramId) : undefined;
+  const vmtActor = vmtProgramId ? actorIdFromAddress(vmtProgramId) : undefined;
 
   const [vmtSails, redeemSails] = await Promise.all([loadSails(VMT_IDL), loadSails(REDEEM_IDL)]);
   const connection = await connect(args, queryTimeoutMs);
@@ -490,6 +519,40 @@ async function main() {
       redeemProgramId,
       redeemActor,
     });
+
+    const readRedeemRates = async (label: string) => {
+      const rates = {
+        scrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ScrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ScrstRate", payload), queryTimeoutMs, `${label}.ScrstRate`),
+        bcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.BcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "BcrstRate", payload), queryTimeoutMs, `${label}.BcrstRate`),
+        hcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.HcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "HcrstRate", payload), queryTimeoutMs, `${label}.HcrstRate`),
+      };
+      console.log(`[redeem:rates:${label}]`, Object.fromEntries(
+        Object.entries(rates).map(([key, value]) => [key, value.toString()]),
+      ));
+      return rates;
+    };
+
+    await readRedeemRates("before");
+    if (args.setRates) {
+      const rates = {
+        scrst: parsePositiveU128(args.scrstRate || envValue("SCRST_RATE"), "6", "--scrst-rate"),
+        bcrst: parsePositiveU128(args.bcrstRate || envValue("BCRST_RATE"), "30", "--bcrst-rate"),
+        hcrst: parsePositiveU128(args.hcrstRate || envValue("HCRST_RATE"), "150", "--hcrst-rate"),
+      };
+      await sendInjected(
+        connection,
+        redeemProgramId,
+        "Redeem.Admin.SetRates",
+        redeemSails.services.Admin.functions.SetRates.encodePayload(rates.scrst, rates.bcrst, rates.hcrst) as Hex,
+        () => null,
+        validatorMode,
+        promiseTimeoutMs,
+      );
+      await readRedeemRates("after-set-rates");
+    }
+
+    if (args.ratesOnly) return;
+    if (!proxyActor || !vmtProgramId || !vmtActor) throw new Error("proxy and vmt are required unless --rates-only is used");
 
     const vmtRedeemBefore = await queryPayload(
       connection,
@@ -590,9 +653,6 @@ async function main() {
     console.log("[redeem:vmt-approval]", { proxyActor, redeemActor, isProxyApproved });
 
     const redeemState = {
-      scrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ScrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ScrstRate", payload), queryTimeoutMs, "Redeem.ScrstRate"),
-      bcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.BcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "BcrstRate", payload), queryTimeoutMs, "Redeem.BcrstRate"),
-      hcrstRate: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.HcrstRate.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "HcrstRate", payload), queryTimeoutMs, "Redeem.HcrstRate"),
       reserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.ReserveBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "ReserveBalance", payload), queryTimeoutMs, "Redeem.ReserveBalance"),
       availableReserve: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.AvailableReserve.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "AvailableReserve", payload), queryTimeoutMs, "Redeem.AvailableReserve"),
       locked: await queryPayload(connection, redeemProgramId, redeemSails.services.Redeem.queries.LockedBalance.encodePayload() as Hex, (payload) => bigintResult(redeemSails, "Redeem", "LockedBalance", payload), queryTimeoutMs, "Redeem.LockedBalance"),

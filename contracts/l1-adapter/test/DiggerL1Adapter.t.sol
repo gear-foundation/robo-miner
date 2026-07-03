@@ -222,7 +222,7 @@ contract DiggerL1AdapterTest {
         DiggerL1Adapter thinAdapter = new DiggerL1Adapter(address(resMirror), address(redeemMirror));
         resMirror.setAdapter(address(thinAdapter));
         redeemMirror.setAdapter(address(thinAdapter));
-        vm.deal(address(thinAdapter), 65 * VARA_UNIT);
+        vm.deal(address(thinAdapter), 5 * VARA_UNIT);
 
         bytes32 messageId = thinAdapter.requestMint(USER, 1, 0, 0);
         resMirror.succeed(messageId);

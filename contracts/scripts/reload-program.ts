@@ -75,6 +75,11 @@ const EXPECTED_RESOURCES = {
   total: 100,
 } as const;
 
+const DEFAULT_WORLD_CONFIG = [
+  [MAP_WIDTH, MAP_HEIGHT, 100, 77, 19, 4, 1, 50, 10, 1000],
+  [1, 2, 1, 4, 1, 12],
+] as const;
+
 type ValidatorMode = "default" | "slot";
 
 type CliArgs = {
@@ -463,7 +468,7 @@ function encodeCreatePayload(sails: SailsProgram): Hex {
   if (!ctor) {
     throw new Error("IDL does not contain DiggerWorld.Create constructor");
   }
-  return ctor.encodePayload() as Hex;
+  return ctor.args?.length ? ctor.encodePayload(DEFAULT_WORLD_CONFIG) as Hex : ctor.encodePayload() as Hex;
 }
 
 function encodeUploadPayload(sails: SailsProgram, seed: bigint, tiles: number[]): Hex {

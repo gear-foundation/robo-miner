@@ -31,6 +31,10 @@ pub trait DiggerWorldClientCtors {
     type Env: sails_rs::client::GearEnv;
     fn create(
         self,
+        config: (
+            (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32),
+            (u32, u32, u32, u32, u32, u32),
+        ),
     ) -> sails_rs::client::PendingCtor<DiggerWorldClientProgram, io::Create, Self::Env>;
 }
 
@@ -40,14 +44,18 @@ impl<E: sails_rs::client::GearEnv> DiggerWorldClientCtors
     type Env = E;
     fn create(
         self,
+        config: (
+            (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32),
+            (u32, u32, u32, u32, u32, u32),
+        ),
     ) -> sails_rs::client::PendingCtor<DiggerWorldClientProgram, io::Create, Self::Env> {
-        self.pending_ctor(())
+        self.pending_ctor((config,))
     }
 }
 
 pub mod io {
     use super::*;
-    sails_rs::io_struct_impl!(Create () -> (), 0);
+    sails_rs::io_struct_impl!(Create (config: ((u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, ), (u32, u32, u32, u32, u32, u32, ), )) -> (), 0);
 }
 
 pub mod world {
@@ -285,17 +293,36 @@ pub mod admin {
     pub trait Admin {
         type Env: sails_rs::client::GearEnv;
         fn admin(&self) -> sails_rs::client::PendingCall<io::Admin, Self::Env>;
+        fn chest_dynamite_chance_bps(
+            &self,
+        ) -> sails_rs::client::PendingCall<io::ChestDynamiteChanceBps, Self::Env>;
         fn finish_session(&mut self)
         -> sails_rs::client::PendingCall<io::FinishSession, Self::Env>;
         fn kill(
             &mut self,
             inheritor: ActorId,
         ) -> sails_rs::client::PendingCall<io::Kill, Self::Env>;
+        fn ladder_exchange_rate(
+            &self,
+        ) -> sails_rs::client::PendingCall<io::LadderExchangeRate, Self::Env>;
         fn reset_map(
             &mut self,
             seed: u64,
         ) -> sails_rs::client::PendingCall<io::ResetMap, Self::Env>;
         fn resource_vmt(&self) -> sails_rs::client::PendingCall<io::ResourceVmt, Self::Env>;
+        fn set_chest_dynamite_chance_bps(
+            &mut self,
+            chest_dynamite_chance_bps: u32,
+        ) -> sails_rs::client::PendingCall<io::SetChestDynamiteChanceBps, Self::Env>;
+        fn set_ladder_exchange_rate(
+            &mut self,
+            ladder_scrst_resource_amount: u32,
+            ladder_scrst_ladder_amount: u32,
+            ladder_bcrst_resource_amount: u32,
+            ladder_bcrst_ladder_amount: u32,
+            ladder_hcrst_resource_amount: u32,
+            ladder_hcrst_ladder_amount: u32,
+        ) -> sails_rs::client::PendingCall<io::SetLadderExchangeRate, Self::Env>;
         fn set_resource_vmt(
             &mut self,
             resource_vmt: ActorId,
@@ -312,12 +339,17 @@ pub mod admin {
 
     impl sails_rs::client::Identifiable for AdminImpl {
         const INTERFACE_ID: sails_rs::InterfaceId =
-            sails_rs::InterfaceId::from_bytes_8([90, 203, 117, 102, 32, 80, 177, 100]);
+            sails_rs::InterfaceId::from_bytes_8([4, 211, 146, 145, 149, 160, 122, 21]);
     }
 
     impl<E: sails_rs::client::GearEnv> Admin for sails_rs::client::Service<AdminImpl, E> {
         type Env = E;
         fn admin(&self) -> sails_rs::client::PendingCall<io::Admin, Self::Env> {
+            self.pending_call(())
+        }
+        fn chest_dynamite_chance_bps(
+            &self,
+        ) -> sails_rs::client::PendingCall<io::ChestDynamiteChanceBps, Self::Env> {
             self.pending_call(())
         }
         fn finish_session(
@@ -331,6 +363,11 @@ pub mod admin {
         ) -> sails_rs::client::PendingCall<io::Kill, Self::Env> {
             self.pending_call((inheritor,))
         }
+        fn ladder_exchange_rate(
+            &self,
+        ) -> sails_rs::client::PendingCall<io::LadderExchangeRate, Self::Env> {
+            self.pending_call(())
+        }
         fn reset_map(
             &mut self,
             seed: u64,
@@ -339,6 +376,30 @@ pub mod admin {
         }
         fn resource_vmt(&self) -> sails_rs::client::PendingCall<io::ResourceVmt, Self::Env> {
             self.pending_call(())
+        }
+        fn set_chest_dynamite_chance_bps(
+            &mut self,
+            chest_dynamite_chance_bps: u32,
+        ) -> sails_rs::client::PendingCall<io::SetChestDynamiteChanceBps, Self::Env> {
+            self.pending_call((chest_dynamite_chance_bps,))
+        }
+        fn set_ladder_exchange_rate(
+            &mut self,
+            ladder_scrst_resource_amount: u32,
+            ladder_scrst_ladder_amount: u32,
+            ladder_bcrst_resource_amount: u32,
+            ladder_bcrst_ladder_amount: u32,
+            ladder_hcrst_resource_amount: u32,
+            ladder_hcrst_ladder_amount: u32,
+        ) -> sails_rs::client::PendingCall<io::SetLadderExchangeRate, Self::Env> {
+            self.pending_call((
+                ladder_scrst_resource_amount,
+                ladder_scrst_ladder_amount,
+                ladder_bcrst_resource_amount,
+                ladder_bcrst_ladder_amount,
+                ladder_hcrst_resource_amount,
+                ladder_hcrst_ladder_amount,
+            ))
         }
         fn set_resource_vmt(
             &mut self,
@@ -361,13 +422,17 @@ pub mod admin {
     pub mod io {
         use super::*;
         sails_rs::io_struct_impl!(Admin () -> ActorId | String, 0, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(FinishSession () -> Vec<u128> | String, 1, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(Kill (inheritor: ActorId) -> () | String, 2, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(ResetMap (seed: u64) -> Vec<u128> | String, 3, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(ResourceVmt () -> ActorId | String, 4, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(SetResourceVmt (resource_vmt: ActorId) -> ActorId | String, 5, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(StartSession () -> Vec<u128> | String, 6, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
-        sails_rs::io_struct_impl!(UploadMap (seed: u64, map: Vec<u32>) -> Vec<u128> | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ChestDynamiteChanceBps () -> u32 | String, 1, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(FinishSession () -> Vec<u128> | String, 2, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(Kill (inheritor: ActorId) -> () | String, 3, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(LadderExchangeRate () -> Vec<u32> | String, 4, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ResetMap (seed: u64) -> Vec<u128> | String, 5, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(ResourceVmt () -> ActorId | String, 6, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetChestDynamiteChanceBps (chest_dynamite_chance_bps: u32) -> u32 | String, 7, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetLadderExchangeRate (ladder_scrst_resource_amount: u32, ladder_scrst_ladder_amount: u32, ladder_bcrst_resource_amount: u32, ladder_bcrst_ladder_amount: u32, ladder_hcrst_resource_amount: u32, ladder_hcrst_ladder_amount: u32) -> Vec<u32> | String, 8, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(SetResourceVmt (resource_vmt: ActorId) -> ActorId | String, 9, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(StartSession () -> Vec<u128> | String, 10, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
+        sails_rs::io_struct_impl!(UploadMap (seed: u64, map: Vec<u32>) -> Vec<u128> | String, 11, <super::AdminImpl as sails_rs::client::Identifiable>::INTERFACE_ID);
     }
 
     #[cfg(not(target_arch = "wasm32"))]

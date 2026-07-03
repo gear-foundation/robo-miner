@@ -14,6 +14,13 @@ const CHEST_X: u32 = 2;
 const CHEST_Y: u32 = 1;
 const STARTING_HP: u128 = 1;
 const STARTING_LADDERS: u32 = 50;
+const WORLD_CONFIG: (
+    (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32),
+    (u32, u32, u32, u32, u32, u32),
+) = (
+    (40, 64, 100, 77, 19, 4, 1, 50, 10, 1000),
+    (1, 2, 1, 4, 1, 12),
+);
 
 #[tokio::test]
 async fn drilling_chest_emits_event_and_applies_outcome() {
@@ -255,7 +262,7 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
         .await
         .unwrap();
     let agent_after_trade = traded.expect("resource trade should succeed");
-    assert_eq!(agent_after_trade[4], (STARTING_LADDERS + 1) as u128);
+    assert_eq!(agent_after_trade[4], (STARTING_LADDERS + 4) as u128);
     assert_eq!(agent_after_trade[9], 0);
 
     assert_eq!(
@@ -268,8 +275,8 @@ async fn surfaced_agent_can_trade_banked_resources_for_ladders() {
                 0,
                 1,
                 0,
-                1,
-                STARTING_LADDERS + 1,
+                4,
+                STARTING_LADDERS + 4,
             )
         )
     );
@@ -281,7 +288,7 @@ async fn deploy_world_program(
     salt: &str,
 ) -> sails_rs::client::Actor<::digger_world_client::DiggerWorldClientProgram, GtestEnv> {
     env.deploy::<::digger_world_client::DiggerWorldClientProgram>(code_id, salt.as_bytes().to_vec())
-        .create()
+        .create(WORLD_CONFIG)
         .await
         .unwrap()
 }

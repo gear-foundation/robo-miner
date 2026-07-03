@@ -14,13 +14,13 @@ const OTHER_ID: u64 = 123;
 
 const VARA_UNIT: u128 = 1_000_000_000_000;
 const RESERVE_VALUE: u128 = 10_000 * VARA_UNIT;
-const SCRST_RATE: u128 = 66;
-const BCRST_RATE: u128 = 330;
-const HCRST_RATE: u128 = 1650;
+const SCRST_RATE: u128 = 6;
+const BCRST_RATE: u128 = 30;
+const HCRST_RATE: u128 = 150;
 const SCRST: u128 = 2;
 const BCRST: u128 = 3;
 const HCRST: u128 = 1;
-const EXPECTED_PAYOUT: u128 = (2 * 66 + 3 * 330 + 1650) * VARA_UNIT;
+const EXPECTED_PAYOUT: u128 = (2 * SCRST_RATE + 3 * BCRST_RATE + HCRST_RATE) * VARA_UNIT;
 const SCRST_ID: u128 = 0;
 const BCRST_ID: u128 = 1;
 const HCRST_ID: u128 = 2;

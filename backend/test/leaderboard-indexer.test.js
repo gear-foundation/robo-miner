@@ -48,7 +48,7 @@ test('injected AgentSurfaced updates the MVP banked leaderboard', async () => {
   const rows = await new LeaderboardService({ store, config: CONFIG }).list({ metric: 'banked' });
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].banked, { scrst: 20, bcrst: 1, hcrst: 0 });
-  assert.equal(rows[0].score, 20 * 66 + 330);
+  assert.equal(rows[0].score, 20 * 6 + 30);
 });
 
 test('world snapshot reconciles banked totals when injected event is missing', async () => {
@@ -76,7 +76,7 @@ test('world snapshot reconciles banked totals when injected event is missing', a
   const rows = await new LeaderboardService({ store, config: CONFIG }).list({ metric: 'banked' });
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].banked, { scrst: 25, bcrst: 2, hcrst: 1 });
-  assert.equal(rows[0].score, 25 * 66 + 2 * 330 + 1650);
+  assert.equal(rows[0].score, 25 * 6 + 2 * 30 + 150);
 });
 
 test('world snapshot updates public world session status and agent count', async () => {

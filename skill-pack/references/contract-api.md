@@ -192,7 +192,7 @@ Redeem.ConfirmRedeem(redeemId)
 ```
 
 Rates are multiplied by `VaraUnit()`. Current intended rates are
-`SCRST=66`, `BCRST=330`, `HCRST=1650`.
+`SCRST=6`, `BCRST=30`, `HCRST=150`.
 
 ## `vara-wallet` Examples
 

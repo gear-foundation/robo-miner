@@ -6,7 +6,7 @@
 - `npm run build` passes in `frontend`.
 - `ADMIN_API_TOKEN` is set for any non-local live API.
 - `DIGGER_DAILY_EXEC_TARGET=120000000000000`.
-- Redeem rate config is `VARA_UNIT=1000000000000`, `SCRST_RATE=66`, `BCRST_RATE=330`, `HCRST_RATE=1650`.
+- Redeem rate config is `VARA_UNIT=1000000000000`, `SCRST_RATE=6`, `BCRST_RATE=30`, `HCRST_RATE=150`.
 - `DIGGER_RENTAL_MODE` is intentionally `dry-run` or `live`.
 - `DIGGER_PROXY_CODE_ID` is set before live rental deploys.
 - `VITE_BACKEND_URL` points frontend builds to the backend API when chain mode is enabled.

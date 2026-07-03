@@ -62,7 +62,7 @@ type ActionFunctionName =
 type ResourceTile = typeof TILE_RESOURCE_SCRST | typeof TILE_RESOURCE_BCRST | typeof TILE_RESOURCE_HCRST;
 
 const WORLD_HEADER_PREFIX = "0x474d0110c947eba8a499d9a7";
-const ADMIN_HEADER_PREFIX = "0x474d01105acb75662050b164";
+const ADMIN_HEADER_PREFIX = "0x474d011004d3929195a07a15";
 const sailsHeader = (prefix: string, route: number, entry = 1): Hex =>
   `${prefix}${route.toString(16).padStart(2, "0")}${entry.toString(16).padStart(4, "0")}` as Hex;
 

@@ -275,9 +275,9 @@ Redeem rates are display VARA values:
 
 | Resource | Rate |
 | --- | ---: |
-| `SCRST` | `66` |
-| `BCRST` | `330` |
-| `HCRST` | `1650` |
+| `SCRST` | `6` |
+| `BCRST` | `30` |
+| `HCRST` | `150` |
 
 `digger-redeem` stores `vara_unit` separately. Current Vara.eth unit is
 `1000000000000`.

@@ -1,4 +1,4 @@
-import { profileFor, adminKeyFor, DEFAULT_NETWORK } from '../../../config/networks.js';
+import { profileFor, adminKeyFor, DEFAULT_NETWORK, cloneWorldConfig, parseWorldConfig } from '../../../config/networks.js';
 
 function currentNetwork() {
   return String(process.env.CHAIN_NETWORK || DEFAULT_NETWORK).toLowerCase();
@@ -16,6 +16,7 @@ export function loadChainEnv(overrides = {}) {
     discoveryPort: p.DISCOVERY_PORT,
     topUp: p.TOP_UP_WEI,
     codeId: p.WORLD_CODE_ID,
+    worldConfig: parseWorldConfig(process.env.DIGGER_WORLD_CONFIG) || cloneWorldConfig(p.WORLD_CONFIG),
     wasmPath: '',
     idlPath: '',
     resVmtProgramId: p.RES_VMT_PROGRAM_ID,

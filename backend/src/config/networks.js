@@ -1,3 +1,30 @@
+export const DEFAULT_WORLD_CONFIG = [
+  [40, 64, 100, 77, 19, 4, 1, 50, 10, 1000],
+  [1, 2, 1, 4, 1, 12],
+];
+
+export const DEFAULT_REDEEM_RATES = { scrst: 6, bcrst: 30, hcrst: 150 };
+
+export function cloneWorldConfig(config = DEFAULT_WORLD_CONFIG) {
+  return config.map((section) => section.map(Number));
+}
+
+export function parseWorldConfig(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length !== 2 ||
+    !Array.isArray(parsed[0]) ||
+    !Array.isArray(parsed[1]) ||
+    parsed[0].length !== 10 ||
+    parsed[1].length !== 6
+  ) {
+    throw new Error('DIGGER_WORLD_CONFIG must be [[10 base u32 values],[6 ladder exchange u32 values]]');
+  }
+  return cloneWorldConfig(parsed);
+}
+
 export const MAINNET = {
   ETH_RPC: 'https://mainnet-reth-rpc.gear-tech.io',
   VARA_WS: 'wss://validator-1-eth.vara.network',
@@ -5,6 +32,8 @@ export const MAINNET = {
   DOCUMENT_ID: 'mainnet',
   DISCOVERY_PORT: 8780,
   WORLD_CODE_ID: '0xb8f7a6b0f5b86d84b8a790857c9026287ad385f03c87f4e0840320cb74a81b03',
+  WORLD_CONFIG: DEFAULT_WORLD_CONFIG,
+  REDEEM_RATES: DEFAULT_REDEEM_RATES,
   PROXY_CODE_ID: '0x2390d97aea22bbc45af6efe8bca29d06c80cebbddd55d9c0796eb724b77a5e93',
   RES_VMT_PROGRAM_ID: '0x09ca219f6b7f4c897ddcf60c6ab16c2802f51cfb',
   REDEEM_PROGRAM_ID: '0x5f627eb3d4658ed0f793e94142d4dfdba68090ee',
@@ -40,9 +69,11 @@ export const TESTNET = {
   DOCUMENT_ID: 'testnet',
   DISCOVERY_PORT: 8781,
   WORLD_CODE_ID: '0xc0aee115c4256e5fa18ddd91764bf23354883989cf2cfe04ad4e6dedc118e8af',
+  WORLD_CONFIG: DEFAULT_WORLD_CONFIG,
+  REDEEM_RATES: DEFAULT_REDEEM_RATES,
   PROXY_CODE_ID: '0x67190d741f9d1463934751fc57b6ff7b6c386f6897ff7ff974a2694422cd77ea',
-  RES_VMT_PROGRAM_ID: '',
-  REDEEM_PROGRAM_ID: '',
+  RES_VMT_PROGRAM_ID: '0x4888c0ed7cc9a61e0f537e88d6abc93e15d91240',
+  REDEEM_PROGRAM_ID: '0x9c5b14f959efa66d5015dd111912fc851232b787',
   TOP_UP_WEI: '300000000000000',
   BASE_WORLDS: 3,
   POOL_MAX: 6,

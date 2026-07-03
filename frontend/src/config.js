@@ -40,7 +40,7 @@ export const BLOCK = {
   DRILL_RELIC: 21, // jammed drill — needs dynamite, grants drill buff
   TORCH: 22,       // wall torch decoration
   // Digger campaign (agent arena) resource crystals — replace the 8-ore
-  // economy in that mode. Redeemable in VARA: SCRST 66 / BCRST 330 / HCRST 1650.
+  // economy in that mode. Redeemable in VARA: SCRST 6 / BCRST 30 / HCRST 150.
   SCRST: 23,       // small crystal — common, shallow
   BCRST: 24,       // big crystal — mid depth
   HCRST: 25,       // huge crystal — rare, deep
@@ -100,9 +100,9 @@ export const BLOCK_DATA = {
   // Digger crystals (agent arena). `price` = the VARA redeem rate, so the
   // existing auto-sell / team-score code values them straight away. Hardness
   // rises with rarity so the deep HCRST takes a real drill to break.
-  [BLOCK.SCRST]:  { name: 'scrst',   color: 0x5fd6ff, price: 66,     hardness: 1.5,  solid: true,  minDepth: 3,  maxDepth: 34 },
-  [BLOCK.BCRST]:  { name: 'bcrst',   color: 0x66e06a, price: 330,    hardness: 2.5,  solid: true,  minDepth: 22, maxDepth: 50 },
-  [BLOCK.HCRST]:  { name: 'hcrst',   color: 0xff5fc8, price: 1650,   hardness: 4,    solid: true,  minDepth: 45, maxDepth: 60 },
+  [BLOCK.SCRST]:  { name: 'scrst',   color: 0x5fd6ff, price: 6,      hardness: 1.5,  solid: true,  minDepth: 3,  maxDepth: 34 },
+  [BLOCK.BCRST]:  { name: 'bcrst',   color: 0x66e06a, price: 30,     hardness: 2.5,  solid: true,  minDepth: 22, maxDepth: 50 },
+  [BLOCK.HCRST]:  { name: 'hcrst',   color: 0xff5fc8, price: 150,    hardness: 4,    solid: true,  minDepth: 45, maxDepth: 60 },
 };
 
 // Minimum dig animation duration so high-tier drills don't make breaking

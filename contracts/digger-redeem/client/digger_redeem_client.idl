@@ -1,5 +1,5 @@
 
-!@sails: 1.0.0
+!@sails: 1.0.0-beta.5
 
 service Redeem@0x74c0432f9f172e15 {
     events {

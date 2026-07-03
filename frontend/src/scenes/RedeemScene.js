@@ -49,7 +49,7 @@ export default class RedeemScene extends Phaser.Scene {
     title.style.cssText = 'text-align:center;margin:8px 0 22px';
     title.innerHTML = `
       <div style="font-size:42px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">RES REDEEM</div>
-      <div style="margin-top:4px;font-size:16px;color:#fff;text-shadow:2px 2px 0 #000">SCRST × 66 · BCRST × 330 · HCRST × 1650</div>
+      <div style="margin-top:4px;font-size:16px;color:#fff;text-shadow:2px 2px 0 #000">SCRST × 6 · BCRST × 30 · HCRST × 150</div>
     `;
     root.appendChild(title);
 

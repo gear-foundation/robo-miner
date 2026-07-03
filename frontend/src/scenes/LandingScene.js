@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { navigateTo } from '../router.js';
 
 const HERO_BG = '/assets/landing/hero-mine.png';
-const RATES = { scrst: 66, bcrst: 330, hcrst: 1650 };
+const RATES = { scrst: 6, bcrst: 30, hcrst: 150 };
 const RESERVE_VARA = 11934;
 const SKILL_INSTALL_COMMAND = 'npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y';
 

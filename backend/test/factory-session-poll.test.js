@@ -173,7 +173,15 @@ test('factory reset hook stops the tick before provisioning or publishing', asyn
   let provisioned = false;
   let published = false;
   let resetHandled = false;
+  const livePersists = [];
   const factory = createFactory({
+    initialLive: [
+      makeWorld({
+        id: 'w001',
+        status: WORLD.OPEN,
+        programId: '0x1111111111111111111111111111111111111111',
+      }),
+    ],
     config: {
       poolSize: 1,
       baseWorlds: 1,
@@ -197,6 +205,12 @@ test('factory reset hook stops the tick before provisioning or publishing', asyn
     publish: async () => {
       published = true;
     },
+    onLive: async (worlds) => {
+      livePersists.push({
+        afterReset: resetHandled,
+        ids: worlds.map((world) => world.id),
+      });
+    },
     driver: {
       async provision() {
         provisioned = true;
@@ -213,6 +227,7 @@ test('factory reset hook stops the tick before provisioning or publishing', asyn
   assert.equal(resetHandled, true);
   assert.equal(provisioned, false);
   assert.equal(published, false);
+  assert.deepEqual(livePersists, [{ afterReset: false, ids: ['w001'] }]);
 });
 
 test('factory recycles a finished active world before provisioning a replacement', async () => {

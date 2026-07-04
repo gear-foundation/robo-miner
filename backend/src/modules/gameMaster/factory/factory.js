@@ -339,6 +339,7 @@ export function createFactory({
         } catch (error) {
           log(`[factory] tick error: ${error?.message || error}`);
         }
+        if (!running) return;
         await persistLive();
         timer = setTimeout(loop, cfg.tickMs);
       };

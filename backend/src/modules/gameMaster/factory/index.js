@@ -21,6 +21,7 @@ import { createDryRunDriver } from './drivers/dryRunDriver.js';
 import { createRegistryPublisher } from './registry.js';
 import { createDiscoveryServer } from './discovery.js';
 import { createArchiveStore } from './archive.js';
+import { isRestorableProgramSnapshot, persistedWorldLooksOpened } from './recovery.js';
 import { resetRequestDecision } from './resetRequest.js';
 import { WORLD } from './world.js';
 import { gridHash } from '../genmap.js';
@@ -363,30 +364,64 @@ function createWorldRegistry() {
 
 async function recoverLiveFromPool(live, env) {
   const pool = await readJson(programsFilePath(), {});
+  const readyLiveCandidates = [];
+  const incompleteLive = [];
+  for (const world of live) {
+    if (persistedWorldLooksOpened(world)) {
+      readyLiveCandidates.push(world);
+    } else if (world?.programId) {
+      incompleteLive.push(world);
+    }
+  }
+  for (const world of incompleteLive) {
+    console.warn(
+      `[factory] not restoring incomplete live world ${world.id || '-'} program=${world.programId} ` +
+      `session=${world.sessionId || 0} seed=${world.seed || 0}; leaving program for provisioning`,
+    );
+  }
   if (staleForResetGeneration(pool)) {
     console.warn(`[factory] ignoring stale program pool from before reset ${resetGenerationId()}`);
-    return live;
+    return readyLiveCandidates;
   }
   if (codeIdMismatch(pool, env)) {
     console.warn(`[factory] ignoring program pool for stale codeId=${pool?.codeId || 'none'} (expected ${env.codeId})`);
-    return live;
+    return readyLiveCandidates;
   }
-  const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
-  const known = new Set(live.map((world) => String(world.programId || '').toLowerCase()).filter(Boolean));
-  const missing = programs.filter((programId) => !known.has(String(programId).toLowerCase()));
-  if (missing.length === 0) return live;
 
+  const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
+  const readyLive = [];
   let chain = null;
   const recovered = [];
   try {
     const { connectDiggerWorldChain } = await import('../../../chain/diggerWorld.js');
     chain = await connectDiggerWorldChain(env);
+    for (const world of readyLiveCandidates) {
+      try {
+        await ensureRestoredEconomy(chain, world.programId, env);
+        readyLive.push(world);
+      } catch (error) {
+        console.warn(`[factory] live world ${world.id || '-'} not restored: ${error?.message || error}`);
+      }
+    }
+
+    const known = new Set(readyLive.map((world) => String(world.programId || '').toLowerCase()).filter(Boolean));
+    const missing = programs.filter((programId) => !known.has(String(programId).toLowerCase()));
+    if (missing.length === 0) return readyLive;
+
     let nextId = nextWorldNumber(live);
     for (const programId of missing) {
       try {
         const session = chain.decode.session((await chain.query(programId, chain.encode.session())).payload).map(Number);
         const owners = await readOwners(chain, programId);
         const rawGrid = await readRawGrid(chain, programId);
+        if (!isRestorableProgramSnapshot({ session, rawGrid })) {
+          console.warn(
+            `[factory] pool program ${programId} not restored: session/map is not ready; ` +
+            'leaving it in the pool for provisioning',
+          );
+          continue;
+        }
+        await ensureRestoredEconomy(chain, programId, env);
         const now = Date.now();
         const status = session[2] === 1
           ? WORLD.ACTIVE
@@ -420,7 +455,12 @@ async function recoverLiveFromPool(live, env) {
   if (recovered.length > 0) {
     console.warn(`[factory] recovered ${recovered.length} live world(s) from factory-programs pool`);
   }
-  return [...live, ...recovered];
+  return [...readyLive, ...recovered];
+}
+
+async function ensureRestoredEconomy(chain, programId, env) {
+  if (!env.resVmtProgramId || typeof chain.ensureWorldEconomy !== 'function') return;
+  await chain.ensureWorldEconomy(programId);
 }
 
 async function consumeFactoryResetRequest() {

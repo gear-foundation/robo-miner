@@ -11,7 +11,7 @@ test('mainnet profile drives the factory config', () => {
     const c = loadConfig();
     assert.equal(c.poolSize, MAINNET.POOL_MAX);
     assert.equal(c.baseWorlds, 6);
-    assert.equal(c.allowCreate, false);
+    assert.equal(c.allowCreate, true);
     assert.equal(c.lobbyMin, 1);
     assert.equal(c.lobbyCap, 10);
     assert.equal(c.sessionAutofinish, false);
@@ -19,6 +19,7 @@ test('mainnet profile drives the factory config', () => {
     assert.equal(e.network, 'mainnet');
     assert.equal(e.router, MAINNET.ROUTER);
     assert.equal(e.codeId, MAINNET.WORLD_CODE_ID);
+    assert.equal(e.codeId, '0x9e5e17dabbe4c1c0ae20b4c48981bbca866ffe24f1427fa807b98ddb57a72ff2');
     assert.deepEqual(e.worldConfig, DEFAULT_WORLD_CONFIG);
     assert.equal(e.balanceMinWvara, MAINNET.BALANCE_MIN_WVARA);
     assert.equal(e.topUp, MAINNET.TOP_UP_WEI);

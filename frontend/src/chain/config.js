@@ -17,8 +17,8 @@ const NETWORKS = {
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://validator-1-eth.vara.network',
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
-    resVmtProgramId: '0x09ca219f6b7f4c897ddcf60c6ab16c2802f51cfb',
-    redeemProgramId: '0x5f627eb3d4658ed0f793e94142d4dfdba68090ee',
+    resVmtProgramId: '0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448',
+    redeemProgramId: '0xdb8dae5f6fc193006d428e12ee0c717715c6b887',
     explorer: 'https://etherscan.io',
   },
   // Hoodi testnet (Vara.eth), chainId 560048 — see vara-wiki network-endpoints.

@@ -59,11 +59,13 @@ export class AdminService {
     });
   }
 
-  async resetTestnetState({ scope = 'all', confirm = '', restartFactory = true } = {}) {
-    if (this.config.network !== 'testnet' || this.config.databaseDocumentId !== 'testnet') {
-      throw httpError(403, 'testnet reset is only available for the testnet data namespace');
+  async resetNetworkState({ scope = 'all', confirm = '', restartFactory = true } = {}) {
+    const network = String(this.config.network || '').toLowerCase();
+    const namespace = String(this.config.databaseDocumentId || '').toLowerCase();
+    if (!['testnet', 'mainnet'].includes(network) || namespace !== network) {
+      throw httpError(403, 'network reset is only available for matching testnet/mainnet data namespaces');
     }
-    if (confirm !== 'reset-testnet') {
+    if (confirm !== `reset-${network}`) {
       throw httpError(400, 'missing reset confirmation');
     }
 
@@ -73,7 +75,7 @@ export class AdminService {
     }
 
     const now = this.now().toISOString();
-    const requestId = `admin-testnet-reset:${now}`;
+    const requestId = `admin-${network}-reset:${now}`;
     const resetRegistry = normalizedScope === 'registry' || normalizedScope === 'all';
     const resetFactory = normalizedScope === 'factory' || normalizedScope === 'all';
     if (resetFactory && restartFactory !== true) {
@@ -89,7 +91,7 @@ export class AdminService {
         id: requestId,
         type: 'factory-reset-request',
         status: 'pending',
-        network: 'testnet',
+        network,
         scope: normalizedScope,
         restartFactory: Boolean(restartFactory),
         createdAt: now,
@@ -102,7 +104,7 @@ export class AdminService {
       await this.store.write({
         jobRuns: [{
           id: requestId,
-          job: 'admin-testnet-reset',
+          job: `admin-${network}-reset`,
           mode: 'admin',
           scope: normalizedScope,
           resetRegistry,
@@ -112,7 +114,7 @@ export class AdminService {
       });
     }
 
-    this.logger?.warn?.('testnet.reset', {
+    this.logger?.warn?.(`${network}.reset`, {
       scope: normalizedScope,
       resetRegistry,
       resetFactory,
@@ -122,7 +124,7 @@ export class AdminService {
 
     return {
       status: 'ok',
-      network: 'testnet',
+      network,
       scope: normalizedScope,
       resetRegistry,
       resetFactory,
@@ -131,6 +133,13 @@ export class AdminService {
       factoryResetQueued: Boolean(resetRequest),
       resetRequestId: resetRequest?.id || null,
     };
+  }
+
+  async resetTestnetState(options = {}) {
+    if (this.config.network !== 'testnet' || this.config.databaseDocumentId !== 'testnet') {
+      throw httpError(403, 'testnet reset is only available for the testnet data namespace');
+    }
+    return this.resetNetworkState(options);
   }
 
   async deleteFactoryDocuments(ids) {

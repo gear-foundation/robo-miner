@@ -43,6 +43,7 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       worldId: world.id,
       status,
       deployMode,
+      codeId: env.codeId || null,
       programId: world.programId || null,
       seed: String(world.seed ?? ''),
       network: env.network || 'mainnet',
@@ -86,6 +87,7 @@ export function createRegistryPublisher({ cfg, env = {}, stateDir = 'state', now
       }
       const payload = {
         schemaVersion: 1,
+        codeId: env.codeId || null,
         createdAt,
         updatedAt: ts,
         worlds: records,

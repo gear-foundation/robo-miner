@@ -96,6 +96,15 @@ function staleForResetGeneration(payload) {
   return Boolean(resetId && payload?.resetRequestId !== resetId);
 }
 
+function codeIdMismatch(payload, env = {}) {
+  if (!env.codeId) return false;
+  const hasPrograms = Array.isArray(payload?.programs) && payload.programs.some(Boolean);
+  const hasWorlds = Array.isArray(payload?.worlds) && payload.worlds.some((world) => world?.programId);
+  if (!hasPrograms && !hasWorlds) return false;
+  if (!payload?.codeId) return true;
+  return String(payload.codeId).toLowerCase() !== String(env.codeId).toLowerCase();
+}
+
 async function loadPast() {
   const data = await readJson(pastFilePath(), {});
   if (staleForResetGeneration(data)) return [];
@@ -133,11 +142,17 @@ function compactWorld(world) {
   };
 }
 
-async function loadLive() {
+async function loadLive(env = {}) {
+  const pool = await readJson(programsFilePath(), {});
+  const poolMismatch = codeIdMismatch(pool, env);
   const live = await readJson(liveFilePath(), null);
   if (Array.isArray(live?.worlds)) {
     if (staleForResetGeneration(live)) {
       console.warn(`[factory] ignoring stale live state from before reset ${resetGenerationId()}`);
+      return [];
+    }
+    if ((live.codeId && codeIdMismatch(live, env)) || (!live.codeId && poolMismatch)) {
+      console.warn(`[factory] ignoring live state for stale codeId=${live.codeId || pool?.codeId || 'none'} (expected ${env.codeId})`);
       return [];
     }
     return live.worlds
@@ -150,6 +165,10 @@ async function loadLive() {
   const registry = await readJson(registryFilePath(), null);
   if (staleForResetGeneration(registry)) {
     console.warn(`[factory] ignoring stale gamemaster fallback from before reset ${resetGenerationId()}`);
+    return [];
+  }
+  if ((registry?.codeId && codeIdMismatch(registry, env)) || (!registry?.codeId && poolMismatch)) {
+    console.warn(`[factory] ignoring gamemaster fallback for stale codeId=${registry?.codeId || pool?.codeId || 'none'} (expected ${env.codeId})`);
     return [];
   }
   if (!Array.isArray(registry?.worlds)) return [];
@@ -165,6 +184,7 @@ async function saveLive(worlds) {
   await writeJson(liveFilePath(), {
     schemaVersion: 1,
     resetRequestId: resetGenerationId(),
+    codeId: chainEnv.codeId || null,
     updatedAt: new Date().toISOString(),
     worlds: active,
   });
@@ -232,7 +252,7 @@ if (useChain) {
   chainEnv.poolSize = config.poolSize;
   chainEnv.allowCreate = config.allowCreate;
   chainEnv.resetRequestId = resetGenerationId();
-  initialLive = await recoverLiveFromPool(await loadLive(), chainEnv);
+  initialLive = await recoverLiveFromPool(await loadLive(chainEnv), chainEnv);
   reservedProgramIds = initialLive.map((world) => world.programId).filter(Boolean);
   const { createChainDriver } = await import('./drivers/chainDriver.js');
   driver = await createChainDriver({ env: chainEnv, reservedProgramIds, documentStore, documentPrefix });
@@ -345,6 +365,10 @@ async function recoverLiveFromPool(live, env) {
   const pool = await readJson(programsFilePath(), {});
   if (staleForResetGeneration(pool)) {
     console.warn(`[factory] ignoring stale program pool from before reset ${resetGenerationId()}`);
+    return live;
+  }
+  if (codeIdMismatch(pool, env)) {
+    console.warn(`[factory] ignoring program pool for stale codeId=${pool?.codeId || 'none'} (expected ${env.codeId})`);
     return live;
   }
   const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];

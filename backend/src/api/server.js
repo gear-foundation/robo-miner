@@ -318,6 +318,19 @@ const server = http.createServer(async (req, res) => {
         restartFactory: body.restartFactory ?? true,
       }));
     }
+    if (req.method === 'POST' && url.pathname === '/api/admin/mainnet/reset') {
+      const body = await readJsonBody(req);
+      const mainnetAdmin = bundleFor('mainnet').adminService;
+      logger.warn('admin.mainnet.reset', {
+        scope: body.scope || 'all',
+        restartFactory: body.restartFactory ?? true,
+      });
+      return json(res, 202, await mainnetAdmin.resetNetworkState({
+        scope: body.scope || 'all',
+        confirm: body.confirm || '',
+        restartFactory: body.restartFactory ?? true,
+      }));
+    }
     if (req.method === 'GET' && url.pathname === '/api/admin/redeem') {
       const programId = url.searchParams.get('program') || config.redeemProgramIds[0];
       if (!programId) return json(res, 400, { error: 'missing_redeem_program' });

@@ -65,6 +65,54 @@ test('testnet factory reset requires a factory restart', async () => {
   );
 });
 
+test('mainnet reset clears the mainnet namespace with a mainnet confirmation', async () => {
+  const store = new MemoryStore({ worlds: [{ id: 'w001' }], jobRuns: [{ id: 'old' }] });
+  const documents = new MemoryDocumentStore({
+    'mainnet:factory:factory-live': { worlds: [{ id: 'w001' }] },
+    'mainnet:factory:factory-programs': { programs: ['0xold'] },
+    'mainnet:factory:gamemaster': { worlds: [{ id: 'w001', programId: '0xold' }] },
+  });
+  const service = new AdminService({
+    store,
+    documentStore: documents,
+    config: makeConfig({ network: 'mainnet', databaseDocumentId: 'mainnet' }),
+    chainFactory: async () => null,
+    now: () => new Date('2026-07-08T12:00:00.000Z'),
+  });
+
+  await assert.rejects(
+    service.resetNetworkState({
+      scope: 'all',
+      confirm: 'reset-testnet',
+      restartFactory: true,
+    }),
+    /missing reset confirmation/,
+  );
+
+  const result = await service.resetNetworkState({
+    scope: 'all',
+    confirm: 'reset-mainnet',
+    restartFactory: true,
+  });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.network, 'mainnet');
+  assert.equal(result.factoryResetQueued, true);
+  assert.deepEqual(documents.deleted, [[
+    'mainnet:factory:factory-live',
+    'mainnet:factory:factory-programs',
+    'mainnet:factory:factory-past',
+    'mainnet:factory:gamemaster',
+    'mainnet:factory:balance-keeper',
+  ]]);
+  assert.equal(documents.writes[0].id, 'mainnet:factory:factory-reset-request');
+  assert.equal(documents.writes[0].data.network, 'mainnet');
+
+  const db = await store.read();
+  assert.deepEqual(db.worlds, []);
+  assert.equal(db.jobRuns[0].job, 'admin-mainnet-reset');
+});
+
 test('testnet reset is rejected outside the testnet namespace', async () => {
   const service = new AdminService({
     store: new MemoryStore(),

@@ -69,7 +69,7 @@ export async function createChainDriver({
     try {
       return normalizePool(JSON.parse(await readFile(poolFile, 'utf8')));
     } catch {
-      return { codeId: null, programs: [] };
+      return { codeId: env.codeId || null, programs: [] };
     }
   }
   async function savePool() {
@@ -87,7 +87,18 @@ export async function createChainDriver({
 
   function normalizePool(value) {
     if (poolResetRequestId && value?.resetRequestId !== poolResetRequestId) {
-      return { resetRequestId: poolResetRequestId, codeId: null, programs: [] };
+      return { resetRequestId: poolResetRequestId, codeId: env.codeId || null, programs: [] };
+    }
+    if (poolCodeMismatch(value, env.codeId)) {
+      log(
+        `[chain] ignoring program pool for codeId=${value?.codeId || 'none'} ` +
+        `(expected ${env.codeId})`,
+      );
+      return {
+        resetRequestId: value?.resetRequestId || poolResetRequestId || null,
+        codeId: env.codeId || null,
+        programs: [],
+      };
     }
     return {
       resetRequestId: value?.resetRequestId || poolResetRequestId || null,
@@ -327,4 +338,12 @@ export async function createChainDriver({
     balanceSnapshot: () => keeper.snapshot(),
     disconnect: () => chain.disconnect(),
   };
+}
+
+export function poolCodeMismatch(pool, expectedCodeId) {
+  if (!expectedCodeId) return false;
+  const programs = Array.isArray(pool?.programs) ? pool.programs.filter(Boolean) : [];
+  if (programs.length === 0) return false;
+  if (!pool?.codeId) return true;
+  return String(pool.codeId).toLowerCase() !== String(expectedCodeId).toLowerCase();
 }

@@ -19,7 +19,7 @@ test('mainnet profile drives the factory config', () => {
     assert.equal(e.network, 'mainnet');
     assert.equal(e.router, MAINNET.ROUTER);
     assert.equal(e.codeId, MAINNET.WORLD_CODE_ID);
-    assert.equal(e.codeId, '0x9e5e17dabbe4c1c0ae20b4c48981bbca866ffe24f1427fa807b98ddb57a72ff2');
+    assert.equal(e.codeId, '0xd1255c81d69594019a90e94aa06c682bde08037492b48cb53e6d24d90caac22f');
     assert.deepEqual(e.worldConfig, DEFAULT_WORLD_CONFIG);
     assert.equal(e.balanceMinWvara, MAINNET.BALANCE_MIN_WVARA);
     assert.equal(e.topUp, MAINNET.TOP_UP_WEI);

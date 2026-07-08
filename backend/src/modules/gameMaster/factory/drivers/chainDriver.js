@@ -158,7 +158,7 @@ export async function createChainDriver({
   async function sendAdminWithSessionRecovery(programId, label, payload, predicate) {
     try {
       await waitForAdminReply(label, () => chain.sendAdmin(programId, payload));
-      return await readSession(programId);
+      return await waitForSession(programId, predicate, label);
     } catch (error) {
       log(`[chain] ${label} reply missing; checking session state: ${error?.message || error}`);
       return waitForSession(programId, predicate, label);

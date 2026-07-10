@@ -174,8 +174,13 @@ resVmtProgramId = manifest economy/resource config value if present
 redeemProgramId = manifest economy/resource config value if present
 ```
 
-If `/api/manifest` does not include economy ids, settlement is not configured
-yet. Do not use stale addresses from another network.
+If `/api/manifest` does not include economy ids on mainnet, use the current
+mainnet fallback ids below. Do not use them on another network.
+
+```text
+resVmtProgramId = 0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
+redeemProgramId = 0xdb8dae5f6fc193006d428e12ee0c717715c6b887
+```
 
 Verification before using economy ids:
 

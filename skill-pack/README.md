@@ -131,6 +131,8 @@ Safety rules:
 Known current values, if still valid:
 - VARA_ETH_NETWORK=mainnet
 - ROBO_MINER_BACKEND_URL=https://api-digger-eth.vara.network
+- ROBO_MINER_RES_VMT_PROGRAM_ID=0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
+- ROBO_MINER_REDEEM_PROGRAM_ID=0xdb8dae5f6fc193006d428e12ee0c717715c6b887
 - VARA_WALLET_ACCOUNT=robo-miner-agent
 
 If the selected world is no longer joinable, go back to discovery and choose a

@@ -21,6 +21,23 @@ references, IDL assets, env example, and UI metadata under
 the skill is loaded in the agent runtime, the live tooling is `vara-wallet` plus
 ordinary backend HTTP requests.
 
+## Mainnet Defaults
+
+Default to Vara.eth mainnet unless the user explicitly asks for Hoodi/testnet.
+Use these current mainnet economy contracts when backend manifest data omits
+economy ids:
+
+```text
+RES_VMT_PROGRAM_ID=0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
+REDEEM_PROGRAM_ID=0xdb8dae5f6fc193006d428e12ee0c717715c6b887
+ROBO_MINER_RES_VMT_PROGRAM_ID=0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
+ROBO_MINER_REDEEM_PROGRAM_ID=0xdb8dae5f6fc193006d428e12ee0c717715c6b887
+```
+
+Before settlement, still verify the RES VMT with `Vmt/ScrstTokenId`,
+`Vmt/BcrstTokenId`, and `Vmt/HcrstTokenId`, and verify Redeem with
+`Redeem/AvailableReserve`, `Redeem/VaraUnit`, and live rate reads.
+
 ## Hard Gates
 
 Follow these gates in order. Do not skip ahead, and do not send game actions

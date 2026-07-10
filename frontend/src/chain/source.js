@@ -59,6 +59,11 @@ const CONTRACT_TILE = {
   HCRST: 12,
   SURFACE: 20,
 };
+const RESOURCE_KIND = {
+  SCRST: 1,
+  BCRST: 2,
+  HCRST: 3,
+};
 const CHEST_OUTCOME = {
   DYNAMITE: 1,
   LADDERS: 2,
@@ -80,6 +85,15 @@ const CONTRACT_TO_RENDER_TILE = {
 
 function renderTile(contractTile) {
   return CONTRACT_TO_RENDER_TILE[Number(contractTile)] ?? BLOCK.DIRT;
+}
+
+function renderResourceKind(kind) {
+  switch (Number(kind)) {
+    case RESOURCE_KIND.SCRST: return BLOCK.SCRST;
+    case RESOURCE_KIND.BCRST: return BLOCK.BCRST;
+    case RESOURCE_KIND.HCRST: return BLOCK.HCRST;
+    default: return BLOCK.DIRT;
+  }
 }
 
 function sameActor(a, b) {
@@ -109,6 +123,21 @@ function normalizeResourceTotals(value = {}) {
     bcrst: normalizeEventNumber(value.bcrst),
     hcrst: normalizeEventNumber(value.hcrst),
   };
+}
+
+function resourceKeyForBlock(block) {
+  switch (Number(block)) {
+    case BLOCK.SCRST: return 'scrst';
+    case BLOCK.BCRST: return 'bcrst';
+    case BLOCK.HCRST: return 'hcrst';
+    default: return null;
+  }
+}
+
+function inventoryFromResources(carried = {}, banked = {}) {
+  const c = normalizeResourceTotals(carried);
+  const b = normalizeResourceTotals(banked);
+  return [c.scrst, c.bcrst, c.hcrst, b.scrst, b.bcrst, b.hcrst];
 }
 
 function nowMs() {
@@ -219,6 +248,11 @@ function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous 
     bcrst: inventory[1] ?? row.state?.[6],
     hcrst: inventory[2] ?? row.state?.[7],
   });
+  const carriedResources = normalizeResourceTotals({
+    scrst: inventory[0] ?? row.state?.[5],
+    bcrst: inventory[1] ?? row.state?.[6],
+    hcrst: inventory[2] ?? row.state?.[7],
+  });
   const bankedResources = normalizeResourceTotals({
     scrst: inventory[3] ?? row.state?.[8],
     bcrst: inventory[4] ?? row.state?.[9],
@@ -241,7 +275,8 @@ function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous 
     cargo,
     maxCargo: backpackCapacity,
     backpackCapacity,
-    inventory,
+    inventory: inventory.length ? inventory : inventoryFromResources(carriedResources, bankedResources),
+    carriedResources,
     banked: resourceTotal(bankedResources),
     bankedResources,
     items: { ladder: laddersRemaining },
@@ -659,6 +694,7 @@ export class ChainSource {
               hcrst: Math.max(0, Number(miner.bankedResources?.hcrst || 0) - spent.hcrst),
             });
             miner.banked = resourceTotal(miner.bankedResources);
+            miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
           }
         }
         break;
@@ -713,7 +749,9 @@ export class ChainSource {
     }
     if ('block' in event) {
       event.rawBlock = normalizeEventNumber(event.block);
-      event.block = renderTile(event.rawBlock);
+      event.block = event.type === 'resource_extracted'
+        ? renderResourceKind(event.rawBlock)
+        : renderTile(event.rawBlock);
     }
     if ('newBlock' in event) {
       event.rawNewBlock = normalizeEventNumber(event.newBlock);
@@ -770,8 +808,10 @@ export class ChainSource {
       cargo: 0,
       maxCargo: backpackCapacity,
       backpackCapacity,
-      inventory: [],
+      inventory: inventoryFromResources(),
+      carriedResources: normalizeResourceTotals(),
       banked: 0,
+      bankedResources: normalizeResourceTotals(),
       items: { ladder: startingLadders },
       stats: makeEmptyStats(),
       respawnAtMs: null,
@@ -938,12 +978,18 @@ export class ChainSource {
     if (!miner || !act) return;
     const event = act.event;
     if (act.kind === 'resource') {
+      const resourceKey = resourceKeyForBlock(event?.block);
       const carriedTotal = event?.sessionId != null ? normalizeEventNumber(event?.amount, miner.cargo) : null;
       const amount = carriedTotal == null
         ? normalizeEventNumber(event?.amount, 1)
         : Math.max(0, carriedTotal - miner.cargo);
       if (carriedTotal != null) event.carriedTotal = carriedTotal;
       event.amount = amount;
+      if (resourceKey && amount > 0) {
+        miner.carriedResources = normalizeResourceTotals(miner.carriedResources);
+        miner.carriedResources[resourceKey] += amount;
+        miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+      }
       miner.cargo += amount;
       miner.stats.ore += amount;
       this._emitVisualEvent(event);
@@ -971,6 +1017,8 @@ export class ChainSource {
       miner.banked = amount;
       miner.bankedResources = banked;
       miner.cargo = 0;
+      miner.carriedResources = normalizeResourceTotals();
+      miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
       miner.status = AGENT_STATUS.SURFACED;
       miner.stats.sold = amount;
       this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);

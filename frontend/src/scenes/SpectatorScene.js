@@ -163,6 +163,13 @@ function resourceTotal(resources) {
   return Number(resources?.scrst || 0) + Number(resources?.bcrst || 0) + Number(resources?.hcrst || 0);
 }
 
+function addResourceTotals(totals, resources) {
+  totals.scrst += Number(resources?.scrst || 0);
+  totals.bcrst += Number(resources?.bcrst || 0);
+  totals.hcrst += Number(resources?.hcrst || 0);
+  return totals;
+}
+
 function agentBubbleIcon(kind, color = '#333') {
   const style = 'display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:-4px;flex:0 0 18px';
   if (kind === 'status') {
@@ -1148,9 +1155,9 @@ export default class SpectatorScene extends GameScene {
     const ladders = Number(state[4] ?? agent.items?.ladder ?? 0);
     const capacity = Number(state[11] ?? agent.backpackCapacity ?? agent.maxCargo ?? 0);
     const carried = {
-      scrst: Number(inv[0] ?? state[5] ?? 0),
-      bcrst: Number(inv[1] ?? state[6] ?? 0),
-      hcrst: Number(inv[2] ?? state[7] ?? 0),
+      scrst: Number(inv[0] ?? state[5] ?? agent.carriedResources?.scrst ?? 0),
+      bcrst: Number(inv[1] ?? state[6] ?? agent.carriedResources?.bcrst ?? 0),
+      hcrst: Number(inv[2] ?? state[7] ?? agent.carriedResources?.hcrst ?? 0),
     };
     const banked = {
       scrst: Number(inv[3] ?? state[8] ?? agent.bankedResources?.scrst ?? 0),
@@ -1538,9 +1545,7 @@ export default class SpectatorScene extends GameScene {
       : NaN;
     const stateLabel = hudStateLabel(status, remainingMs);
     const banked = ms.reduce((totals, m) => {
-      totals.scrst += Number(m.bankedResources?.scrst || 0);
-      totals.bcrst += Number(m.bankedResources?.bcrst || 0);
-      totals.hcrst += Number(m.bankedResources?.hcrst || 0);
+      addResourceTotals(totals, m.bankedResources);
       return totals;
     }, { scrst: 0, bcrst: 0, hcrst: 0 });
     const fps = Math.round(this.game.loop.actualFps);
@@ -1548,7 +1553,7 @@ export default class SpectatorScene extends GameScene {
     this.statsEl.innerHTML =
       `<span style="color:${fc}">${fps} fps</span>　` +
       `${stateLabel}　agents <b>${countLabel}</b>　` +
-      `SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b>` +
+      `<span title="banked crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
 
@@ -1620,10 +1625,7 @@ export default class SpectatorScene extends GameScene {
 
   bankedResourceTotals() {
     return (this.rt?.s?.miners || []).reduce((totals, miner) => {
-      totals.scrst += Number(miner.bankedResources?.scrst || 0);
-      totals.bcrst += Number(miner.bankedResources?.bcrst || 0);
-      totals.hcrst += Number(miner.bankedResources?.hcrst || 0);
-      return totals;
+      return addResourceTotals(totals, miner.bankedResources);
     }, { scrst: 0, bcrst: 0, hcrst: 0 });
   }
 

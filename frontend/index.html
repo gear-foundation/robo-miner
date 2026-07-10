@@ -32,24 +32,6 @@
 </head>
 <body>
   <div id="game"></div>
-  <script>
-    // Block macOS trackpad "pinch zoom" (delivered as ctrl+wheel) and
-    // the standard ctrl/cmd +/-/0 zoom hotkeys. Without this, two-finger
-    // pinch on the trackpad scales the whole page and the HUD/canvas
-    // misalign mid-game.
-    window.addEventListener('wheel', (e) => {
-      if (e.ctrlKey || e.metaKey) e.preventDefault();
-    }, { passive: false });
-    window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && ['+','-','=','0'].includes(e.key)) {
-        e.preventDefault();
-      }
-    });
-    // Block multi-touch gestures on mobile Safari that bypass the meta tag.
-    document.addEventListener('gesturestart',  (e) => e.preventDefault());
-    document.addEventListener('gesturechange', (e) => e.preventDefault());
-    document.addEventListener('gestureend',    (e) => e.preventDefault());
-  </script>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

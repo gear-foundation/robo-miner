@@ -1,3 +1,4 @@
+import './zoomGuard.js';
 import Phaser from 'phaser';
 import LandingScene from './scenes/LandingScene.js';
 import MenuScene from './scenes/MenuScene.js';

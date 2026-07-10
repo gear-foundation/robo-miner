@@ -170,6 +170,27 @@ function addResourceTotals(totals, resources) {
   return totals;
 }
 
+function resourceTotals(...items) {
+  return items.reduce((totals, resources) => addResourceTotals(totals, resources), { scrst: 0, bcrst: 0, hcrst: 0 });
+}
+
+function maxResourceTotals(a = {}, b = {}) {
+  return {
+    scrst: Math.max(Number(a.scrst || 0), Number(b.scrst || 0)),
+    bcrst: Math.max(Number(a.bcrst || 0), Number(b.bcrst || 0)),
+    hcrst: Math.max(Number(a.hcrst || 0), Number(b.hcrst || 0)),
+  };
+}
+
+function earnedResourceTotals(agent = {}, currentBanked = null) {
+  const accounted = resourceTotals(
+    agent.mintedResources,
+    agent.spentBankedResources,
+    currentBanked || agent.bankedResources,
+  );
+  return maxResourceTotals(agent.surfacedResources, accounted);
+}
+
 function agentBubbleIcon(kind, color = '#333') {
   const style = 'display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:-4px;flex:0 0 18px';
   if (kind === 'status') {
@@ -1134,9 +1155,12 @@ export default class SpectatorScene extends GameScene {
       const detail = await this.rt.inspectAgent(agent.owner);
       if (this._agentInspectRequestId !== requestId) return;
       if (!this.agentBubbleMiner || !sameDisplayAddress(this.agentBubbleMiner.owner, agent.owner)) return;
+      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
+      if (synced && sameDisplayAddress(synced.owner, agent.owner)) this.agentBubbleMiner = synced;
       if (this.agentBubbleContentEl) {
         this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
       }
+      this.updateHUD();
       this.positionAgentBubble();
     } catch {
       // Snapshot data is enough for the bubble; a missed query should not make
@@ -1159,11 +1183,12 @@ export default class SpectatorScene extends GameScene {
       bcrst: Number(inv[1] ?? state[6] ?? agent.carriedResources?.bcrst ?? 0),
       hcrst: Number(inv[2] ?? state[7] ?? agent.carriedResources?.hcrst ?? 0),
     };
-    const banked = {
+    const currentBanked = {
       scrst: Number(inv[3] ?? state[8] ?? agent.bankedResources?.scrst ?? 0),
       bcrst: Number(inv[4] ?? state[9] ?? agent.bankedResources?.bcrst ?? 0),
       hcrst: Number(inv[5] ?? state[10] ?? agent.bankedResources?.hcrst ?? 0),
     };
+    const banked = earnedResourceTotals(agent, currentBanked);
     const cargo = resourceTotal(carried);
     const bankedTotal = resourceTotal(banked);
     const address = displayAddress(agent.owner);
@@ -1193,11 +1218,11 @@ export default class SpectatorScene extends GameScene {
           <span style="display:flex;align-items:center;gap:4px;color:#5b4127;font-weight:700">${agentBubbleIcon('bag')}bag</span>
           <span style="display:flex;align-items:center;justify-content:space-between;gap:7px">${crystalCounts(carried)}</span>
         </div>
-        <div title="banked crystals" style="display:grid;grid-template-columns:58px 1fr;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #eee">
+        <div title="earned crystals" style="display:grid;grid-template-columns:58px 1fr;align-items:center;gap:6px;padding:4px 0;border-top:1px solid #eee">
           <span style="display:flex;align-items:center;gap:4px;color:#5b4127;font-weight:700">${agentBubbleIcon('bank')}bank</span>
           <span style="display:flex;align-items:center;justify-content:space-between;gap:7px">${crystalCounts(banked)}</span>
         </div>
-        <div style="display:flex;justify-content:flex-end;color:#5b4127;font-size:11px;margin-top:-1px">banked total: <b style="margin-left:4px;color:#222">${bankedTotal}</b></div>
+        <div style="display:flex;justify-content:flex-end;color:#5b4127;font-size:11px;margin-top:-1px">earned total: <b style="margin-left:4px;color:#222">${bankedTotal}</b></div>
       </div>`;
   }
 
@@ -1544,16 +1569,13 @@ export default class SpectatorScene extends GameScene {
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;
     const stateLabel = hudStateLabel(status, remainingMs);
-    const banked = ms.reduce((totals, m) => {
-      addResourceTotals(totals, m.bankedResources);
-      return totals;
-    }, { scrst: 0, bcrst: 0, hcrst: 0 });
+    const banked = ms.reduce((totals, m) => addResourceTotals(totals, earnedResourceTotals(m)), { scrst: 0, bcrst: 0, hcrst: 0 });
     const fps = Math.round(this.game.loop.actualFps);
     const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     this.statsEl.innerHTML =
       `<span style="color:${fc}">${fps} fps</span>　` +
       `${stateLabel}　agents <b>${countLabel}</b>　` +
-      `<span title="banked crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
+      `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
 
@@ -1625,7 +1647,7 @@ export default class SpectatorScene extends GameScene {
 
   bankedResourceTotals() {
     return (this.rt?.s?.miners || []).reduce((totals, miner) => {
-      return addResourceTotals(totals, miner.bankedResources);
+      return addResourceTotals(totals, earnedResourceTotals(miner));
     }, { scrst: 0, bcrst: 0, hcrst: 0 });
   }
 

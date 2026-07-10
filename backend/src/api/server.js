@@ -243,9 +243,14 @@ const server = http.createServer(async (req, res) => {
         await streamEvents(req, res, { store, logger, eventBus });
         return;
       }
-      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
+      const program = String(url.searchParams.get('program') || '').toLowerCase();
+      const maxLimit = program ? 5000 : 500;
+      const limit = Math.min(maxLimit, Math.max(1, Number(url.searchParams.get('limit') || 100)));
       const db = await store.read();
-      return json(res, 200, { events: db.chainEvents.slice(-limit) });
+      const events = program
+        ? db.chainEvents.filter((event) => String(event.programId || event.program_id || '').toLowerCase() === program)
+        : db.chainEvents;
+      return json(res, 200, { events: events.slice(-limit) });
     }
     if (req.method === 'POST' && url.pathname === '/api/social/x/submit') {
       const body = await readJsonBody(req);

@@ -42,6 +42,7 @@ export function createWorldSource(opts) {
 
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
+const CHAIN_AGENT_SYNC_MS = 10_000;
 const AGENT_STATUS = {
   ACTIVE: 1,
   SURFACED: 2,
@@ -125,6 +126,44 @@ function normalizeResourceTotals(value = {}) {
   };
 }
 
+function addResourceTotals(left = {}, right = {}) {
+  const a = normalizeResourceTotals(left);
+  const b = normalizeResourceTotals(right);
+  return {
+    scrst: a.scrst + b.scrst,
+    bcrst: a.bcrst + b.bcrst,
+    hcrst: a.hcrst + b.hcrst,
+  };
+}
+
+function subtractResourceTotals(left = {}, right = {}) {
+  const a = normalizeResourceTotals(left);
+  const b = normalizeResourceTotals(right);
+  return {
+    scrst: Math.max(0, a.scrst - b.scrst),
+    bcrst: Math.max(0, a.bcrst - b.bcrst),
+    hcrst: Math.max(0, a.hcrst - b.hcrst),
+  };
+}
+
+function maxResourceTotals(left = {}, right = {}) {
+  const a = normalizeResourceTotals(left);
+  const b = normalizeResourceTotals(right);
+  return {
+    scrst: Math.max(a.scrst, b.scrst),
+    bcrst: Math.max(a.bcrst, b.bcrst),
+    hcrst: Math.max(a.hcrst, b.hcrst),
+  };
+}
+
+function earnedResourceTotals(miner = {}) {
+  const accounted = addResourceTotals(
+    addResourceTotals(miner.mintedResources, miner.spentBankedResources),
+    miner.bankedResources,
+  );
+  return maxResourceTotals(miner.surfacedResources, accounted);
+}
+
 function resourceKeyForBlock(block) {
   switch (Number(block)) {
     case BLOCK.SCRST: return 'scrst';
@@ -138,6 +177,28 @@ function inventoryFromResources(carried = {}, banked = {}) {
   const c = normalizeResourceTotals(carried);
   const b = normalizeResourceTotals(banked);
   return [c.scrst, c.bcrst, c.hcrst, b.scrst, b.bcrst, b.hcrst];
+}
+
+function resourceStateFromRow(row = {}) {
+  const state = Array.isArray(row.state) ? row.state : [];
+  const inventory = Array.isArray(row.inventory) ? row.inventory : [];
+  const carriedResources = normalizeResourceTotals({
+    scrst: inventory[0] ?? state[5],
+    bcrst: inventory[1] ?? state[6],
+    hcrst: inventory[2] ?? state[7],
+  });
+  const bankedResources = normalizeResourceTotals({
+    scrst: inventory[3] ?? state[8],
+    bcrst: inventory[4] ?? state[9],
+    hcrst: inventory[5] ?? state[10],
+  });
+  return {
+    inventory: inventory.length ? inventory : inventoryFromResources(carriedResources, bankedResources),
+    carriedResources,
+    bankedResources,
+    cargo: resourceTotal(carriedResources),
+    banked: resourceTotal(bankedResources),
+  };
 }
 
 function nowMs() {
@@ -240,25 +301,19 @@ function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous 
   const laddersRemaining = Number(row.state?.[4] ?? config[7] ?? 0);
   const backpackCapacity = Number(row.state?.[11] ?? config[8] ?? 0);
   const y = rawToVisualY(rawY, surface, rawSurface, yOffset);
-  const inventory = Array.isArray(row.inventory) ? row.inventory : [];
+  const resourceState = resourceStateFromRow(row);
   const dead = status === AGENT_STATUS.DEAD;
   const exited = status === AGENT_STATUS.EXITED;
-  const cargo = resourceTotal({
-    scrst: inventory[0] ?? row.state?.[5],
-    bcrst: inventory[1] ?? row.state?.[6],
-    hcrst: inventory[2] ?? row.state?.[7],
-  });
-  const carriedResources = normalizeResourceTotals({
-    scrst: inventory[0] ?? row.state?.[5],
-    bcrst: inventory[1] ?? row.state?.[6],
-    hcrst: inventory[2] ?? row.state?.[7],
-  });
-  const bankedResources = normalizeResourceTotals({
-    scrst: inventory[3] ?? row.state?.[8],
-    bcrst: inventory[4] ?? row.state?.[9],
-    hcrst: inventory[5] ?? row.state?.[10],
-  });
   const skin = skinFromAddress(row.owner);
+  const mintedResources = normalizeResourceTotals(previous?.mintedResources);
+  const spentBankedResources = normalizeResourceTotals(previous?.spentBankedResources);
+  const surfacedResources = normalizeResourceTotals(previous?.surfacedResources);
+  const earnedResources = earnedResourceTotals({
+    bankedResources: resourceState.bankedResources,
+    mintedResources,
+    spentBankedResources,
+    surfacedResources,
+  });
   return {
     id: row.index,
     owner: row.owner,
@@ -272,13 +327,17 @@ function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous 
     alive: status === AGENT_STATUS.ACTIVE || status === AGENT_STATUS.SURFACED,
     act: null,
     hp,
-    cargo,
+    cargo: resourceState.cargo,
     maxCargo: backpackCapacity,
     backpackCapacity,
-    inventory: inventory.length ? inventory : inventoryFromResources(carriedResources, bankedResources),
-    carriedResources,
-    banked: resourceTotal(bankedResources),
-    bankedResources,
+    inventory: resourceState.inventory,
+    carriedResources: resourceState.carriedResources,
+    banked: resourceTotal(earnedResources),
+    bankedResources: resourceState.bankedResources,
+    mintedResources,
+    spentBankedResources,
+    surfacedResources,
+    earnedResources,
     items: { ladder: laddersRemaining },
     stats: makeEmptyStats(),
     respawnAtMs: dead ? Number.POSITIVE_INFINITY : null,
@@ -407,8 +466,11 @@ export class ChainSource {
     this._playbackOpenGroups = new Map();
     this._snapshotReloadReason = null;
     this._snapshotReloadPromise = null;
+    this._agentStateSyncMs = 0;
+    this._agentStateSyncPromise = null;
     this._lastGrid = null;
     this._lastAgents = new Map();
+    this._countedResourceEvents = new Set();
     this.ready = this._boot();
   }
 
@@ -433,6 +495,7 @@ export class ChainSource {
   async _boot() {
     await this.connect();
     await this.load();
+    await this._loadRecentResourceHistory();
     await this.subscribe();
     return this;
   }
@@ -459,6 +522,27 @@ export class ChainSource {
   async load() {
     const snap = await this._readSnapshot();
     this._applySnapshot(snap, { emitEvents: false });
+  }
+
+  async _loadRecentResourceHistory() {
+    const base = discoveryBaseUrl();
+    if (!base || !this.programId) return;
+
+    const search = new URLSearchParams({
+      limit: '5000',
+      program: this.programId,
+      network: CHAIN.network || '',
+    });
+    try {
+      const response = await fetch(`${base}/api/events?${search.toString()}`);
+      if (!response.ok) return;
+      const data = await response.json();
+      const rows = Array.isArray(data) ? data : (data?.events || data?.items || []);
+      this._applyResourceHistory(rows);
+    } catch {
+      // Chain state remains authoritative; event history only restores cumulative
+      // earned counters after refresh.
+    }
   }
 
   // 3) Live event path. After the initial snapshot, animation is event-only:
@@ -537,6 +621,7 @@ export class ChainSource {
   update(dtMs = 0) {
     this.timeMs += dtMs;
     this._startSnapshotReloadIfNeeded();
+    this._startAgentStateSyncIfNeeded(dtMs);
     this._drainPlaybackQueue();
     this._advanceAnimations(dtMs);
 
@@ -588,7 +673,22 @@ export class ChainSource {
     if (ownerResult.status === 'fulfilled') {
       detail.walletOwner = String(Wq.OwnerOf.decodeResult(ownerResult.value));
     }
+    this.syncAgentDetail(owner, detail);
     return detail;
+  }
+
+  syncAgentDetail(owner, detail = {}) {
+    if (!owner || (!Array.isArray(detail.state) && !Array.isArray(detail.inventory))) return null;
+    const miner = this._mergeAgentRow({
+      owner,
+      state: detail.state,
+      inventory: detail.inventory,
+    });
+    if (miner) {
+      this._recomputeTeamScore();
+      this._lastAgents = new Map(this.s.miners.map((item) => [item.owner, { ...item }]));
+    }
+    return miner;
   }
 
   async _readSnapshot() {
@@ -618,6 +718,177 @@ export class ChainSource {
     }));
 
     return { config, session, rawGrid, agents: agentRows };
+  }
+
+  _applyResourceHistory(rows = []) {
+    if (!Array.isArray(rows) || rows.length === 0) return;
+    const replayByOwner = new Map();
+
+    const replayFor = (owner) => {
+      const key = String(owner || '').toLowerCase();
+      if (!key) return null;
+      if (!replayByOwner.has(key)) {
+        replayByOwner.set(key, {
+          owner,
+          bankedResources: normalizeResourceTotals(),
+          mintedResources: normalizeResourceTotals(),
+          spentBankedResources: normalizeResourceTotals(),
+          surfacedResources: normalizeResourceTotals(),
+        });
+      }
+      return replayByOwner.get(key);
+    };
+
+    const ordered = rows
+      .map((row) => this._resourceEventFromBackend(row))
+      .filter(Boolean)
+      .sort((a, b) => {
+        const at = Date.parse(a.timestamp || '') || 0;
+        const bt = Date.parse(b.timestamp || '') || 0;
+        return at - bt || normalizeEventNumber(a.logIndex, 0) - normalizeEventNumber(b.logIndex, 0);
+      });
+
+    for (const event of ordered) {
+      if (!this._claimResourceEvent(event)) continue;
+      const replay = replayFor(event.owner);
+      if (!replay) continue;
+
+      if (event.type === 'surfaced') {
+        const banked = normalizeResourceTotals(event.banked);
+        replay.surfacedResources = addResourceTotals(
+          replay.surfacedResources,
+          subtractResourceTotals(banked, replay.bankedResources),
+        );
+        replay.bankedResources = banked;
+      } else if (event.type === 'resources_minted') {
+        const minted = normalizeResourceTotals(event.minted);
+        replay.mintedResources = addResourceTotals(replay.mintedResources, minted);
+        replay.bankedResources = subtractResourceTotals(replay.bankedResources, minted);
+      } else if (event.type === 'resources_traded_for_ladders') {
+        const spent = normalizeResourceTotals(event.spent);
+        replay.spentBankedResources = addResourceTotals(replay.spentBankedResources, spent);
+        replay.bankedResources = subtractResourceTotals(replay.bankedResources, spent);
+      }
+    }
+
+    let changed = false;
+    for (const replay of replayByOwner.values()) {
+      const miner = this.s.miners.find((item) => sameActor(item.owner, replay.owner));
+      if (!miner) continue;
+      miner.mintedResources = addResourceTotals(miner.mintedResources, replay.mintedResources);
+      miner.spentBankedResources = addResourceTotals(miner.spentBankedResources, replay.spentBankedResources);
+      miner.surfacedResources = addResourceTotals(miner.surfacedResources, replay.surfacedResources);
+      this._syncMinerEarned(miner);
+      changed = true;
+    }
+
+    if (changed) {
+      this._recomputeTeamScore();
+      this._lastAgents = new Map(this.s.miners.map((item) => [item.owner, { ...item }]));
+    }
+  }
+
+  _resourceEventFromBackend(row = {}) {
+    const programId = String(row.programId || row.program_id || '').toLowerCase();
+    if (programId && this.programId && programId !== String(this.programId).toLowerCase()) return null;
+
+    const name = String(row.event || row.chainEvent || row.type || '');
+    const args = Array.isArray(row.args) ? row.args : [];
+    const sessionId = normalizeEventNumber(args[0], 0);
+    const currentSessionId = Number(this.session?.[0] || 0);
+    if (sessionId && currentSessionId && sessionId !== currentSessionId) return null;
+
+    const owner = args[1];
+    if (!owner) return null;
+    const base = {
+      owner,
+      sessionId,
+      source: 'backend-events',
+      id: row.id,
+      messageId: row.messageId || row.message_id || null,
+      txHash: row.txHash || row.tx_hash || null,
+      logIndex: row.logIndex || row.log_index || 0,
+      timestamp: row.timestamp || row.createdAt || row.created_at || '',
+    };
+
+    if (name === 'AgentSurfaced' || name === 'surfaced') {
+      return { ...base, type: 'surfaced', banked: { scrst: args[2], bcrst: args[3], hcrst: args[4] } };
+    }
+    if (name === 'ResourcesMinted' || name === 'resources_minted') {
+      return { ...base, type: 'resources_minted', minted: { scrst: args[2], bcrst: args[3], hcrst: args[4] } };
+    }
+    if (name === 'ResourcesTradedForLadders' || name === 'resources_traded_for_ladders') {
+      return { ...base, type: 'resources_traded_for_ladders', spent: { scrst: args[2], bcrst: args[3], hcrst: args[4] } };
+    }
+    return null;
+  }
+
+  _resourceAccountingKey(event = {}) {
+    return event.messageId
+      || event.id
+      || event.txHash
+      || `${event.type || 'resource'}:${event.sessionId || ''}:${event.owner || ''}:${event.timestamp || ''}`;
+  }
+
+  _claimResourceEvent(event = {}) {
+    const key = this._resourceAccountingKey(event);
+    if (!key) return true;
+    if (this._countedResourceEvents.has(key)) return false;
+    this._countedResourceEvents.add(key);
+    if (this._countedResourceEvents.size > 5000) {
+      this._countedResourceEvents = new Set([...this._countedResourceEvents].slice(-2500));
+    }
+    return true;
+  }
+
+  _syncMinerEarned(miner) {
+    if (!miner) return null;
+    miner.bankedResources = normalizeResourceTotals(miner.bankedResources);
+    miner.mintedResources = normalizeResourceTotals(miner.mintedResources);
+    miner.spentBankedResources = normalizeResourceTotals(miner.spentBankedResources);
+    miner.surfacedResources = normalizeResourceTotals(miner.surfacedResources);
+    miner.earnedResources = earnedResourceTotals(miner);
+    miner.banked = resourceTotal(miner.earnedResources);
+    return miner.earnedResources;
+  }
+
+  _recomputeTeamScore() {
+    this.teamScore = this.s.miners.reduce((sum, miner) => sum + resourceTotal(miner.earnedResources), 0);
+  }
+
+  _applySurfaceAccounting(miner, event) {
+    if (!miner || !this._claimResourceEvent(event)) return null;
+    const banked = normalizeResourceTotals(event.banked);
+    const previous = normalizeResourceTotals(miner.bankedResources);
+    const deltaBanked = subtractResourceTotals(banked, previous);
+    miner.surfacedResources = addResourceTotals(miner.surfacedResources, deltaBanked);
+    miner.bankedResources = banked;
+    miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+    this._syncMinerEarned(miner);
+    this._recomputeTeamScore();
+    return { banked, deltaBanked };
+  }
+
+  _applyMintAccounting(miner, event) {
+    if (!miner || !this._claimResourceEvent(event)) return false;
+    const minted = normalizeResourceTotals(event.minted);
+    miner.mintedResources = addResourceTotals(miner.mintedResources, minted);
+    miner.bankedResources = subtractResourceTotals(miner.bankedResources, minted);
+    miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+    this._syncMinerEarned(miner);
+    this._recomputeTeamScore();
+    return true;
+  }
+
+  _applyTradeAccounting(miner, event) {
+    if (!miner || !this._claimResourceEvent(event)) return false;
+    const spent = normalizeResourceTotals(event.spent);
+    miner.spentBankedResources = addResourceTotals(miner.spentBankedResources, spent);
+    miner.bankedResources = subtractResourceTotals(miner.bankedResources, spent);
+    miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+    this._syncMinerEarned(miner);
+    this._recomputeTeamScore();
+    return true;
   }
 
   _applyChainEvent(rawEvent) {
@@ -680,21 +951,14 @@ export class ChainSource {
         break;
       case 'resources_minted':
         if (miner) {
-          miner.mintedResources = normalizeResourceTotals(event.minted);
+          this._applyMintAccounting(miner, event);
         }
         break;
       case 'resources_traded_for_ladders':
         if (miner) {
           if (Number.isFinite(event.laddersRemaining)) miner.items.ladder = event.laddersRemaining;
           if (event.spent) {
-            const spent = normalizeResourceTotals(event.spent);
-            miner.bankedResources = normalizeResourceTotals({
-              scrst: Math.max(0, Number(miner.bankedResources?.scrst || 0) - spent.scrst),
-              bcrst: Math.max(0, Number(miner.bankedResources?.bcrst || 0) - spent.bcrst),
-              hcrst: Math.max(0, Number(miner.bankedResources?.hcrst || 0) - spent.hcrst),
-            });
-            miner.banked = resourceTotal(miner.bankedResources);
-            miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+            this._applyTradeAccounting(miner, event);
           }
         }
         break;
@@ -812,6 +1076,10 @@ export class ChainSource {
       carriedResources: normalizeResourceTotals(),
       banked: 0,
       bankedResources: normalizeResourceTotals(),
+      mintedResources: normalizeResourceTotals(),
+      spentBankedResources: normalizeResourceTotals(),
+      surfacedResources: normalizeResourceTotals(),
+      earnedResources: normalizeResourceTotals(),
       items: { ladder: startingLadders },
       stats: makeEmptyStats(),
       respawnAtMs: null,
@@ -989,6 +1257,7 @@ export class ChainSource {
         miner.carriedResources = normalizeResourceTotals(miner.carriedResources);
         miner.carriedResources[resourceKey] += amount;
         miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
+        this._syncMinerEarned(miner);
       }
       miner.cargo += amount;
       miner.stats.ore += amount;
@@ -1004,24 +1273,16 @@ export class ChainSource {
       return;
     }
     if (act.kind === 'surface') {
-      const banked = normalizeResourceTotals(event.banked);
-      const previous = normalizeResourceTotals(miner.bankedResources);
-      const deltaBanked = {
-        scrst: Math.max(0, banked.scrst - previous.scrst),
-        bcrst: Math.max(0, banked.bcrst - previous.bcrst),
-        hcrst: Math.max(0, banked.hcrst - previous.hcrst),
-      };
-      const amount = banked.scrst + banked.bcrst + banked.hcrst;
+      const accounting = this._applySurfaceAccounting(miner, event);
+      const deltaBanked = accounting?.deltaBanked || normalizeResourceTotals();
+      const amount = resourceTotal(accounting?.banked || miner.bankedResources);
       event.deltaBanked = deltaBanked;
-      event.amount = deltaBanked.scrst + deltaBanked.bcrst + deltaBanked.hcrst;
-      miner.banked = amount;
-      miner.bankedResources = banked;
+      event.amount = resourceTotal(deltaBanked);
       miner.cargo = 0;
       miner.carriedResources = normalizeResourceTotals();
       miner.inventory = inventoryFromResources(miner.carriedResources, miner.bankedResources);
       miner.status = AGENT_STATUS.SURFACED;
       miner.stats.sold = amount;
-      this.teamScore = this.s.miners.reduce((sum, m) => sum + (m.banked || 0), 0);
       this._emitVisualEvent(event);
       return;
     }
@@ -1204,6 +1465,20 @@ export class ChainSource {
       });
   }
 
+  _startAgentStateSyncIfNeeded(dtMs = 0) {
+    this._agentStateSyncMs += Number(dtMs) || 0;
+    if (this._agentStateSyncMs < CHAIN_AGENT_SYNC_MS) return;
+    this._agentStateSyncMs = 0;
+    if (this._agentStateSyncPromise || this._polling || this._snapshotReloadPromise) return;
+    this._agentStateSyncPromise = this._refreshAgentStates()
+      .catch((error) => {
+        this._pending.push({ type: 'chain_error', message: `agent sync failed: ${error?.message || error}` });
+      })
+      .finally(() => {
+        this._agentStateSyncPromise = null;
+      });
+  }
+
   _clearPlaybackState() {
     this._playbackGroups = [];
     this._playbackOpenGroups.clear();
@@ -1214,6 +1489,83 @@ export class ChainSource {
       miner.act = null;
       miner.actQueue = [];
     }
+  }
+
+  async _refreshAgentStates() {
+    if (!this._program || !this._q) return;
+    const Wq = this._program.services.World.queries;
+    const agentsPayload = await this._call(this._q.agents());
+    const owners = Wq.Agents.decodeResult(agentsPayload);
+    const rows = await Promise.all(owners.map(async (owner, index) => {
+      try {
+        const [statePayload, inventoryPayload] = await Promise.all([
+          this._call(this._q.agentOf(owner)),
+          this._call(this._q.inventoryOf(owner)),
+        ]);
+        return {
+          index,
+          owner,
+          state: Wq.AgentOf.decodeResult(statePayload).map((v) => Number(v)),
+          inventory: Wq.InventoryOf.decodeResult(inventoryPayload).map(Number),
+        };
+      } catch {
+        return null;
+      }
+    }));
+    this._mergeAgentRows(rows.filter(Boolean));
+  }
+
+  _mergeAgentRows(rows = []) {
+    let changed = false;
+    for (const row of rows) {
+      if (this._mergeAgentRow(row)) changed = true;
+    }
+    if (changed) {
+      this._recomputeTeamScore();
+      this._lastAgents = new Map(this.s.miners.map((m) => [m.owner, { ...m }]));
+    }
+  }
+
+  _mergeAgentRow(row = {}) {
+    if (!row.owner) return null;
+    let miner = this.s.miners.find((m) => sameActor(m.owner, row.owner));
+    if (!miner) {
+      if (!this.world) return null;
+      const created = this._toMiner({ ...row, index: row.index ?? this.s.miners.length }, this.world.surface, this.world.rawSurface, this.world.yOffset);
+      this.s.miners.push(created);
+      return created;
+    }
+
+    const state = Array.isArray(row.state) ? row.state : [];
+    const resourceState = resourceStateFromRow(row);
+    const status = Number(state[0] ?? miner.status ?? AGENT_STATUS.ACTIVE);
+    const rawY = Number(state[2] ?? NaN);
+    const visualY = Number.isFinite(rawY) ? this._visualY(rawY) : miner.ty;
+    const x = Number(state[1] ?? miner.tx ?? 0);
+    const hp = Number(state[3] ?? miner.hp ?? 1);
+    const laddersRemaining = Number(state[4] ?? miner.items?.ladder ?? 0);
+    const backpackCapacity = Number(state[11] ?? miner.backpackCapacity ?? miner.maxCargo ?? 0);
+
+    miner.status = status;
+    miner.alive = status === AGENT_STATUS.ACTIVE || status === AGENT_STATUS.SURFACED;
+    miner.exited = status === AGENT_STATUS.EXITED;
+    miner.hp = hp;
+    miner.inventory = resourceState.inventory;
+    miner.carriedResources = resourceState.carriedResources;
+    miner.bankedResources = resourceState.bankedResources;
+    miner.cargo = resourceState.cargo;
+    miner.items = { ...(miner.items || {}), ladder: laddersRemaining };
+    miner.maxCargo = backpackCapacity;
+    miner.backpackCapacity = backpackCapacity;
+    this._syncMinerEarned(miner);
+
+    if (!miner.act) {
+      miner.tx = x;
+      miner.ty = visualY;
+      miner.drawX = x;
+      miner.drawY = visualY;
+    }
+    return miner;
   }
 
   _applySnapshot(snap, opts = {}) {
@@ -1286,7 +1638,7 @@ export class ChainSource {
       finishedReason: null,
     };
     this.finished = snap.session?.[2] === 2;
-    this.teamScore = miners.reduce((sum, m) => sum + (m.banked || 0), 0);
+    this._recomputeTeamScore();
     this._lastGrid = grid;
     this._lastAgents = new Map(miners.map((m) => [m.owner, { ...m }]));
   }

@@ -22,7 +22,8 @@ Use this order when backend responses disagree with the skill:
 `/matches` may return legacy `register.steps` telling a client to send injected
 `World.Register(owner)`. Ignore those steps in this skill. They are not
 authoritative for player agents. Register only through the rented DiggerProxy
-with `Digger/Register --via injected`.
+with `robo_miner_action Digger/Register '[]'` after sourcing the reviewed
+bundled action helper.
 
 ## Discovery
 

@@ -145,6 +145,28 @@ cargo test
 
 `frontend` build runs `npm run check:idl` automatically through `prebuild`.
 
+## Fast Operator Game Loop
+
+`contracts/scripts/proxy-fleet.ts` is the low-latency operator path for an
+already-provisioned DiggerProxy fleet. It holds one Vara.eth API connection for
+the complete run, submits injected actions without waiting for the
+DiggerProxy reply, and confirms each world transition with a short backoff.
+It also checks the session at bounded action checkpoints instead of opening a
+fresh session query for every move.
+
+```bash
+cd contracts
+pnpm proxy-fleet -- --no-deploy --steps 20 --session-checkpoint 5
+```
+
+It requires the existing trusted-operator signer configuration (`PRIVATE_KEY`,
+`DIGGER_PROGRAM_ID`, `DIGGER_PROXY_PROGRAM_ID` or
+`DIGGER_PROXY_PROGRAM_IDS`, RPCs, and Router). Keep it out of agent prompts
+and shell history. The `skill-pack` remains the safer named-`vara-wallet`
+workflow for autonomous agents; it deliberately favors key isolation over this
+operator-only throughput path. Pass `--await-proxy-reply` only to diagnose the
+legacy timing path.
+
 ## IDL Source Of Truth
 
 Contract release IDLs under `contracts/target/wasm32-gear/release/` are the

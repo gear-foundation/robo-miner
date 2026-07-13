@@ -47,6 +47,7 @@ const DEFAULTS = {
   DIGGER_QUERY_TIMEOUT_MS: "30000",
   DIGGER_PROXY_TOP_UP: "100000000000000",
   DIGGER_VALIDATOR_MODE: "default",
+  DIGGER_SESSION_CHECKPOINT: "5",
 } as const;
 
 const PROXY_IDL_PATH = process.env.DIGGER_PROXY_IDL_PATH || path.join(ROOT, "target/wasm32-gear/release/digger_proxy.idl");
@@ -107,6 +108,8 @@ type CliArgs = {
   untilGold?: boolean;
   goldAndSurface?: boolean;
   surfaceCarried?: boolean;
+  sessionCheckpoint?: string;
+  awaitProxyReply?: boolean;
   help?: boolean;
 };
 
@@ -116,11 +119,11 @@ type Connection = {
   disconnect: () => Promise<void>;
 };
 
-type InjectedReplyMetrics = {
+type InjectedSubmissionMetrics = {
   programId: Address;
   messageId: Hex;
   txHash: Hex;
-  promiseMs: number;
+  submissionMs: number;
   replyCode: Hex | null;
   payloadBytes: number;
 };
@@ -200,8 +203,8 @@ function printUsage() {
   pnpm proxy-fleet -- --create 9 --steps 2
 
 Flow:
-  1. Uses existing DIGGER_PROXY_CODE_ID from .env.
-  2. Creates N new DiggerProxy programs.
+  1. Creates N new DiggerProxy programs when deployment is enabled.
+  2. Uses existing DIGGER_PROXY_PROGRAM_IDS when --no-deploy is set.
   3. Initializes each proxy with owner=signer and world=DIGGER_PROGRAM_ID.
   4. Registers every proxy in World while registration is open.
   5. Optionally starts the World session with --start-session.
@@ -220,6 +223,11 @@ Options:
   --gold-strategy   HCRST strategy: round-robin or nearest. Default round-robin.
   --max-rounds      Safety limit for --until-gold. Rounds for round-robin, moves for nearest. Default 200.
   --proxy-indexes   One-based proxy indexes to play, comma-separated. Example: 2,5.
+  --session-checkpoint
+                    Recheck World.Session after this many accepted actions. Default 5.
+  --await-proxy-reply
+                    Legacy diagnostic mode: wait for the DiggerProxy reply before
+                    confirming World state. The default submits immediately.
   --no-deploy       Skip creating new proxies; only use env list.
   --no-play         Deploy/register only.
   --start-session   Start the World session after deployment/registration.
@@ -295,6 +303,12 @@ function parseArgs(argv: string[]): CliArgs {
       }
       case "--proxy-indexes":
         args.proxyIndexes = next();
+        break;
+      case "--session-checkpoint":
+        args.sessionCheckpoint = next();
+        break;
+      case "--await-proxy-reply":
+        args.awaitProxyReply = true;
         break;
       case "--no-deploy":
         args.noDeploy = true;
@@ -606,16 +620,42 @@ async function sendInjectedMessageAndWaitForReplyOnly(
   const rawReply = await withTimeout(injected.sendAndWaitForPromise(), promiseTimeoutMs, `${label} injected promise`);
   const promiseMs = Date.now() - promiseStartedAt;
   const reply = unwrapInjectedPromise(rawReply, label);
-  const metrics: InjectedReplyMetrics = {
+  const metrics: InjectedSubmissionMetrics = {
     programId,
     messageId: injected.messageId as Hex,
     txHash: injected.txHash as Hex,
-    promiseMs,
+    submissionMs: promiseMs,
     replyCode: reply ? normalizeReplyCode(reply.code) : null,
     payloadBytes: reply ? payloadBytes(reply.payload) : 0,
   };
   console.log(`[${label}] injected:reply`, metrics);
   if (reply) assertSuccessReply(reply.code, reply.payload);
+  return metrics;
+}
+
+async function submitInjectedMessage(
+  api: VaraEthApi,
+  programId: Address,
+  label: string,
+  payload: Hex,
+  validatorMode: ValidatorMode,
+): Promise<InjectedSubmissionMetrics> {
+  const injected = await api.createInjectedTransaction({ destination: programId, payload, value: 0n });
+  validatorMode === "slot" ? await injected.setSlotValidator() : injected.setDefaultValidator();
+
+  const startedAt = Date.now();
+  // send() resolves to a validator acknowledgement such as "Accept". The
+  // prepared transaction exposes the stable transaction and message IDs.
+  await injected.send();
+  const metrics: InjectedSubmissionMetrics = {
+    programId,
+    messageId: injected.messageId as Hex,
+    txHash: injected.txHash as Hex,
+    submissionMs: Date.now() - startedAt,
+    replyCode: null,
+    payloadBytes: 0,
+  };
+  console.log(`[${label}] injected:submitted`, metrics);
   return metrics;
 }
 
@@ -1386,8 +1426,10 @@ async function waitForAgentChange(
   proxy: Address,
   before: AgentView,
   timeoutMs: number,
+  initialPollMs = 100,
 ) {
   const startedAt = Date.now();
+  let pollMs = initialPollMs;
   while (Date.now() - startedAt < timeoutMs) {
     const after = await readAgent(connection, worldSails, worldProgramId, proxy, timeoutMs);
     if (
@@ -1400,7 +1442,8 @@ async function waitForAgentChange(
     ) {
       return after;
     }
-    await sleep(2_000);
+    await sleep(pollMs);
+    pollMs = Math.min(1_000, pollMs * 2);
   }
   throw new Error(`Timed out waiting for agent change for ${proxy}`);
 }
@@ -1534,19 +1577,28 @@ async function executeProxyAction(
   validatorMode: ValidatorMode,
   promiseTimeoutMs: number,
   timeoutMs: number,
+  awaitProxyReply = false,
 ) {
   const fn = proxySails.services.Digger.functions[action.fn];
   const payload = action.direction === undefined
     ? fn.encodePayload() as Hex
     : fn.encodePayload(action.direction) as Hex;
-  const injectedReply = await sendInjectedMessageAndWaitForReplyOnly(
-    connection.api,
-    proxy,
-    `fleet-play-${action.fn}`,
-    payload,
-    validatorMode,
-    promiseTimeoutMs,
-  );
+  const injectedReply = awaitProxyReply
+    ? await sendInjectedMessageAndWaitForReplyOnly(
+      connection.api,
+      proxy,
+      `fleet-play-${action.fn}`,
+      payload,
+      validatorMode,
+      promiseTimeoutMs,
+    )
+    : await submitInjectedMessage(
+      connection.api,
+      proxy,
+      `fleet-play-${action.fn}`,
+      payload,
+      validatorMode,
+    );
   const after = await waitForAgentChange(connection, worldSails, worldProgramId, proxy, agent, timeoutMs);
   console.log("[fleet:play]", {
     proxy,
@@ -1579,7 +1631,7 @@ async function executeProxyAction(
     reason: action.reason,
     txHash: injectedReply.txHash,
     messageId: injectedReply.messageId,
-    promiseMs: injectedReply.promiseMs,
+    submissionMs: injectedReply.submissionMs,
     replyCode: injectedReply.replyCode,
     before: {
       x: agent.x,
@@ -1632,6 +1684,7 @@ async function playProxyStep(
   timeoutMs: number,
   queryTimeoutMs: number,
   mode: "simple" | "gold" = "simple",
+  awaitProxyReply = false,
 ) {
   const [agent, map] = await Promise.all([
     readAgent(connection, worldSails, worldProgramId, proxy, queryTimeoutMs),
@@ -1656,6 +1709,7 @@ async function playProxyStep(
     validatorMode,
     promiseTimeoutMs,
     timeoutMs,
+    awaitProxyReply,
   );
 }
 
@@ -1970,11 +2024,18 @@ async function main() {
   const timeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_EVENT_TIMEOUT_MS"], "DIGGER_EVENT_TIMEOUT_MS", args.timeoutMs), 180_000, "--timeout-ms");
   const promiseTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_PROMISE_TIMEOUT_MS"], "DIGGER_PROMISE_TIMEOUT_MS", args.promiseTimeoutMs), 60_000, "--promise-timeout-ms");
   const queryTimeoutMs = parsePositiveInt(valueOrDefault(["DIGGER_QUERY_TIMEOUT_MS"], "DIGGER_QUERY_TIMEOUT_MS", args.queryTimeoutMs), 30_000, "--query-timeout-ms");
+  const sessionCheckpoint = parsePositiveInt(
+    valueOrDefault(["DIGGER_SESSION_CHECKPOINT"], "DIGGER_SESSION_CHECKPOINT", args.sessionCheckpoint),
+    5,
+    "--session-checkpoint",
+  );
   const validatorMode = (args.validatorMode || envValue("DIGGER_VALIDATOR_MODE") || DEFAULTS.DIGGER_VALIDATOR_MODE) as ValidatorMode;
   const goldStrategy = (args.goldStrategy || envValue("DIGGER_GOLD_STRATEGY") || "round-robin") as GoldStrategy;
   const topUp = parseAmount(args.topUp || envValue("DIGGER_PROXY_TOP_UP") || DEFAULTS.DIGGER_PROXY_TOP_UP, "DIGGER_PROXY_TOP_UP");
   const worldProgramId = normalizeAddress(requireValue(envValue("DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID"), "DIGGER_PROGRAM_ID");
-  const codeId = normalizeHex32(requireValue(envValue("DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID");
+  const codeId = createCount > 0
+    ? normalizeHex32(requireValue(envValue("DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID"), "DIGGER_PROXY_CODE_ID")
+    : null;
 
   if (validatorMode !== "default" && validatorMode !== "slot") throw new Error("validator mode must be default or slot");
   if (goldStrategy !== "round-robin" && goldStrategy !== "nearest") throw new Error("gold strategy must be round-robin or nearest");
@@ -1998,19 +2059,24 @@ async function main() {
       goldStrategy,
       maxRounds,
       validatorMode,
+      sessionCheckpoint,
+      awaitProxyReply: Boolean(args.awaitProxyReply),
       topUp: topUp.toString(),
       startSession: Boolean(args.startSession),
       txLogPath: fleetTxLogPath,
     });
 
-    const codeState = await connection.api.eth.router.codeState(codeId);
-    if (codeState !== CodeState.Validated) {
-      throw new Error(`DIGGER_PROXY_CODE_ID is not validated; state=${String(codeState)}`);
+    if (codeId) {
+      const codeState = await connection.api.eth.router.codeState(codeId);
+      if (codeState !== CodeState.Validated) {
+        throw new Error(`DIGGER_PROXY_CODE_ID is not validated; state=${String(codeState)}`);
+      }
     }
 
     const proxies = envProxyList();
     const newProxies: Address[] = [];
     for (let i = 0; i < createCount; i += 1) {
+      if (!codeId) throw new Error('DIGGER_PROXY_CODE_ID is required when creating DiggerProxy programs');
       console.log("[fleet:create]", { index: i + 1, of: createCount });
       const proxy = await deployProxy(connection, proxySails, worldProgramId, codeId, topUp, promiseTimeoutMs, timeoutMs);
       await registerProxy(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
@@ -2166,18 +2232,8 @@ async function main() {
       }
     } else {
       let executed = 0;
+      let sessionCheckedAt = -1;
       for (let attempt = 0; executed < steps; attempt += 1) {
-        const session = await readSession(connection, worldSails, worldProgramId, queryTimeoutMs);
-        if (session.status !== SESSION_ACTIVE) {
-          console.log("[fleet:play-stop-session]", {
-            executed,
-            target: steps,
-            sessionId: session.sessionId.toString(),
-            status: session.status.toString(),
-            actionSeq: session.actionSeq.toString(),
-          });
-          break;
-        }
         console.log("[fleet:play-step]", {
           attempt: attempt + 1,
           executed: executed + 1,
@@ -2185,14 +2241,43 @@ async function main() {
           proxies: playProxies.length,
         });
         let progressed = false;
+        let sessionStopped = false;
         for (const proxy of playProxies) {
           if (executed >= steps) break;
-          const result = await playProxyStep(connection, proxySails, worldSails, worldProgramId, proxy, validatorMode, promiseTimeoutMs, timeoutMs, queryTimeoutMs);
+          if (executed % sessionCheckpoint === 0 && sessionCheckedAt !== executed) {
+            const session = await readSession(connection, worldSails, worldProgramId, queryTimeoutMs);
+            sessionCheckedAt = executed;
+            if (session.status !== SESSION_ACTIVE) {
+              console.log("[fleet:play-stop-session]", {
+                executed,
+                target: steps,
+                sessionId: session.sessionId.toString(),
+                status: session.status.toString(),
+                actionSeq: session.actionSeq.toString(),
+              });
+              sessionStopped = true;
+              break;
+            }
+          }
+          const result = await playProxyStep(
+            connection,
+            proxySails,
+            worldSails,
+            worldProgramId,
+            proxy,
+            validatorMode,
+            promiseTimeoutMs,
+            timeoutMs,
+            queryTimeoutMs,
+            "simple",
+            Boolean(args.awaitProxyReply),
+          );
           if (result.action) {
             executed += 1;
             progressed = true;
           }
         }
+        if (sessionStopped) break;
         if (!progressed) {
           console.log("[fleet:play-stop-no-action]", { executed, target: steps });
           break;

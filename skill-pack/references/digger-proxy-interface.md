@@ -83,12 +83,14 @@ event proves only that the proxy accepted and forwarded the request. It does not
 prove that DiggerWorld applied the action. The world may reject the forwarded
 message while the proxy transaction itself still succeeds.
 
-In strict mode, for every state-changing proxy action:
+In strict mode, source `scripts/robo-miner-action.sh` and use
+`robo_miner_action`. For every state-changing proxy action it:
 
 1. Read `World.AgentOf(agentActorId)` before the proxy write and save
    `preActionSeq = result[12]`.
-2. Send one proxy write with `vara-wallet ... --via injected`.
-3. Re-read `World.AgentOf(agentActorId)`.
+2. Sends one proxy write through the named-wallet persistent session on the
+   injected rail.
+3. Polls only `World.AgentOf(agentActorId)`.
 4. Treat the action as applied only when `result[12] > preActionSeq`.
 5. If `lastActionSeq` did not increase, discard the intended local state update,
    refresh `Session`, `AgentOf`, and `MapSnapshot`, then replan or report the
@@ -111,9 +113,9 @@ After backend returns `diggerProgramId`:
 1. Derive `agentActorId` from `diggerProgramId`.
 2. Query `Digger.Owner()` and confirm it equals `ownerActorId`.
 3. Query `Digger.World()` and confirm it equals the chosen `worldId`.
-4. Call `Digger/Register` with `vara-wallet --via injected`.
+4. Call `Digger/Register` with `robo_miner_action Digger/Register '[]'`.
 5. Query `World.AgentOf(agentActorId)` with `vara-wallet`.
-6. Play through direct `vara-wallet` calls:
+6. Play through `robo_miner_action` calls:
    `Digger/MoveAgent`, `Digger/Drill`, `Digger/PlaceLadder`,
    `Digger/Surface`, `Digger/TradeResourcesForLadders`, `Digger/Exit`, and
    `Digger/MintResources`. After each write, prove world execution with
@@ -133,19 +135,11 @@ transport: Vara.eth injected transaction
 signer: owner wallet from vara-wallet
 ```
 
-Primary command:
+The helper is the primary command path:
 
 ```bash
-vara-wallet \
-  --chain vara-eth \
-  --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Register \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+source "$ROBO_MINER_SKILL_ROOT/scripts/robo-miner-action.sh"
+robo_miner_action Digger/Register '[]'
 ```
 
 If this returns a Sails route/header/decode error, treat it as a DiggerProxy
@@ -167,32 +161,25 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 
 If registration fails because the world is no longer joinable, choose a fresh
 world from `/api/manifest`, convert its 20-byte program id to a 32-byte ActorId,
-then call `Digger/SetWorld` with `vara-wallet`. Verify the decoded result equals
+then call `Digger/SetWorld` with the helper. It verifies `Digger.World` equals
 the new world ActorId before retrying `Digger/Register`.
 
 ```bash
 newWorldActorId="0x000000000000000000000000${newWorldId#0x}"
 
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/SetWorld \
-  --args "[\"$newWorldActorId\"]" \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+robo_miner_action Digger/SetWorld "[\"$newWorldActorId\"]"
 ```
 
 Action command matrix:
 
 ```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MoveAgent --args '[2]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/TradeResourcesForLadders --args "[$scrst,$bcrst,$hcrst]" --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Exit --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+robo_miner_action Digger/MoveAgent '[2]'
+robo_miner_action Digger/Drill '[1]'
+robo_miner_action Digger/PlaceLadder '[4]'
+robo_miner_action Digger/Surface '[]'
+robo_miner_action Digger/TradeResourcesForLadders "[$scrst,$bcrst,$hcrst]"
+robo_miner_action Digger/Exit '[]'
+robo_miner_action Digger/MintResources '[]'
 ```
 
 The world events will reference `agentActorId` (the proxy), not the wallet EVM

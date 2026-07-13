@@ -1,0 +1,22 @@
+name: Skill Pack
+
+on:
+  pull_request:
+    paths:
+      - 'skill-pack/**'
+      - '.github/workflows/skill-pack.yml'
+  push:
+    paths:
+      - 'skill-pack/**'
+      - '.github/workflows/skill-pack.yml'
+
+jobs:
+  action-helper-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test Robo Miner action helper
+        run: bash skill-pack/scripts/test-robo-miner-action.sh

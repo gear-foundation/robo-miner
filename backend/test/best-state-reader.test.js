@@ -60,3 +60,25 @@ test('program event decoder supports sails-js builds without decodeEvent helper'
     data: ['7', '0xowner', 1, 2, 1, 3],
   });
 });
+
+test('best-state reader subscribes to worlds discovered after startup', async () => {
+  const first = '0x0000000000000000000000000000000000000001';
+  const second = '0x0000000000000000000000000000000000000002';
+  const reader = new BestStateEventReader({
+    config: { rootDir: process.cwd(), varaEthWs: 'ws://example.invalid' },
+    programs: [{ programType: 'world', programId: first }],
+  });
+  const started = [];
+  reader.started = true;
+  reader.loadSails = async () => {};
+  reader.startProgram = (program) => started.push(program.programId);
+
+  const added = await reader.addPrograms([
+    { programType: 'world', programId: first },
+    { programType: 'world', programId: second },
+  ]);
+
+  assert.deepEqual(added.map((program) => program.programId), [second]);
+  assert.deepEqual(started, [second]);
+  assert.equal(reader.programs.length, 2);
+});

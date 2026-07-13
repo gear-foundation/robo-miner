@@ -26,6 +26,7 @@ Jobs:
   - snapshot projection
   - game master lifecycle
   - world executable balance top-up
+  - queued digger rental deploys
   - digger rental top-up
 
 LP Bonus is intentionally not included.
@@ -48,8 +49,9 @@ async function main() {
 
   const config = loadConfig();
   const store = createStore(config);
+  let bestStateReader = null;
   const jobs = {
-    registry: () => runRegistry({ store, config }),
+    registry: () => runRegistry({ store, config, bestStateReader }),
     snapshot: () => runSnapshot({ store, config }),
     lifecycle: () => runLifecycle({ store, config }),
     worldBalance: () => runWorldBalance({ store, config }),
@@ -80,7 +82,7 @@ async function main() {
 
   await runNamed('registry', jobs.registry);
   try {
-    await startBestStateWatcher({ store, config });
+    bestStateReader = await startBestStateWatcher({ store, config });
   } catch (error) {
     logger.error('best_state.start.failed', errorFields(error));
   }
@@ -113,9 +115,17 @@ async function runNamed(name, fn) {
   }
 }
 
-async function runRegistry({ store, config }) {
+async function runRegistry({ store, config, bestStateReader = null }) {
   const manifest = await new WorldRegistryService({ store, config }).syncFromGameMaster();
-  return { season: manifest.season?.id, active: manifest.active.length, worlds: manifest.worlds.length };
+  const addedPrograms = bestStateReader
+    ? await bestStateReader.addPrograms((await buildIndexerConfig({ store, config })).indexerPrograms)
+    : [];
+  return {
+    season: manifest.season?.id,
+    active: manifest.active.length,
+    worlds: manifest.worlds.length,
+    bestStateProgramsAdded: addedPrograms.length,
+  };
 }
 
 async function runSnapshot({ store, config }) {
@@ -211,8 +221,15 @@ async function runRental({ store, config }) {
   const chain = dryRun ? null : await createVaraEthChain(config);
   try {
     const rental = new DiggerRentalService({ store, chain, config });
+    const queued = dryRun ? [] : await rental.processQueuedDiggerRequests();
     const results = await rental.runDailyTopUp({ dryRun });
-    return { mode: dryRun ? 'dry-run' : 'live', selected: results.length, results };
+    return {
+      mode: dryRun ? 'dry-run' : 'live',
+      queued: queued.length,
+      queuedResults: queued,
+      selected: results.length,
+      results,
+    };
   } finally {
     await chain?.disconnect?.();
   }

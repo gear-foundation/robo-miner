@@ -20,11 +20,13 @@ export class LeaderboardService {
       if (seasonId && stats.seasonId !== seasonId) continue;
       if (worldId && stats.worldId !== worldId) continue;
       if (sessionId && String(stats.sessionId) !== String(sessionId)) continue;
-      if (owner && normalizeKey(stats.ownerActor) !== normalizeKey(owner)) continue;
+      const resolved = resolveLeaderboardIdentity(db, stats);
+      if (owner && normalizeKey(resolved.ownerActor) !== normalizeActorKey(owner)) continue;
 
-      const key = stats.ownerActor;
-      const row = rowsByOwner.get(key) || emptyRow(stats);
-      mergeRow(row, stats, selectedMetric, this.rates);
+      const key = normalizeKey(resolved.ownerActor);
+      const resolvedStats = { ...stats, ...resolved };
+      const row = rowsByOwner.get(key) || emptyRow(resolvedStats);
+      mergeRow(row, resolvedStats, selectedMetric, this.rates);
       rowsByOwner.set(key, row);
     }
 
@@ -133,4 +135,44 @@ function emptyResources() {
 
 function normalizeKey(value) {
   return String(value || '').toLowerCase();
+}
+
+function resolveLeaderboardIdentity(db, stats) {
+  const proxyProgramId = stats.diggerProgramId || actorToEvmAddress(stats.ownerActor);
+  const digger = proxyProgramId
+    ? db.diggers.find((item) => normalizeEvmAddress(item.programId || item.id) === normalizeEvmAddress(proxyProgramId))
+    : null;
+  if (!digger?.owner) {
+    return {
+      ownerActor: stats.ownerActor,
+      diggerProgramId: stats.diggerProgramId || null,
+      agentName: stats.agentName || null,
+    };
+  }
+  return {
+    ownerActor: evmAddressToActor(digger.owner) || stats.ownerActor,
+    diggerProgramId: digger.programId || proxyProgramId || null,
+    agentName: digger.agentName || stats.agentName || null,
+  };
+}
+
+function normalizeActorKey(value) {
+  return normalizeKey(evmAddressToActor(value) || value);
+}
+
+function normalizeEvmAddress(value) {
+  return normalizeKey(actorToEvmAddress(value) || value);
+}
+
+function actorToEvmAddress(value) {
+  const hex = normalizeKey(value).replace(/^0x/, '');
+  if (!/^[0-9a-f]{40,64}$/.test(hex)) return null;
+  return `0x${hex.slice(-40)}`;
+}
+
+function evmAddressToActor(value) {
+  const hex = normalizeKey(value).replace(/^0x/, '');
+  if (/^[0-9a-f]{64}$/.test(hex)) return `0x${hex}`;
+  if (!/^[0-9a-f]{40}$/.test(hex)) return null;
+  return `0x${'0'.repeat(24)}${hex}`;
 }

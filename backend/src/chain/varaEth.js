@@ -118,19 +118,9 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         elapsedMs: Date.now() - startedAt,
       });
 
-      logger?.info?.('deploy.wait_created_mirror.start', {
+      logger?.info?.('deploy.wait_created_mirror.skipped', {
         programId,
-        expectedInitialized: false,
-        timeoutMs: config.indexerTimeoutMs || 180000,
-        elapsedMs: Date.now() - startedAt,
-      });
-      const createdMirrorState = await waitForMirrorState(api, getMirrorClient, publicClient, signer, programId, { initialized: false }, config.indexerTimeoutMs || 180000);
-      logger?.info?.('deploy.wait_created_mirror.ok', {
-        programId,
-        stateHash: createdMirrorState.stateHash || null,
-        program: createdMirrorState.program || null,
-        initialized: createdMirrorState.initialized,
-        executableBalance: createdMirrorState.executableBalance || null,
+        reason: 'fast_digger_deploy',
         elapsedMs: Date.now() - startedAt,
       });
 
@@ -155,31 +145,18 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         elapsedMs: Date.now() - startedAt,
       });
       const initPayload = createCtor.encodePayload(ownerActor, worldActor);
-      const initResult = await sendMirrorMessageAndWaitForReply({
+      const initResult = await sendMirrorMessageAndWaitForReceipt({
         mirror,
         payload: initPayload,
         value: 0n,
         label: 'DiggerProxy.Create',
-        sails,
-        ReplyCode,
-        bytesToHex,
-        timeoutMs: config.indexerTimeoutMs || 180000,
         logger,
         programId,
         startedAt,
       });
-      logger?.info?.('deploy.wait_mirror.start', {
+      logger?.info?.('deploy.wait_mirror.skipped', {
         programId,
-        timeoutMs: config.indexerTimeoutMs || 180000,
-        elapsedMs: Date.now() - startedAt,
-      });
-      const mirrorState = await waitForMirrorState(api, getMirrorClient, publicClient, signer, programId, { initialized: true }, config.indexerTimeoutMs || 180000);
-      logger?.info?.('deploy.wait_mirror.ok', {
-        programId,
-        stateHash: mirrorState.stateHash || null,
-        program: mirrorState.program || null,
-        initialized: mirrorState.initialized,
-        executableBalance: mirrorState.executableBalance || null,
+        reason: 'fast_digger_deploy',
         elapsedMs: Date.now() - startedAt,
       });
 
@@ -241,6 +218,45 @@ async function sendAndWait(tx, label) {
     return sent || { status: 'sent', label };
   }
   throw new Error(`${label} transaction object does not expose send method`);
+}
+
+async function sendMirrorMessageAndWaitForReceipt({
+  mirror,
+  payload,
+  value,
+  label,
+  logger = null,
+  programId,
+  startedAt = Date.now(),
+}) {
+  const tx = await mirror.sendMessage(payload, value);
+  logger?.info?.('deploy.init.send.start', {
+    programId,
+    payloadBytes: payloadBytes(payload),
+    value: value.toString(),
+    elapsedMs: Date.now() - startedAt,
+  });
+
+  const txHash = typeof tx.send === 'function' ? await tx.send() : null;
+  const receipt = typeof tx.getReceipt === 'function'
+    ? await tx.getReceipt()
+    : await sendAndWait(tx, label);
+  const message = typeof tx.getMessage === 'function' ? await tx.getMessage() : null;
+  logger?.info?.('deploy.init.receipt', {
+    programId,
+    txHash: receipt.transactionHash || receipt.hash || txHash || null,
+    status: receipt.status,
+    blockNumber: stringifyMaybe(receipt.blockNumber),
+    messageId: message?.id || null,
+    elapsedMs: Date.now() - startedAt,
+  });
+  logger?.info?.('deploy.init.reply.skipped', {
+    programId,
+    reason: 'fast_digger_deploy',
+    messageId: message?.id || null,
+    elapsedMs: Date.now() - startedAt,
+  });
+  return { receipt, txHash, reply: null };
 }
 
 async function sendMirrorMessageAndWaitForReply({

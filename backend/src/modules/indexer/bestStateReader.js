@@ -42,6 +42,24 @@ export class BestStateEventReader {
     }
   }
 
+  async addPrograms(programs = []) {
+    const known = new Set(this.programs.map(programKey));
+    const added = [];
+    for (const program of programs.map(normalizeProgramConfig)) {
+      if (!CONTRACT_IDLS[program.programType] || known.has(programKey(program))) continue;
+      known.add(programKey(program));
+      this.programs.push(program);
+      added.push(program);
+    }
+    if (added.length === 0) return [];
+
+    await this.loadSails(added);
+    if (this.started) {
+      for (const program of added) this.startProgram(program);
+    }
+    return added;
+  }
+
   async stop() {
     this.started = false;
     for (const sub of this.subscriptions.values()) {
@@ -55,14 +73,15 @@ export class BestStateEventReader {
     await this.queue.catch(() => {});
   }
 
-  async loadSails() {
+  async loadSails(programs = this.programs) {
     const { readFile } = await import('node:fs/promises');
     const path = await import('node:path');
     const { SailsProgram } = await import('sails-js');
     const { SailsIdlParser } = await import('sails-js/parser');
     const parser = new SailsIdlParser();
     await parser.init();
-    const neededTypes = [...new Set(this.programs.map((program) => program.programType))];
+    const neededTypes = [...new Set(programs.map((program) => program.programType))]
+      .filter((programType) => !this.sailsByType.has(programType));
     for (const programType of neededTypes) {
       const relative = CONTRACT_IDLS[programType];
       const file = path.resolve(this.config.rootDir, '..', relative);
@@ -315,6 +334,10 @@ function normalizeProgramConfig(program) {
     programType: program.programType,
     programId: normalizeActorAddress(program.programId),
   };
+}
+
+function programKey(program) {
+  return `${program.programType}:${program.programId}`;
 }
 
 function normalizeActorAddress(value) {

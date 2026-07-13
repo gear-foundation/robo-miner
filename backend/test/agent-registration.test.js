@@ -233,6 +233,46 @@ test('queued live digger rental returns pending and completes to active digger',
   assert.equal(db.jobRuns[0].status, 'ok');
 });
 
+test('queued live digger rentals can be processed as a scheduler batch', async () => {
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({
+    store,
+    chain: null,
+    config: CONFIG,
+    now: fixedNow,
+  });
+  const queued = await rental.enqueueDiggerRequest({
+    owner: OWNER,
+    worldId: WORLD,
+  });
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() {
+        return {
+          programId: '0x5555555555555555555555555555555555555555',
+          createTxHash: '0xcreate',
+          topUpTxHash: '0xtopup',
+          initTxHash: '0xinit',
+        };
+      },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const results = await processor.processQueuedDiggerRequests();
+
+  assert.deepEqual(results, [{
+    requestId: queued.requestId,
+    status: 'confirmed',
+    programId: '0x5555555555555555555555555555555555555555',
+  }]);
+  const db = await store.read();
+  assert.equal(db.rentalRequests[0].status, 'confirmed');
+  assert.equal(db.diggers[0].status, 'active');
+});
+
 function fixedNow() {
   return new Date('2026-06-11T00:00:00.000Z');
 }

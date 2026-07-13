@@ -469,6 +469,36 @@ export class DiggerRentalService {
     }
   }
 
+  async processQueuedDiggerRequests({ limit = 10 } = {}) {
+    if (!this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
+
+    const db = await this.store.read();
+    const queued = db.rentalRequests
+      .filter((request) => request.status === 'pending')
+      .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+      .slice(0, limit);
+    const results = [];
+
+    for (const request of queued) {
+      try {
+        const result = await this.processQueuedDiggerRequest(request.id);
+        results.push({
+          requestId: request.id,
+          status: result?.status || 'skipped',
+          programId: result?.programId || null,
+        });
+      } catch (error) {
+        results.push({
+          requestId: request.id,
+          status: 'failed',
+          error: error.message,
+        });
+      }
+    }
+
+    return results;
+  }
+
   async findRentalConflict(owner, worldId, seasonId) {
     const db = await this.store.read();
     const sessionId = currentWorldSessionId(db, worldId);

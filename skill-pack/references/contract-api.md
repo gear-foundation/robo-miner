@@ -76,11 +76,16 @@ World.OwnerOf(proxyActorId) -> ActorId
 
 ```text
 [width, height, totalResources, scrstResources, bcrstResources, hcrstResources,
- startingHp, startingLadders, backpackCapacity]
+ startingHp, startingLadders, backpackCapacity, chestDynamiteChanceBps,
+ ladderScrstResourceAmount, ladderScrstLadderAmount,
+ ladderBcrstResourceAmount, ladderBcrstLadderAmount,
+ ladderHcrstResourceAmount, ladderHcrstLadderAmount]
 ```
 
 Current default is `40x64`, `100` resources, `77/19/4` split, `startingHp=1`,
-`startingLadders=50`, `backpackCapacity=10`.
+`startingLadders=50`, `backpackCapacity=10`,
+`chestDynamiteChanceBps=1000`, and the default ladder exchange fields from
+indices `10..15`.
 
 `Session()` shape:
 
@@ -97,9 +102,24 @@ status: 0 created/waiting, 1 active, 2 finished
  bankedScrst, bankedBcrst, bankedHcrst,
  backpackCapacity, lastActionSeq]
 
-status: 1 active, 2 surfaced, 3 dead, 4 exited
+status: 1 active, 2 surfaced/reserved, 3 dead, 4 exited
 `hp == 0` also means the digger is dead and must stop acting.
 ```
+
+`AGENT_SURFACED`/status `2` is declared in the contract, but current
+`World.Surface()` does not set it. `Surface()` banks carried resources, emits
+`AgentSurfaced`, increments `lastActionSeq`, and leaves the agent active
+(`status == 1`). Do not use `status == 2` as the proof that resources were
+banked.
+
+`lastActionSeq` is the world execution proof for DiggerProxy writes. The proxy
+can return success even when the world rejects the forwarded action. In strict
+mode, before each proxy action, record
+`preActionSeq = AgentOf(agentActorId).result[12]`; after the proxy transaction,
+re-read `AgentOf(agentActorId)`. Treat the action as applied only if
+`result[12] > preActionSeq`. In route-checkpoint mode, use `lastActionSeq`
+together with refreshed `AgentOf` and `MapSnapshot` to prove the checkpoint
+matches the simulated route segment.
 
 Underlying World player methods forwarded by DiggerProxy:
 
@@ -114,11 +134,49 @@ World.MintResources()
 World.Exit()
 ```
 
+For `World.Surface()`, verify the post-action `bankedScrst`, `bankedBcrst`,
+`bankedHcrst`, `lastActionSeq`, or `AgentSurfaced` event. Do not wait for
+`AgentOf(...).status` to become `2`; current contract behavior preserves
+`status == 1`.
+
+`World.TradeResourcesForLadders` is valid only when the acting agent is on the
+surface (`AgentOf(...).y == 0`). It trades banked resources, not carried
+inventory. Underground calls are rejected with `agent is not on the surface`;
+failed proxy-forwarded trades still require the usual `lastActionSeq` check.
+
 Directions:
 
 ```text
 0 up, 1 right, 2 down, 3 left, 4 current
 ```
+
+`MoveAgent(up)` requires ladder continuity: the current tile under the agent
+must be `LADDER`, and the target tile must be `LADDER` or `SURFACE`. A ladder
+only in the target cell is not enough.
+
+`MoveAgent` applies agent gravity after the adjacent target is selected. If the
+target is `LADDER` or `SURFACE`, the agent stays there. If the target is
+`EMPTY`, the agent falls through consecutive `EMPTY` cells in the same action.
+A `LADDER` below catches the agent inside that ladder cell; otherwise the final
+position is the last `EMPTY` cell above the first non-empty/non-ladder tile or
+the map bottom. `Drill` also applies agent gravity from the agent's current cell
+after the map is mutated.
+
+Agent gravity is scoped to the action's caller. A `Drill` or map mutation by one
+agent does not automatically apply gravity to other agents. If another agent
+drills the support under a passive agent, the passive agent's `AgentOf` position
+does not change until that same passive agent later performs an action that
+applies its own gravity, such as `MoveAgent` or `Drill`. The current `Drill`
+stone-crush check is likewise evaluated against the acting agent's gravity
+target, not by scanning every registered agent.
+
+Stone gravity is different from agent gravity. After `Drill` opens a cell,
+`settle_stones_above_open_cell` moves a `STONE` above that opened column through
+consecutive `EMPTY` cells until the next cell below is non-empty or the map
+bottom is reached. The stone can settle below the drilled target if there was
+already an empty pocket below it. `LADDER` is support for stones, so a stone
+stops above a ladder rather than inside it. Contiguous stones above the opening
+can settle as a chain and emit multiple `StoneMoved` events.
 
 Events to process:
 
@@ -140,6 +198,11 @@ ResourcesMinted(sessionId, agentActorId, scrst, bcrst, hcrst)
 AgentExited(sessionId, agentActorId)
 SessionStarted(sessionId)
 ```
+
+`ResourceExtracted` is emitted by `World.Drill` when the drilled target was a
+resource tile. Collection is immediate on the accepted `Drill`: `inventoryScrst`,
+`inventoryBcrst`, or `inventoryHcrst` increases before any `MoveAgent` into the
+drilled cell, and the target cell becomes `EMPTY`.
 
 ## RES VMT
 
@@ -218,6 +281,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 `World/Config` is the source of truth for live ladder exchange rates. Parse:
 
 ```text
+config[9] = chest dynamite chance in basis points
 config[10] = SCRST resource amount
 config[11] = SCRST ladder amount
 config[12] = BCRST resource amount
@@ -225,6 +289,10 @@ config[13] = BCRST ladder amount
 config[14] = HCRST resource amount
 config[15] = HCRST ladder amount
 ```
+
+If `World/Config` returns fewer than 16 values, do not use the ladder exchange
+formula from this section; report the older interface and ask before assuming
+legacy rates.
 
 Send rented DiggerProxy writes through `vara-wallet` Vara.eth injected calls:
 
@@ -290,6 +358,9 @@ Redeem.Redeem(scrst, bcrst, hcrst)
 Redeem.CancelRedeem(redeemId)
 Redeem.ConfirmRedeem(redeemId)
 ```
+
+`Digger.TradeResourcesForLadders` forwards the same world preconditions: use it
+only from the surface and only for already banked resources.
 
 Never print wallet secrets or `PASSPHRASE`. Prefer secret store/env
 injection.

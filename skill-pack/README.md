@@ -65,8 +65,10 @@ First read:
 
 Goal: join a public Robo Miner / DiggerWorld match on Vara.eth mainnet as a player
 agent, get or reuse a backend-managed DiggerProxy, register through the
-DiggerProxy, wait for an active session, play one confirmed action at a time,
-and bank/mint/redeem when useful.
+DiggerProxy, wait for an active session, use strict read-after-write by default,
+optionally use short route checkpoints for prevalidated movement-only segments,
+prove world execution with `World.AgentOf(agentActorId).result[12]`, and
+bank/mint/redeem when useful.
 
 Strictly follow the gates:
 
@@ -112,9 +114,19 @@ not joinable:
 
 8. Wait for session: poll `World/Session`; play only when
    `World.Session().result[2] === 1`.
-9. Action loop: before every action, reread `Session`, `AgentOf`, `InventoryOf`,
-   and `MapSnapshot`; send exactly one confirmed action through DiggerProxy;
-   wait for the result, reread state, and replan.
+9. Action loop: start from a fresh planning snapshot (`Session`, `AgentOf`,
+   `MapSnapshot`, plus cached `Config` as needed). Record
+   `preActionSeq = AgentOf(...).result[12]`; in strict mode, send exactly one
+   action through DiggerProxy, reread `AgentOf`, and treat the action as applied
+   only if `result[12]` increased. Refresh `MapSnapshot` before map-dependent
+   decisions and after accepted map-changing actions. In optional
+   route-checkpoint mode, send only a short prevalidated `MoveAgent` segment
+   whose steps satisfy direction-specific movement rules; for `MoveAgent(up)`,
+   require `LADDER` underfoot and `LADDER` or `SURFACE` in the target cell; for
+   moves into `EMPTY`, simulate agent gravity because one action can fall
+   through multiple empty cells and stop inside a ladder cell. Then reread and
+   continue only if `lastActionSeq` growth and chain state match the simulated
+   checkpoint.
 10. Settlement: when useful, return to surface, then use
    `Surface -> MintResources -> Approve/Redeem` if balances and reserve allow it.
 
@@ -122,7 +134,9 @@ Safety rules:
 - Never call `Admin/*`.
 - Do not use Robo Miner npm packages, helper CLIs, or local scripts for game
   actions. Use only `vara-wallet` and backend HTTP.
-- Do not send multiple unconfirmed transactions at once.
+- In strict mode, do not send another proxy action until the previous one has
+  either increased `lastActionSeq` or been classified as rejected from fresh
+  chain reads. Use route-checkpoint mode only for short movement-only segments.
 - After registration, chain state is the source of truth.
 - Use backend only for discovery and DiggerProxy rental.
 - If any gate fails, stop and report the failed gate, world/program id, owner

@@ -76,6 +76,34 @@ Killed(inheritor)
 WorldUpdated(previousWorld, nextWorld)
 ```
 
+## Forwarding Versus World Execution
+
+A successful DiggerProxy reply, returned message id, `Success`, or `Forwarded`
+event proves only that the proxy accepted and forwarded the request. It does not
+prove that DiggerWorld applied the action. The world may reject the forwarded
+message while the proxy transaction itself still succeeds.
+
+In strict mode, for every state-changing proxy action:
+
+1. Read `World.AgentOf(agentActorId)` before the proxy write and save
+   `preActionSeq = result[12]`.
+2. Send one proxy write with `vara-wallet ... --via injected`.
+3. Re-read `World.AgentOf(agentActorId)`.
+4. Treat the action as applied only when `result[12] > preActionSeq`.
+5. If `lastActionSeq` did not increase, discard the intended local state update,
+   refresh `Session`, `AgentOf`, and `MapSnapshot`, then replan or report the
+   rejection.
+
+Route-checkpoint mode is the only exception to the immediate read-after-write
+pattern. Use it only for a short, prevalidated `MoveAgent` segment whose steps
+satisfy direction-specific movement rules. For `MoveAgent(up)`, the current tile
+under the agent must be `LADDER` and the target tile must be `LADDER` or
+`SURFACE`; a ladder only in the target cell is not enough. For moves into
+`EMPTY`, simulate agent gravity because one action can fall through multiple
+empty cells and stop inside a ladder cell. After the checkpoint, re-read
+`World.AgentOf(agentActorId)` and `World.MapSnapshot()` and continue only if the
+chain state matches the simulated, gravity-adjusted checkpoint state.
+
 ## How to Use It
 
 After backend returns `diggerProgramId`:
@@ -88,7 +116,11 @@ After backend returns `diggerProgramId`:
 6. Play through direct `vara-wallet` calls:
    `Digger/MoveAgent`, `Digger/Drill`, `Digger/PlaceLadder`,
    `Digger/Surface`, `Digger/TradeResourcesForLadders`, `Digger/Exit`, and
-   `Digger/MintResources`.
+   `Digger/MintResources`. After each write, prove world execution with
+   `World.AgentOf(agentActorId).result[12]`.
+   `Digger/TradeResourcesForLadders` is valid only when the agent is on the
+   surface and spends banked resources only; call `Digger/Surface` first when
+   resources are still carried inventory.
 
 Registration maps to this exact Sails call:
 

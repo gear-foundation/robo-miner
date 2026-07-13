@@ -51,7 +51,7 @@ until every prior gate is verified.
 | 4. Digger | A backend-managed DiggerProxy exists for `owner + season + world`. |
 | 5. Registration | The agent is registered in the chosen world and `World.AgentOf(agentActorId)` returns an agent row. |
 | 6. Session | `World.Session().status === 1` (active). In lobby status `0`, wait and re-check. |
-| 7. Action Loop | Send one confirmed action at a time, refresh state after every reply/event, then replan. |
+| 7. Action Loop | Use strict read-after-write by default. An explicit route-checkpoint mode may send a short prevalidated movement segment before re-reading state, but only under the safety limits below. |
 | 8. Settlement | Surface, mint RES, redeem if useful, record result, then discover the next match. |
 
 If a gate fails, stop the current play loop, report the failed gate and the exact
@@ -105,9 +105,12 @@ Bundled helper assets:
 2. Register through the rented digger with `vara-wallet call ... Digger/Register
    --via injected`. Do not call `World.Register` directly in this live skill.
 3. Poll `World.Session()` until active.
-4. Read `Session()`, `Config()`, `MapSnapshot()`, `Agents()`,
-   `AgentOf(agentActorId)`, and `InventoryOf(agentActorId)` with
-   `vara-wallet call`.
+4. Read a baseline `Session()`, `Config()`, `MapSnapshot()`, `Agents()`, and
+   `AgentOf(agentActorId)` with `vara-wallet call`. Cache `Config()` for the
+   selected world/session unless trade-rate-sensitive logic needs a fresh read;
+   `AgentOf()` already includes carried and banked resources, so
+   `InventoryOf()` is an optional compact audit read, not a per-action
+   requirement.
 5. Before selecting a route or placing a ladder, scan `MapSnapshot()` for every
    `LADDER` tile, including ladders placed by other agents. Treat those ladders
    as shared map infrastructure and compare the safe route through existing
@@ -124,14 +127,55 @@ Bundled helper assets:
    not drillable; route around it. Treat drilling a tile directly below `STONE`
    as unsafe unless the plan proves the falling stone cannot block the route or
    crush the agent.
-9. Choose exactly one supported proxy action: `MoveAgent`, `Drill`,
+   Drilling a resource tile collects that resource immediately: after world
+   acceptance, update the target cell to `EMPTY` and increment carried inventory.
+   Do not plan an extra `MoveAgent` into the resource cell just to pick it up.
+9. Choose an execution verification mode:
+   - Strict mode is the default: send exactly one proxy write, then prove world
+     execution by re-reading `World.AgentOf(agentActorId).result[12]`.
+   - Route-checkpoint mode is optional and must be deliberate. Use it only for a
+     short, precomputed `MoveAgent` segment through already traversable
+     `EMPTY`, `LADDER`, or `SURFACE` cells when every step satisfies the
+     direction-specific movement rules and every prefix remains safe under the
+     current agent-gravity and stone-gravity models. For `MoveAgent(up)`, the
+     current tile under the agent must be `LADDER` and the target tile must be
+     `LADDER` or `SURFACE`; a ladder only in the target cell is not enough. For
+     any `MoveAgent` into `EMPTY`, simulate the full `gravity_target`: the
+     action may fall through multiple `EMPTY` cells and stop inside a `LADDER`
+     cell. Do not use it for `Drill`,
+     `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `MintResources`,
+     `Exit`, VMT/redeem writes, chest risk, stone-adjacent uncertainty, low HP,
+     full backpack, or any plan that depends on optimistic map mutation.
+10. In strict mode, choose exactly one supported proxy action: `MoveAgent`,
+   `Drill`,
    `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `Exit`, or
-   `MintResources`. Send it with `vara-wallet call ... --via injected`.
-10. Wait for the transaction reply/events, then update the local map/agent state.
-11. Replan from fresh state. Never assume the previous plan is still valid after
+   `MintResources`. Before sending it, record the current
+   `World.AgentOf(agentActorId).result[12]` as `preActionSeq`. Send it with
+   `vara-wallet call ... --via injected`.
+11. In route-checkpoint mode, record the starting `AgentOf`, `MapSnapshot`, and
+   `preActionSeq`, send at most the configured checkpoint interval of
+   prevalidated `MoveAgent` actions, then re-read `AgentOf`, `Session`, and
+   `MapSnapshot`. Use a small checkpoint interval by default. Larger movement
+   batches are an advanced optimization only after the local simulator has been
+   validated against the current movement, ladder, agent-gravity, and
+   stone-gravity rules. Continue the route only if the refreshed state matches
+   the simulated, gravity-adjusted checkpoint state and `lastActionSeq`
+   increased by the expected amount. If it does not match, discard the
+   optimistic route and fall back to strict mode.
+12. Treat the DiggerProxy response as forwarding evidence only. It can return
+   success even when the world rejects or ignores the action. After a strict
+   proxy write, or after a route-checkpoint segment, re-read
+   `World.AgentOf(agentActorId)`. The strict action is world-applied only if
+   `lastActionSeq` (`result[12]`) increased above `preActionSeq`; a checkpoint
+   segment is accepted only if `lastActionSeq` growth and refreshed state both
+   match the simulated segment.
+13. If `lastActionSeq` did not increase, do not update local position,
+   inventory, ladders, or map from the intended action. Re-read `Session()`,
+   `MapSnapshot()`, and `AgentOf()`, then replan or report the rejection.
+14. Replan from fresh state. Never assume the previous plan is still valid after
    another agent may have moved, drilled, placed a ladder, died, or triggered
    falling stones.
-12. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
+15. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
    report the agent death, and do not send more game actions for that digger.
 
 ## Mandatory Safety Rules
@@ -139,6 +183,10 @@ Bundled helper assets:
 - Treat the contract as source of truth after registration.
 - Treat live `World/Config()` as the source of truth for ladder exchange rates.
   Do not copy rates from docs, memory, previous deployments, or local constants.
+- `TradeResourcesForLadders` is a surface-only banked-resource action. Use it
+  only when fresh `AgentOf(agentActorId).result[2] == 0`, and spend only
+  `bankedScrst`, `bankedBcrst`, and `bankedHcrst`; carried inventory must be
+  banked with `Surface()` first.
 - Treat live `Redeem/*Rate()` and `Redeem/VaraUnit()` as the source of truth for
   RES-to-WVARA exchange. Do not copy redeem rates from docs, memory, previous
   deployments, reports, or local constants.
@@ -147,19 +195,34 @@ Bundled helper assets:
   the rented DiggerProxy.
 - Never call `Admin/*` methods from this skill.
 - Use the rented DiggerProxy path as the only live Robo Miner action path.
+- Never treat DiggerProxy `Success`, returned message id, or `Forwarded` event as
+  proof that the world applied the action. They prove proxy forwarding only.
+- Prove each world-applied action by comparing
+  `World.AgentOf(agentActorId).result[12]` before and after the proxy write.
+- Route-checkpoint mode trades safety for fewer reads. Use it only for
+  prevalidated movement-only route segments whose every prefix has been
+  simulated with movement rules, agent gravity, and stone gravity. Keep the
+  checkpoint interval small by default. Treat long batches, such as 80-100
+  movement writes, as advanced/experimental throughput mode for a locally
+  validated simulator, not as the default skill behavior. Fall back to strict
+  mode after any mismatch, rejected action, map change, stone movement,
+  death/no-ladder signal, or session status change.
 - Use `vara-wallet` as the primary path for all state-changing calls.
 - Do not use local scripts or npm CLIs for Robo Miner actions.
 - Do not keep playing while decoded `Session().status !== 1`.
 - Do not keep playing after decoded `AgentOf(agentActorId).status == 3` or
   `hp == 0`; the digger is dead.
-- Never send multiple unconfirmed game transactions from the same agent at once.
+- In strict mode, never send another proxy write until the previous one has
+  either increased `lastActionSeq` or been classified as rejected from fresh
+  chain reads. In route-checkpoint mode, never exceed the configured checkpoint
+  interval before reconciling against fresh chain state.
 - If a write fails, re-read `AgentOf`, `MapSnapshot`, and `Session`, then replan.
 - Treat `STONE` as an obstacle and falling hazard, not as a drill target. Never
   retry `Drill` against `STONE`; find another path.
 - Before drilling `DIRT`, `CHEST`, or a resource tile, check whether `STONE` is
-  directly above the target cell. If yes, assume the stone can fall into the new
-  opening, block the route, or crush the agent unless a fresh map simulation
-  proves otherwise.
+  directly above the target cell. If yes, assume the stone can fall through the
+  opened target and any consecutive `EMPTY` cells below it, block a lower route,
+  or crush the acting agent unless a fresh map simulation proves otherwise.
 - Never build a new vertical return path just because the agent has enough
   ladders. First evaluate existing/shared ladders from `MapSnapshot`, including
   ladders built by other agents, and use that network when it is safe and cheaper

@@ -130,13 +130,13 @@ export function placeStones(grid, rnd) {
   }
 }
 
-function scatter(grid, rnd, block, count, frac0, frac1) {
+function scatter(grid, rnd, block, count, frac0, frac1, canPlace = (x, y) => isDirt(grid, x, y)) {
   const placed = [];
   let tries = count * 80;
   while (placed.length < count && tries-- > 0) {
     const x = 1 + Math.floor(rnd() * (DIMS.W - 2));
     const y = depthRow(frac0 + rnd() * (frac1 - frac0));
-    if (!isDirt(grid, x, y)) continue;
+    if (!canPlace(x, y)) continue;
     grid[idx(x, y)] = block;
     placed.push({ x, y, type: block });
   }
@@ -148,10 +148,13 @@ function scatter(grid, rnd, block, count, frac0, frac1) {
 export function placeCrystals(grid, rnd) {
   const scale = (DIMS.W * DIMS.H) / AREA_REF;
   const n = (k) => Math.max(1, Math.round(BASE_COUNTS[k] * scale));
+  const reachableFromSurface = floodFromSurface(grid);
+  const canPlaceCrystal = (x, y) =>
+    isDirt(grid, x, y) && hasReachableLateralCell(reachableFromSurface, x, y);
   const crystals = [];
-  crystals.push(...scatter(grid, rnd, BLOCK.SCRST, n('scrst'), 0.05, 0.55));
-  crystals.push(...scatter(grid, rnd, BLOCK.BCRST, n('bcrst'), 0.35, 0.80));
-  crystals.push(...scatter(grid, rnd, BLOCK.HCRST, n('hcrst'), 0.72, 0.99));
+  crystals.push(...scatter(grid, rnd, BLOCK.SCRST, n('scrst'), 0.05, 0.55, canPlaceCrystal));
+  crystals.push(...scatter(grid, rnd, BLOCK.BCRST, n('bcrst'), 0.35, 0.80, canPlaceCrystal));
+  crystals.push(...scatter(grid, rnd, BLOCK.HCRST, n('hcrst'), 0.72, 0.99, canPlaceCrystal));
   return crystals;
 }
 
@@ -201,9 +204,9 @@ function pick(items, rnd) {
   return items[Math.floor(rnd() * items.length)] || items[0];
 }
 
-// Lightweight reachability check: can an agent reach the deep (bottom-most)
-// crystal from the surface through drillable (non-STONE) tiles? Mirrors the
-// classic validator so `regen` can retry seeds that seal the deep band off.
+// Every crystal must have a reachable position to its left or right. This
+// deliberately permits stones above or below the crystal: agents still have
+// to account for falling rocks, but no resource is permanently sealed away.
 export function validateDigger(world) {
   const report = { ok: true, warnings: [] };
   const { grid, crystals } = world;
@@ -212,31 +215,71 @@ export function validateDigger(world) {
     report.warnings.push('no crystals placed');
     return report;
   }
-  const deep = [...crystals].sort((a, b) => b.y - a.y)[0];
-  const spawn = { x: Math.floor(DIMS.W / 2), y: DIMS.S };
-  if (!reachable(grid, spawn, deep)) {
+  const access = inspectDiggerCrystalAccess(grid);
+  if (!access.ok) {
     report.ok = false;
-    report.warnings.push('deep crystals unreachable from surface');
+    report.warnings.push(`crystals without a reachable lateral approach: ${access.missing.length}`);
   }
   return report;
 }
 
-function reachable(grid, from, to) {
-  const W = DIMS.W, H = DIMS.H;
-  const visited = new Uint8Array(W * H);
-  const queue = [from.x, from.y];
-  visited[idx(from.x, from.y)] = 1;
-  while (queue.length) {
-    const y = queue.pop(), x = queue.pop();
-    if (x === to.x && y === to.y) return true;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = x + dx, ny = y + dy;
-      if (nx < 0 || nx >= W || ny < 0 || ny >= H) continue;
-      if (visited[idx(nx, ny)]) continue;
-      if (grid[idx(nx, ny)] === BLOCK.STONE) continue; // unbreakable blocks path
-      visited[idx(nx, ny)] = 1;
-      queue.push(nx, ny);
+export function inspectDiggerCrystalAccess(grid) {
+  const missing = [];
+  for (let y = DIMS.S; y < DIMS.H; y++) {
+    for (let x = 0; x < DIMS.W; x++) {
+      const tile = grid[idx(x, y)];
+      if (!isCrystal(tile)) continue;
+
+      // Treat the target crystal as blocked. A side cell reachable only by
+      // passing through that crystal is not a valid drilling position.
+      const reachable = floodFromSurface(grid, idx(x, y));
+      if (!hasReachableLateralCell(reachable, x, y)) {
+        missing.push({ x, y, type: tile });
+      }
     }
   }
-  return false;
+  return { ok: missing.length === 0, missing };
+}
+
+function isCrystal(tile) {
+  return tile === BLOCK.SCRST || tile === BLOCK.BCRST || tile === BLOCK.HCRST;
+}
+
+function hasReachableLateralCell(reachable, x, y) {
+  return (x > 0 && reachable[idx(x - 1, y)] === 1) ||
+    (x + 1 < DIMS.W && reachable[idx(x + 1, y)] === 1);
+}
+
+function floodFromSurface(grid, blockedIndex = -1) {
+  const W = DIMS.W, H = DIMS.H;
+  const visited = new Uint8Array(W * H);
+  const queue = new Int32Array(W * H);
+  let head = 0;
+  let tail = 0;
+
+  // The live contract's entire top row is traversable surface. Starting from
+  // every ground cell below it models a miner choosing any surface column.
+  for (let x = 0; x < W; x++) {
+    const start = idx(x, DIMS.S);
+    if (start === blockedIndex || grid[start] === BLOCK.STONE) continue;
+    visited[start] = 1;
+    queue[tail++] = start;
+  }
+
+  while (head < tail) {
+    const cell = queue[head++];
+    const x = cell % W;
+    const y = (cell / W) | 0;
+    if (x > 0) visit(cell - 1);
+    if (x + 1 < W) visit(cell + 1);
+    if (y > 0) visit(cell - W);
+    if (y + 1 < H) visit(cell + W);
+  }
+  return visited;
+
+  function visit(next) {
+    if (next === blockedIndex || visited[next] || grid[next] === BLOCK.STONE) return;
+    visited[next] = 1;
+    queue[tail++] = next;
+  }
 }

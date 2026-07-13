@@ -12,7 +12,8 @@ sessionId, last world-accepted action sequence
 Use `vara-wallet` as the primary path for every state-changing Robo Miner
 transaction. The live workflow uses a rented DiggerProxy for actions.
 Use ordinary backend HTTP requests for discovery and digger rental. Do not use
-Robo Miner npm packages, helper CLIs, or local scripts for this workflow.
+Robo Miner npm packages, helper CLIs, or unbundled local scripts for this
+workflow. Source only the reviewed action helper bundled with this skill.
 
 Source-of-truth precedence:
 
@@ -25,11 +26,21 @@ If `/matches` or another backend response includes `register.steps` that call
 frontend/non-authoritative instructions for this skill. Player agents register
 only through the rented DiggerProxy.
 
-Write path rule: use `vara-wallet call ... --via injected` for all DiggerProxy
-state-changing play-loop calls. Do not use `--via eth` for the play loop unless
-the user explicitly asks for that path. If an explicit `--via eth` call returns
+Write path rule: source `scripts/robo-miner-action.sh` and use
+`robo_miner_action` for all DiggerProxy state-changing play-loop calls. Its
+default path holds one named-wallet `vara-eth:session` open, submits injected
+functions, then confirms the expected state on-chain. Do not use `--via eth` for the play loop unless the
+user explicitly asks for that path. If an explicit `--via eth` call returns
 `PROMISE_TIMEOUT`, do not assume failure; immediately verify the intended state
 with a read-only query.
+
+For a long-lived agent process, `vara-wallet >= 0.20.5` provides
+`vara-eth:session`: it keeps the encrypted named-wallet signer and Vara.eth
+connection in one process. `robo_miner_action` uses it by default for both its
+preflight/confirmation reads and submitted functions. Retain the same
+sequence/state confirmation rule before any dependent action. This is the only
+approved persistent agent path. Do not extract a private key to use the
+contract operator scripts. See `wallet-and-signing.md` for session details.
 
 DiggerProxy is a forwarding proxy. A successful proxy transaction, returned
 message id, `Success`, or `Forwarded` event proves only that the proxy accepted
@@ -70,8 +81,8 @@ agents as fallen, crushed, or dead from local simulation alone.
 ## Gate 1: Load the Skill
 
 Install or load the top-level `skill-pack` folder as the skill source. The
-required runtime tools are `curl` for backend HTTP and `vara-wallet` for wallet
-and contract calls.
+required runtime tools are `curl` for backend HTTP, Bash and `jq` for the
+bundled action helper, and `vara-wallet` for wallet and contract calls.
 
 ```bash
 npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y
@@ -93,7 +104,7 @@ package CLI, or helper script installation is required.
 Read `references/wallet-and-signing.md` for wallet details, passphrase handling,
 and secret storage. This workflow only carries the short operational path.
 
-`vara-wallet` must be v0.20.3 or newer:
+`vara-wallet` must be v0.20.5 or newer:
 
 ```bash
 which node
@@ -103,7 +114,7 @@ vara-wallet --version
 
 Install or update `vara-wallet` from the official
 `gear-foundation/vara-wallet` release artifacts before continuing if the
-version is lower than v0.20.3.
+version is lower than v0.20.5.
 
 If `vara-wallet --chain vara-eth ... vara-eth:wallet keys` fails with
 `ERR_REQUIRE_ESM`, make sure `vara-wallet` is executed by the same modern Node
@@ -131,6 +142,7 @@ export ROBO_MINER_DIGGER_PROXY_IDL="${ROBO_MINER_DIGGER_PROXY_IDL:-$ROBO_MINER_S
 export ROBO_MINER_WORLD_IDL="${ROBO_MINER_WORLD_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_world.idl}"
 export ROBO_MINER_RES_VMT_IDL="${ROBO_MINER_RES_VMT_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_res_vmt.idl}"
 export ROBO_MINER_REDEEM_IDL="${ROBO_MINER_REDEEM_IDL:-$ROBO_MINER_SKILL_ROOT/assets/idl/digger_redeem.idl}"
+source "$ROBO_MINER_SKILL_ROOT/scripts/robo-miner-action.sh"
 ```
 
 When running from a repository checkout, `ROBO_MINER_SKILL_ROOT=skill-pack` is
@@ -148,28 +160,24 @@ export ROBO_MINER_VARA_RPC="${ROBO_MINER_VARA_RPC:-wss://validator-1-eth.vara.ne
 export ROBO_MINER_ROUTER="${ROBO_MINER_ROUTER:-0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6}"
 ```
 
-If `PASSPHRASE` is not already available, ask the user for it and keep it only
-in local runtime state:
-
-```bash
-if [ -z "${PASSPHRASE:-}" ]; then
-  read -rsp "Vara.eth wallet passphrase: " PASSPHRASE
-  export PASSPHRASE
-  printf "\n"
-fi
-```
-
-Create or load a persistent Vara.eth wallet:
+Create or load a persistent Vara.eth wallet before the action runner starts:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet list
-vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE"
+vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT"
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" >/dev/null
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" >/dev/null
 ```
 
 If the wallet already exists, `create` may fail with an exists-style error; in
 that case continue with `show`.
+
+Creating without `--passphrase` writes the wallet's local `0600`
+`~/.vara-wallet/.passphrase` file, which `robo_miner_action` resolves through
+its named-wallet session. If this is an existing externally encrypted wallet,
+provision its secret into `~/.vara-wallet/passphrases/<wallet>.passphrase` with
+mode `0600` before the agent starts. Do not place a passphrase in `.env`, logs,
+or a `vara-wallet` command line.
 
 ```bash
 ownerAddress=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
@@ -376,30 +384,26 @@ from a transition to `status == 2`.
 
 ## Gate 5: Register
 
-Register through the rented DiggerProxy with `vara-wallet`. Do not infer the
-wire format from the method name, and do not call `World.Register` directly.
+Register through the rented DiggerProxy with the bundled helper. Do not infer
+the wire format from the method name, and do not call `World.Register` directly.
 
 ```bash
-vara-wallet \
-  --chain vara-eth \
-  --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Register \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+export ROBO_MINER_DIGGER_PROGRAM_ID="$diggerProgramId"
+export ROBO_MINER_WORLD_ID="$worldId"
+robo_miner_action Digger/Register '[]'
 ```
 
-This sends a Vara.eth injected transaction to:
+This submits a Vara.eth injected transaction through `vara-wallet` and polls
+`World.Agents()` until it contains the DiggerProxy ActorId. The membership
+query is deliberate: an unregistered `World.AgentOf(agentActorId)` may carry
+an error reply whose decoded payload is not an agent row.
 
 ```text
 program = diggerProgramId
 method  = Digger/Register
 args    = []
 idl     = assets/idl/digger_proxy.idl
-via     = injected
+via     = injected, wait=submitted
 signer  = vara-wallet account owner
 ```
 
@@ -414,7 +418,8 @@ installed skill folder. If `Register` returns a Sails route, header, or decode
 error, stop and report the backend `codeId`, `diggerProgramId`, and IDL path; do
 not fall back to direct `World/Register`.
 
-Then verify world state:
+Then inspect the registered agent state with a successful `World/AgentOf`
+reply:
 
 ```bash
 agentActorId="0x000000000000000000000000${diggerProgramId#0x}"
@@ -426,8 +431,8 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 ```
 
 `agentActorId` is the DiggerProxy ActorId, derived from `diggerProgramId`.
-Registration is successful when `World.AgentOf(agentActorId).result[0]` is
-present and is not `0`.
+Registration is successful when `World/Agents` contains that exact ActorId;
+only then may `World/AgentOf(agentActorId)` be interpreted as an agent row.
 
 If registration fails because the world is finished, full, or no longer
 joinable:
@@ -456,7 +461,6 @@ vara-wallet \
   --chain vara-eth \
   --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$diggerProgramId" Digger/SetWorld \
   --args "[\"$newWorldActorId\"]" \
@@ -623,67 +627,20 @@ Also run a stone-safety pass before every planned `Drill`:
   acceptance, reconcile carried inventory, `ResourceExtracted`, the target
   `MapSnapshot` cell, and post-`Drill` gravity/stone effects.
 
-Send exactly one `vara-wallet` action through the DiggerProxy. Directions are
+Send exactly one `robo_miner_action` action through the DiggerProxy. Directions are
 `0 up`, `1 right`, `2 down`, `3 left`, and `4 current` for `PlaceLadder` only:
 
 ```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/MoveAgent \
-  --args '[2]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Drill \
-  --args '[1]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/PlaceLadder \
-  --args '[4]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Surface \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/TradeResourcesForLadders \
-  --args "[$scrst,$bcrst,$hcrst]" \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Exit \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+robo_miner_action Digger/MoveAgent '[2]'
+robo_miner_action Digger/Drill '[1]'
+robo_miner_action Digger/PlaceLadder '[4]'
+robo_miner_action Digger/Surface '[]'
+robo_miner_action Digger/TradeResourcesForLadders "[$scrst,$bcrst,$hcrst]"
+robo_miner_action Digger/Exit '[]'
 ```
 
-Wait for the proxy transaction result, then verify world acceptance from chain
-state. In strict mode, re-read `World.AgentOf(agentActorId)` and compare
+The helper returns only after it has verified world acceptance from chain state.
+In strict mode, compare its `postActionSeq` with `preActionSeq` and
 `postActionSeq = result[12]` with `preActionSeq`. If `postActionSeq` increased,
 the world applied an action; use the refreshed `AgentOf` as the source of truth
 for position, hp, ladders, carried resources, banked resources, and
@@ -710,7 +667,7 @@ chain state.
 When carried inventory should be banked:
 
 1. Return to surface (`World.AgentOf(agentActorId).result[2] === 0`).
-2. Call `Digger/Surface` with `vara-wallet`.
+2. Call `Digger/Surface` with `robo_miner_action Digger/Surface '[]'`.
 3. If ladders are low and banked resources are available, prefer the safe
    surface refill before mint/redeem. Before choosing `scrst,bcrst,hcrst`,
    query the selected world's live `World/Config()` and parse the current ladder
@@ -747,14 +704,7 @@ resource amount and no larger than the matching banked resource field. If
 not expose current ladder rates and ask before assuming a legacy rate.
 
 ```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/TradeResourcesForLadders \
-  --args "[$scrst,$bcrst,$hcrst]" \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+robo_miner_action Digger/TradeResourcesForLadders "[$scrst,$bcrst,$hcrst]"
 ```
 
 If `Digger/TradeResourcesForLadders` returns success at the proxy layer but
@@ -764,14 +714,7 @@ common rejection is `agent is not on the surface`.
 4. If banked resources are still non-zero and should be monetized, call:
 
 ```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/MintResources \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+robo_miner_action Digger/MintResources '[]'
 ```
 
 Check RES balances and redeem configuration:
@@ -832,7 +775,6 @@ needed:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$resVmtProgramId" Vmt/Approve \
   --args "[\"$redeemActorId\"]" \
@@ -845,7 +787,6 @@ Then redeem:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/Redeem \
   --args "[$scrst,$bcrst,$hcrst]" \
@@ -858,7 +799,6 @@ Use cancel/confirm only for a redeem id returned by the redeem contract:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/CancelRedeem \
   --args "[$redeemId]" \
@@ -867,7 +807,6 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/ConfirmRedeem \
   --args "[$redeemId]" \

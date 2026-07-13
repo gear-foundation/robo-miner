@@ -18,8 +18,8 @@ settlement through `Surface -> MintResources -> Redeem` is allowed.
 Use this folder as a Codex skill source. The skill is the `SKILL.md`,
 references, IDL assets, env example, and UI metadata under
 `skill-pack`. Install it from GitHub with `npx skills add`, not from npm. Once
-the skill is loaded in the agent runtime, the live tooling is `vara-wallet` plus
-ordinary backend HTTP requests.
+the skill is loaded in the agent runtime, the live tooling is `vara-wallet`, the
+bundled sourceable action helper, and ordinary backend HTTP requests.
 
 ## Mainnet Defaults
 
@@ -45,11 +45,11 @@ until every prior gate is verified.
 
 | Gate | Required result before continuing |
 | --- | --- |
-| 1. Tooling | This skill folder is loaded, `curl` is available for backend HTTP, and `vara-wallet` v0.20.3 or newer from `gear-foundation/vara-wallet` is available. |
+| 1. Tooling | This skill folder is loaded, `curl`, Bash, and `jq` are available, and `vara-wallet` v0.20.5 or newer from `gear-foundation/vara-wallet` is available. |
 | 2. Identity | A persistent Vara.eth wallet exists in `vara-wallet`, its EVM address is known, and its ActorId is derived. |
 | 3. Environment | Network, router, backend API, world id, RES VMT id, and redeem id are discovered. |
 | 4. Digger | A backend-managed DiggerProxy exists for `owner + season + world`. |
-| 5. Registration | The agent is registered in the chosen world and `World.AgentOf(agentActorId)` returns an agent row. |
+| 5. Registration | `World.Agents()` contains the DiggerProxy ActorId, then `World.AgentOf(agentActorId)` returns a successful agent row. |
 | 6. Session | `World.Session().status === 1` (active). In lobby status `0`, wait and re-check. |
 | 7. Action Loop | Use strict read-after-write by default. An explicit route-checkpoint mode may send a short prevalidated movement segment before re-reading state, but only under the safety limits below. |
 | 8. Settlement | Surface, mint RES, redeem if useful, record result, then discover the next match. |
@@ -67,7 +67,7 @@ When instructions disagree, use this precedence:
 
 Backend `/matches` may include legacy `register.steps` that tell clients to send
 `World.Register(owner)`. Ignore those steps in this skill. Player agents register
-only through the rented DiggerProxy with `Digger/Register --via injected`.
+only through the rented DiggerProxy with `robo_miner_action Digger/Register '[]'`.
 
 ## Reference Map
 
@@ -82,7 +82,7 @@ Load only the reference you need for the current step:
 - `references/contract-api.md`: World/RES/Redeem calls, query shapes, event
   meanings, ActorId conversion, and `vara-wallet` examples.
 - `references/digger-proxy-interface.md`: DiggerProxy interface used by rented
-  diggers and the direct `vara-wallet` calls that operate it.
+  diggers and the session helper that operates it.
 - `references/game-and-economy.md`: game rules, tile ids, resource strategy,
   surface/trade-ladders/mint/redeem flow, and planning heuristics.
 
@@ -98,12 +98,28 @@ Use those IDLs for Sails calls, payload encoding, event decoding, and examples.
 Bundled helper assets:
 
 - `assets/examples/agent.env.example`: environment template without secrets.
+- `scripts/robo-miner-action.sh`: sourceable DiggerProxy action helper; it
+  delegates signing to `vara-wallet`.
+
+## Persistent Agent Session
+
+For a prevalidated route or a stateful agent runner, source
+`scripts/robo-miner-action.sh`: its default submitted path opens and reuses the
+encrypted-wallet `vara-wallet vara-eth:session` protocol instead of starting a
+new CLI process per query or write. It is the approved throughput path for
+agents; never replace it by exporting a private key for
+`contracts/scripts/proxy-fleet.ts`.
+
+The helper performs session transport, but the agent must still prove every
+function from fresh world state before sending a dependent action. See
+`references/wallet-and-signing.md` for the session protocol and credentials.
 
 ## Core Loop
 
 1. Read `references/workflow.md` and complete gates 1-4.
-2. Register through the rented digger with `vara-wallet call ... Digger/Register
-   --via injected`. Do not call `World.Register` directly in this live skill.
+2. Source `scripts/robo-miner-action.sh`, then register through the rented
+   digger with `robo_miner_action Digger/Register '[]'`. Do not call
+   `World.Register` directly in this live skill.
 3. Poll `World.Session()` until active.
 4. Read a baseline `Session()`, `Config()`, `MapSnapshot()`, `Agents()`, and
    `AgentOf(agentActorId)` with `vara-wallet call`. Cache `Config()` for the
@@ -150,8 +166,9 @@ Bundled helper assets:
    `Drill`,
    `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `Exit`, or
    `MintResources`. Before sending it, record the current
-   `World.AgentOf(agentActorId).result[12]` as `preActionSeq`. Send it with
-   `vara-wallet call ... --via injected`.
+   `World.AgentOf(agentActorId).result[12]` as `preActionSeq`. Send it through
+   `robo_miner_action`; it submits through the persistent session and proves
+   the action only after the same sequence increases on-chain.
 11. In route-checkpoint mode, record the starting `AgentOf`, `MapSnapshot`, and
    `preActionSeq`, send at most the configured checkpoint interval of
    prevalidated `MoveAgent` actions, then re-read `AgentOf`, `Session`, and
@@ -208,7 +225,9 @@ Bundled helper assets:
   mode after any mismatch, rejected action, map change, stone movement,
   death/no-ladder signal, or session status change.
 - Use `vara-wallet` as the primary path for all state-changing calls.
-- Do not use local scripts or npm CLIs for Robo Miner actions.
+- Do not use unbundled local scripts or npm CLIs for Robo Miner actions. The
+  reviewed `scripts/robo-miner-action.sh` helper is the sole exception and
+  delegates every signed call to `vara-wallet`.
 - Do not keep playing while decoded `Session().status !== 1`.
 - Do not keep playing after decoded `AgentOf(agentActorId).status == 3` or
   `hp == 0`; the digger is dead.

@@ -28,26 +28,29 @@ skill still installs for global-capable agents. For PromptScript, run the same
 install without `-g` from the target project.
 
 Then restart the agent session if it does not pick up newly installed skills
-immediately. Do not install an npm package for this skill and do not use a Robo
-Miner helper CLI. The live runtime path is `vara-wallet` for wallet/contract
-calls and HTTP requests for backend discovery/rental.
+immediately. Do not install an npm package or helper CLI for this skill. The
+live runtime path is `vara-wallet` for wallet/contract calls, the bundled
+sourceable action helper for DiggerProxy calls, and HTTP requests for backend
+discovery/rental.
 
 ## Backend and Writes
 
 ```bash
 export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
+export ROBO_MINER_SKILL_ROOT="${ROBO_MINER_SKILL_ROOT:-skill-pack}"
+source "$ROBO_MINER_SKILL_ROOT/scripts/robo-miner-action.sh"
 
 vara-wallet --chain vara-eth --network mainnet --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
 curl -fsS https://api-digger-eth.vara.network/api/manifest
 curl -fsS https://api-digger-eth.vara.network/api/worlds
 curl -fsS 'https://api-digger-eth.vara.network/api/diggers?owner=0x...&season=season-1&status=active'
 
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Register --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MoveAgent --args '[2]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Drill --args '[1]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/PlaceLadder --args '[4]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/Surface --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
-vara-wallet --chain vara-eth --network mainnet --account "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" --json call "$diggerProgramId" Digger/MintResources --args '[]' --idl "$ROBO_MINER_DIGGER_PROXY_IDL" --via injected
+robo_miner_action Digger/Register '[]'
+robo_miner_action Digger/MoveAgent '[2]'
+robo_miner_action Digger/Drill '[1]'
+robo_miner_action Digger/PlaceLadder '[4]'
+robo_miner_action Digger/Surface '[]'
+robo_miner_action Digger/MintResources '[]'
 ```
 
 ## Agent Prompt
@@ -72,7 +75,7 @@ bank/mint/redeem when useful.
 
 Strictly follow the gates:
 
-1. Tooling: verify `curl`, Node, `vara-wallet >= 0.20.3`, and IDL assets.
+1. Tooling: verify `curl`, Bash, `jq`, Node, `vara-wallet >= 0.20.5`, and IDL assets.
 2. Identity: use or create a persistent Vara.eth wallet. Never print the
    passphrase or private key.
 3. Environment: use `mainnet` and backend
@@ -88,27 +91,32 @@ Strictly follow the gates:
 5. Verify DiggerProxy with read-only `vara-wallet` calls: `Digger/Owner`,
    `Digger/World`, and `Digger/Status`. Owner must match `ownerActorId`; World
    must match the selected world ActorId.
-6. Register only through the rented DiggerProxy: call `Digger/Register` with
-   `--via injected`. Never call `World/Register` directly.
+6. Source the reviewed bundled action helper, then register only through the
+   rented DiggerProxy: `robo_miner_action Digger/Register '[]'`. Never call
+   `World/Register` directly.
 
 Write path rule:
-For all DiggerProxy state-changing calls after rental, use:
-`vara-wallet --chain vara-eth --network mainnet ... call <diggerProgramId> Digger/<Method> ... --via injected`
+For all DiggerProxy state-changing calls after rental, source
+`$ROBO_MINER_SKILL_ROOT/scripts/robo-miner-action.sh` and use
+`robo_miner_action Digger/<Method> '<json-array>'`. Its default submitted path
+reuses one named-wallet Vara.eth session for injected writes and chain reads,
+then proves completion from fresh chain state before another action may be sent.
 
 Do not use `--via eth` for the play loop unless explicitly asked. If `--via eth`
 returns `PROMISE_TIMEOUT`, do not assume failure; immediately verify with a
 read-only query.
 
-7. Verify registration with `World/AgentOf(agentActorId)`, where `agentActorId`
-   is derived from `diggerProgramId`.
+7. Verify registration from `World/Agents`: it must contain `agentActorId`,
+   which is derived from `diggerProgramId`. Then read the successful
+   `World/AgentOf(agentActorId)` row.
 
 Register recovery:
 If `Digger/Register` fails because the world is full, already active, closed, or
 not joinable:
 1. Fetch worlds again.
 2. Select a fresh joinable/waiting world.
-3. Call `Digger/SetWorld(newWorldActorId)` through the same rented DiggerProxy
-   with `--via injected`.
+3. Call `robo_miner_action Digger/SetWorld '["newWorldActorId"]'` through the
+   same rented DiggerProxy.
 4. Verify `Digger.World`.
 5. Retry `Digger/Register`.
 
@@ -132,8 +140,10 @@ not joinable:
 
 Safety rules:
 - Never call `Admin/*`.
-- Do not use Robo Miner npm packages, helper CLIs, or local scripts for game
-  actions. Use only `vara-wallet` and backend HTTP.
+- Do not use Robo Miner npm packages, helper CLIs, or arbitrary local scripts
+  for game actions. The reviewed bundled
+  `scripts/robo-miner-action.sh` is the sole exception; source it rather than
+  copying or modifying its commands.
 - In strict mode, do not send another proxy action until the previous one has
   either increased `lastActionSeq` or been classified as rejected from fresh
   chain reads. Use route-checkpoint mode only for short movement-only segments.

@@ -3,13 +3,49 @@ import { normalizeDb } from './jsonStore.js';
 
 const { Pool } = pg;
 const DEFAULT_DOCUMENT_ID = 'main';
+const RETRYABLE_TRANSACTION_CODES = new Set(['40001', '40P01', '55P03', '57014']);
+
+export class DatabaseBusyError extends Error {
+  constructor(cause) {
+    super('database_busy', { cause });
+    this.name = 'DatabaseBusyError';
+    this.code = 'database_busy';
+    this.statusCode = 503;
+    this.databaseCode = cause?.code || null;
+  }
+}
 
 export class PostgresStore {
-  constructor({ connectionString, documentId = DEFAULT_DOCUMENT_ID, schema = 'public', pool = null }) {
+  constructor({
+    connectionString,
+    documentId = DEFAULT_DOCUMENT_ID,
+    schema = 'public',
+    pool = null,
+    connectionTimeoutMs = 5_000,
+    queryTimeoutMs = 20_000,
+    lockTimeoutMs = 5_000,
+    statementTimeoutMs = 15_000,
+    idleTransactionTimeoutMs = 15_000,
+    updateMaxAttempts = 3,
+    updateRetryBaseMs = 100,
+  }) {
     if (!connectionString && !pool) throw new Error('DATABASE_URL is required for PostgresStore');
     this.documentId = documentId;
     this.schema = schema;
-    this.pool = pool || new Pool({ connectionString, allowExitOnIdle: true });
+    this.connectionTimeoutMs = positiveInteger(connectionTimeoutMs, 5_000);
+    this.queryTimeoutMs = positiveInteger(queryTimeoutMs, 20_000);
+    this.lockTimeoutMs = positiveInteger(lockTimeoutMs, 5_000);
+    this.statementTimeoutMs = positiveInteger(statementTimeoutMs, 15_000);
+    this.idleTransactionTimeoutMs = positiveInteger(idleTransactionTimeoutMs, 15_000);
+    this.updateMaxAttempts = positiveInteger(updateMaxAttempts, 3);
+    this.updateRetryBaseMs = nonNegativeInteger(updateRetryBaseMs, 100);
+    this.pool = pool || new Pool({
+      connectionString,
+      allowExitOnIdle: true,
+      connectionTimeoutMillis: this.connectionTimeoutMs,
+      query_timeout: this.queryTimeoutMs,
+      keepAlive: true,
+    });
     this._ready = null;
   }
 
@@ -56,10 +92,29 @@ export class PostgresStore {
   }
 
   async update(mutator) {
+    let lastError = null;
+    for (let attempt = 1; attempt <= this.updateMaxAttempts; attempt += 1) {
+      try {
+        return await this.updateOnce(mutator);
+      } catch (error) {
+        if (!isRetryableTransactionError(error)) throw error;
+        lastError = error;
+        if (attempt < this.updateMaxAttempts) {
+          await delay(this.updateRetryBaseMs * attempt);
+        }
+      }
+    }
+    throw new DatabaseBusyError(lastError);
+  }
+
+  async updateOnce(mutator) {
     await this.ready();
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+      await client.query(`SET LOCAL lock_timeout = '${this.lockTimeoutMs}ms'`);
+      await client.query(`SET LOCAL statement_timeout = '${this.statementTimeoutMs}ms'`);
+      await client.query(`SET LOCAL idle_in_transaction_session_timeout = '${this.idleTransactionTimeoutMs}ms'`);
       const result = await client.query(
         `SELECT data FROM ${this.tableName()} WHERE id = $1 FOR UPDATE`,
         [this.documentId],
@@ -153,4 +208,23 @@ function ident(value) {
   const s = String(value || '');
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s)) throw new Error(`Invalid Postgres identifier: ${value}`);
   return `"${s.replace(/"/g, '""')}"`;
+}
+
+function isRetryableTransactionError(error) {
+  return RETRYABLE_TRANSACTION_CODES.has(error?.code);
+}
+
+function positiveInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeInteger(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function delay(ms) {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

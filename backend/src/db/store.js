@@ -7,6 +7,13 @@ export function createStore(config) {
       connectionString: config.databaseUrl,
       documentId: config.databaseDocumentId,
       schema: config.databaseSchema,
+      connectionTimeoutMs: config.databaseConnectionTimeoutMs,
+      queryTimeoutMs: config.databaseQueryTimeoutMs,
+      lockTimeoutMs: config.databaseLockTimeoutMs,
+      statementTimeoutMs: config.databaseStatementTimeoutMs,
+      idleTransactionTimeoutMs: config.databaseIdleTransactionTimeoutMs,
+      updateMaxAttempts: config.databaseUpdateMaxAttempts,
+      updateRetryBaseMs: config.databaseUpdateRetryBaseMs,
     });
   }
   return new JsonStore(config.dbFile);

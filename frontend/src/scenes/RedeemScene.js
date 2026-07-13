@@ -121,10 +121,8 @@ export default class RedeemScene extends Phaser.Scene {
     quote.innerHTML = `
       <div style="font-size:13px;color:#cdd3da;font-weight:bold">PAYOUT</div>
       <div id="redeem-payout" style="font-size:30px;color:#7CFFB0;font-weight:bold;margin-top:6px">0 VARA</div>
-      <div id="redeem-reserve" style="font-size:12px;color:#cdd3da;margin-top:4px"></div>
     `;
     this.payoutEl = quote.querySelector('#redeem-payout');
-    this.reserveEl = quote.querySelector('#redeem-reserve');
     const submit = wireBtn(document.createElement('button'));
     submit.textContent = 'REDEEM';
     submit.style.cssText = btnCss('#7CFFB0') + 'flex:0 0 220px;font-size:20px;padding:16px 22px';
@@ -256,7 +254,6 @@ export default class RedeemScene extends Phaser.Scene {
       quote = { raw: 0n, display: '0 VARA' };
     }
     this.payoutEl.textContent = quote.display;
-    this.reserveEl.textContent = this.state ? `Reserve ${formatVara(this.state.reserve, this.state.varaUnit)}` : '';
 
     const validation = this.validateForm();
     this.submitBtn.disabled = this.busy || Boolean(validation);

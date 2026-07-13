@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { normalizeDb } from '../src/db/jsonStore.js';
 import { DiggerRegistryService } from '../src/modules/diggerRegistry/service.js';
-import { DiggerRentalService } from '../src/modules/diggerRental/service.js';
+import { DiggerRentalService, DiggerSessionLockedError } from '../src/modules/diggerRental/service.js';
 
 const CONFIG = {
   diggerRentalSeason: 'season-1',
@@ -79,6 +79,42 @@ test('legacy world labels do not block new digger rentals', async () => {
 
   assert.equal(request.status, 'dry-run');
   assert.equal(queued.status, 'pending');
+});
+
+test('a dead digger blocks only the current session of its own world', async () => {
+  const otherWorld = '0x1111111111111111111111111111111111111111';
+  const store = new MemoryStore({
+    worlds: [{ id: WORLD, programId: WORLD, sessionId: '8' }],
+    diggers: [{
+      id: '0x2222222222222222222222222222222222222222',
+      programId: '0x2222222222222222222222222222222222222222',
+      owner: OWNER,
+      seasonId: 'season-1',
+      worldId: WORLD,
+      sessionId: '8',
+      status: 'dead',
+    }],
+  });
+  const rental = new DiggerRentalService({
+    store,
+    chain: null,
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  await assert.rejects(
+    rental.requestDigger({ owner: OWNER, worldId: WORLD, dryRun: true }),
+    (error) => error instanceof DiggerSessionLockedError && error.statusCode === 409,
+  );
+
+  const otherWorldRequest = await rental.requestDigger({ owner: OWNER, worldId: otherWorld, dryRun: true });
+  assert.equal(otherWorldRequest.status, 'dry-run');
+
+  await store.update((db) => {
+    db.worlds[0].sessionId = '9';
+  });
+  const nextSessionRequest = await rental.requestDigger({ owner: OWNER, worldId: WORLD, dryRun: true });
+  assert.equal(nextSessionRequest.status, 'dry-run');
 });
 
 test('digger registry lists my active digger by normalized owner/world filters', async () => {

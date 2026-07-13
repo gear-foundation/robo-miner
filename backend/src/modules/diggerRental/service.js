@@ -2,6 +2,20 @@ import { generateAgentName } from '../agentNames.js';
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/i;
 const LIVE_WORLD_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
+const EXISTING_RENTAL_STATUSES = new Set(['active', 'planned', 'registered']);
+const FINISHED_AGENT_STATUSES = new Set(['dead', 'exited']);
+
+export class DiggerSessionLockedError extends Error {
+  constructor({ worldId, seasonId, sessionId, status }) {
+    super('digger_already_used_in_current_session');
+    this.name = 'DiggerSessionLockedError';
+    this.statusCode = 409;
+    this.worldId = worldId;
+    this.seasonId = seasonId;
+    this.sessionId = sessionId;
+    this.diggerStatus = status;
+  }
+}
 
 export class DiggerRentalService {
   constructor({ store, chain, config, now = () => new Date(), logger = null }) {
@@ -65,8 +79,17 @@ export class DiggerRentalService {
     if (!dryRun && !this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
 
     const id = requestId || `rent:${resolvedSeasonId}:${normalizedOwner}:${normalizedWorldId}:${now.toISOString()}`;
-    const existing = await this.findExistingActiveRental(normalizedOwner, normalizedWorldId, resolvedSeasonId);
-    if (existing) {
+    const conflict = await this.findRentalConflict(normalizedOwner, normalizedWorldId, resolvedSeasonId);
+    if (conflict?.kind === 'session_locked') {
+      throw new DiggerSessionLockedError({
+        worldId: normalizedWorldId,
+        seasonId: resolvedSeasonId,
+        sessionId: conflict.sessionId,
+        status: conflict.digger.status,
+      });
+    }
+    if (conflict?.kind === 'existing') {
+      const { digger: existing } = conflict;
       this.logger?.info?.('request.existing', {
         owner: normalizedOwner,
         worldId: normalizedWorldId,
@@ -232,8 +255,17 @@ export class DiggerRentalService {
     const resolvedSeasonId = seasonId || this.config.diggerRentalSeason;
     const resolvedCodeId = codeId || this.config.diggerProxyCodeId;
 
-    const existing = await this.findExistingActiveRental(normalizedOwner, normalizedWorldId, resolvedSeasonId);
-    if (existing) {
+    const conflict = await this.findRentalConflict(normalizedOwner, normalizedWorldId, resolvedSeasonId);
+    if (conflict?.kind === 'session_locked') {
+      throw new DiggerSessionLockedError({
+        worldId: normalizedWorldId,
+        seasonId: resolvedSeasonId,
+        sessionId: conflict.sessionId,
+        status: conflict.digger.status,
+      });
+    }
+    if (conflict?.kind === 'existing') {
+      const { digger: existing } = conflict;
       this.logger?.info?.('request.existing', {
         owner: normalizedOwner,
         worldId: normalizedWorldId,
@@ -437,16 +469,30 @@ export class DiggerRentalService {
     }
   }
 
-  async findExistingActiveRental(owner, worldId, seasonId) {
+  async findRentalConflict(owner, worldId, seasonId) {
     const db = await this.store.read();
-    return db.diggers.find((digger) => (
-      digger.owner
-      && digger.worldId
-      && digger.seasonId === seasonId
-      && ['active', 'planned'].includes(digger.status)
-      && normalizeStoredAddress(digger.owner) === owner
-      && normalizeStoredAddress(digger.worldId) === worldId
-    )) || null;
+    const sessionId = currentWorldSessionId(db, worldId);
+    for (const digger of db.diggers) {
+      if (
+        !digger.owner
+        || !digger.worldId
+        || digger.seasonId !== seasonId
+        || normalizeStoredAddress(digger.owner) !== owner
+        || normalizeStoredAddress(digger.worldId) !== worldId
+      ) continue;
+
+      const diggerSessionId = sessionIdForDigger(db, digger, worldId, seasonId);
+      const isCurrentSession = sessionId === null || diggerSessionId === null || diggerSessionId === sessionId;
+
+      if (EXISTING_RENTAL_STATUSES.has(digger.status)) {
+        if (digger.status === 'planned' || isCurrentSession) return { kind: 'existing', digger };
+        continue;
+      }
+      if (FINISHED_AGENT_STATUSES.has(digger.status) && isCurrentSession) {
+        return { kind: 'session_locked', digger, sessionId };
+      }
+    }
+    return null;
   }
 
   async findPendingRentalRequest(owner, worldId, seasonId) {
@@ -612,6 +658,41 @@ function normalizeStoredAddress(address) {
   } catch {
     return null;
   }
+}
+
+function currentWorldSessionId(db, worldId) {
+  const world = db.worlds.find((item) => (
+    normalizeStoredAddress(item.programId) === worldId
+    || normalizeStoredAddress(item.id) === worldId
+    || normalizeStoredAddress(item.worldId) === worldId
+  ));
+  return normalizeSessionId(world?.sessionId ?? world?.session?.id);
+}
+
+function sessionIdForDigger(db, digger, worldId, seasonId) {
+  const direct = normalizeSessionId(digger.sessionId);
+  if (direct !== null) return direct;
+
+  const actorId = String(digger.actorId || actorIdFromProgramId(digger.programId) || '').toLowerCase();
+  if (!actorId) return null;
+  const stats = db.agentStats
+    .filter((item) => (
+      item.seasonId === seasonId
+      && normalizeStoredAddress(item.worldId) === worldId
+      && String(item.ownerActor || '').toLowerCase() === actorId
+    ))
+    .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0];
+  return normalizeSessionId(stats?.sessionId);
+}
+
+function actorIdFromProgramId(programId) {
+  const address = normalizeStoredAddress(programId);
+  return address ? `0x${'00'.repeat(12)}${address.slice(2)}` : null;
+}
+
+function normalizeSessionId(value) {
+  if (value === null || value === undefined || value === '') return null;
+  return String(value);
 }
 
 function selectRentableDiggers(db, diggerProgramIds, seasonId) {

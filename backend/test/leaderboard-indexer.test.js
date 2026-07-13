@@ -79,6 +79,45 @@ test('world snapshot reconciles banked totals when injected event is missing', a
   assert.equal(rows[0].score, 25 * 6 + 2 * 30 + 150);
 });
 
+test('world snapshots preserve dead and exited digger statuses', async () => {
+  const store = new MemoryStore({
+    worlds: [{ id: WORLD_ID, programId: WORLD_ID, seasonId: 'season-1' }],
+  });
+  const projector = new IndexerProjector({ store, config: CONFIG });
+
+  await projector.applySnapshots([{
+    kind: 'world',
+    programId: WORLD_ID,
+    capturedAt: '2026-06-11T00:00:05.000Z',
+    session: ['1', '42', 1, '7'],
+    agents: [
+      { owner: OWNER, state: [2], inventory: [] },
+      { owner: OWNER_2, state: [3], inventory: [] },
+      { owner: '0x0000000000000000000000001111111111111111111111111111111111111111', state: [4], inventory: [] },
+    ],
+  }]);
+
+  let db = await store.read();
+  assert.equal(db.diggers.find((digger) => digger.actorId === OWNER).status, 'active');
+  assert.equal(db.diggers.find((digger) => digger.actorId === OWNER_2).status, 'dead');
+  const exited = db.diggers.find((digger) => digger.actorId?.endsWith('1111111111111111111111111111111111111111'));
+  assert.equal(exited.status, 'exited');
+
+  const deadProgramId = db.diggers.find((digger) => digger.actorId === OWNER_2).programId;
+  await projector.applySnapshots([{
+    kind: 'proxy',
+    programId: deadProgramId,
+    capturedAt: '2026-06-11T00:00:06.000Z',
+    owner: OWNER_2,
+    world: `0x${'00'.repeat(12)}${WORLD_ID.slice(2)}`,
+    status: ['1', '1'],
+    lastMessageId: OWNER_2,
+  }]);
+
+  db = await store.read();
+  assert.equal(db.diggers.find((digger) => digger.programId === deadProgramId).status, 'dead');
+});
+
 test('world snapshot updates public world session status and agent count', async () => {
   const store = new MemoryStore({
     worlds: [{

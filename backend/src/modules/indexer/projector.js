@@ -126,10 +126,11 @@ function applyWorldSnapshot(db, snapshot, config) {
     const ownerActor = actorKey(agent.owner);
     const state = agent.state || [];
     const inventory = agent.inventory || [];
-    const diggerStatus = state[0] === 2 ? 'dead' : state[0] === 3 ? 'exited' : 'active';
+    const diggerStatus = diggerStatusFromAgentState(state[0]);
     const digger = upsertDiggerFromActor(db, ownerActor, {
       seasonId,
       worldId,
+      sessionId,
       status: diggerStatus,
       targetExecBalance: config.diggerDailyExecTarget.toString(),
       updatedAt: snapshot.capturedAt,
@@ -181,7 +182,7 @@ function applyProxySnapshot(db, snapshot, config) {
     worldActor: snapshot.world,
     worldId: actorToEvmAddress(snapshot.world) || snapshot.world,
     seasonId: digger.seasonId || config.diggerRentalSeason,
-    status: 'active',
+    status: digger.status || 'active',
     proxyStatus: {
       actionSeq: snapshot.status?.[0] || '0',
       lastAction: snapshot.status?.[1] || '0',
@@ -228,6 +229,7 @@ function applyWorldEvent(db, event, config) {
   const digger = upsertDiggerFromActor(db, ownerActor, {
     seasonId,
     worldId,
+    sessionId,
     status: event.event === 'AgentDied' ? 'dead' : 'active',
     targetExecBalance: config.diggerDailyExecTarget.toString(),
     updatedAt: event.timestamp,
@@ -318,21 +320,28 @@ function applyWorldRegistration(world, ownerActor, sessionId, timestamp) {
 
 function applyWorldAdminEvent(_db, event, world, config) {
   if (!world) return;
+  const sessionId = toStringNumber(event.args[0]);
   switch (event.event) {
     case 'MapGenerated':
       world.status = 'map_ready';
       world.chain = { ...(world.chain || {}), generatedAt: event.timestamp };
       world.seed = String(event.args[1] ?? world.seed ?? '');
+      world.sessionId = sessionId;
+      world.session = { ...(world.session || {}), id: sessionId, seed: world.seed, status: 0, actionSeq: '0' };
       world.agents = 0;
       world.owners = [];
       applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'waiting_agents' });
       break;
     case 'SessionStarted':
       world.status = 'active';
+      world.sessionId = sessionId;
+      world.session = { ...(world.session || {}), id: sessionId, status: 1 };
       applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'active' });
       break;
     case 'SessionFinished':
       world.status = 'finished';
+      world.sessionId = sessionId;
+      world.session = { ...(world.session || {}), id: sessionId, status: 2 };
       applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'finished' });
       break;
     default:
@@ -364,6 +373,12 @@ function worldStatusFromSession(status, fallback) {
   if (status === 1) return 'active';
   if (status === 2) return 'finished';
   return fallback || 'waiting_agents';
+}
+
+function diggerStatusFromAgentState(status) {
+  if (Number(status) === 3) return 'dead';
+  if (Number(status) === 4) return 'exited';
+  return 'active';
 }
 
 function applyProxyEvent(db, event) {

@@ -5,9 +5,7 @@ import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
 import { CHAIN, chainReady, discoveryBaseUrl, discoveryUrl, setNetwork } from '../chain/config.js';
 import { readWorldAgentSummaries } from '../chain/worldEventListener.js';
-import { backendEnabled, fetchDiggers } from '../backend/api.js';
-import { connectWallet as connectBrowserWallet, getWalletState, shortAddress, startWalletDiscovery, subscribeWallet } from '../chain/wallet.js';
-import { isProgramId, seasonLabelFor, shortProgramId, worldLabelFor } from '../chain/worldIdentity.js';
+import { seasonLabelFor, shortProgramId, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack, navigateTo } from '../router.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
@@ -144,20 +142,13 @@ export default class LobbyScene extends Phaser.Scene {
 
   create() {
     this.cleanupDOM();
-    startWalletDiscovery();
     this.tab = 'current'; // current | past
     this.loadingWorlds = CHAIN.enabled;
     this.worlds = { current: [], past: [] };
     this.agentCountPollTimer = null;
-    this.walletUnsubscribe = null;
-    this.myDiggerRequest = (this.myDiggerRequest || 0) + 1;
-    this.myDiggerState = { wallet: getWalletState(), diggers: [], loading: false, error: '' };
     const W = this.scale.width, H = this.scale.height;
     this.add.graphics().fillStyle(0x20140a, 1).fillRect(0, 0, W, H);
     this.buildDOM();
-    if (CHAIN.enabled && backendEnabled()) {
-      this.walletUnsubscribe = subscribeWallet((wallet) => this.onWalletChanged(wallet));
-    }
     this.refreshWorlds();
     this.agentCountPollTimer = window.setInterval(() => this.refreshLiveAgentCounts(), 10_000);
     this.scale.on('resize', this.onResize, this);
@@ -204,7 +195,6 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     if (CHAIN.enabled) root.appendChild(this.makeToggle());
-    if (CHAIN.enabled && backendEnabled()) root.appendChild(this.makeMyDiggersPanel());
 
     const grid = document.createElement('div');
     grid.id = 'arena-grid';
@@ -215,129 +205,6 @@ export default class LobbyScene extends Phaser.Scene {
     document.body.appendChild(root);
     this.lobbyEl = root;
     this.renderGrid();
-  }
-
-  makeMyDiggersPanel() {
-    const panel = document.createElement('section');
-    panel.id = 'arena-my-diggers';
-    panel.style.cssText = `display:flex;flex-wrap:wrap;align-items:center;gap:12px;max-width:1120px;margin:18px auto 0;
-      padding:12px 0;border-top:2px solid #5a463a;border-bottom:2px solid #5a463a;
-      font-family:'Courier New',monospace;box-sizing:border-box`;
-    this.myDiggersEl = panel;
-    this.renderMyDiggers();
-    return panel;
-  }
-
-  onWalletChanged(wallet) {
-    const request = ++this.myDiggerRequest;
-    this.myDiggerState = { wallet, diggers: [], loading: Boolean(wallet.connected), error: '' };
-    this.renderMyDiggers();
-    if (!wallet.connected || !backendEnabled()) return;
-
-    fetchDiggers({ owner: wallet.account, status: 'active' })
-      .then((diggers) => {
-        if (request !== this.myDiggerRequest) return;
-        this.myDiggerState = { wallet, diggers, loading: false, error: '' };
-        this.renderMyDiggers();
-      })
-      .catch((error) => {
-        if (request !== this.myDiggerRequest) return;
-        this.myDiggerState = { wallet, diggers: [], loading: false, error: error?.message || 'Could not load diggers.' };
-        this.renderMyDiggers();
-      });
-  }
-
-  renderMyDiggers() {
-    const panel = this.myDiggersEl;
-    if (!panel) return;
-    panel.replaceChildren();
-    const { wallet, diggers, loading, error } = this.myDiggerState || {};
-
-    const heading = document.createElement('div');
-    heading.textContent = 'MY DIGGERS';
-    heading.style.cssText = 'font-size:14px;font-weight:bold;letter-spacing:1px;color:#ffdd55;white-space:nowrap';
-    panel.appendChild(heading);
-
-    if (!wallet?.connected) {
-      const connect = wireBtn(document.createElement('button'));
-      connect.textContent = 'CONNECT WALLET';
-      connect.style.cssText = btnCss('#5fd0e6') + 'font-size:12px;padding:7px 10px';
-      connect.onclick = () => this.connectMyWallet();
-      panel.appendChild(connect);
-      return;
-    }
-
-    const account = document.createElement('div');
-    account.textContent = shortAddress(wallet.account);
-    account.title = wallet.account;
-    account.style.cssText = 'font-size:12px;color:#cdd3da;white-space:nowrap';
-    panel.appendChild(account);
-
-    const content = document.createElement('div');
-    content.style.cssText = 'display:flex;flex:1;flex-wrap:wrap;align-items:center;gap:8px;min-width:0';
-    if (loading) {
-      content.textContent = 'loading...';
-      content.style.color = '#cdd3da';
-    } else if (error) {
-      content.textContent = error;
-      content.style.color = '#ff9898';
-    } else if (!diggers?.length) {
-      content.textContent = 'no active diggers';
-      content.style.color = '#cdd3da';
-    } else {
-      for (const digger of diggers) content.appendChild(this.makeMyDiggerRow(digger));
-    }
-    panel.appendChild(content);
-  }
-
-  makeMyDiggerRow(digger) {
-    const world = this.findWorldByProgram(digger.worldProgramId || digger.worldId);
-    const worldProgramId = digger.worldProgramId || world?.programId || digger.worldId;
-    const label = digger.worldLabel || worldLabelFor(world || digger);
-    const season = seasonLabelFor(digger.seasonId || world?.seasonId);
-    const session = digger.worldSessionId ?? world?.sessionId;
-    const row = document.createElement('div');
-    row.style.cssText = `display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%;padding:5px 7px;
-      border:2px solid #000;background:#302015;color:#fff;font-size:12px`;
-
-    const identity = document.createElement('span');
-    identity.textContent = `${digger.agentName || 'Digger'} - ${label}`;
-    identity.style.cssText = 'font-weight:bold;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-    row.appendChild(identity);
-
-    const meta = document.createElement('span');
-    meta.textContent = [season, session == null ? null : `Session ${session}`].filter(Boolean).join(' - ');
-    meta.style.cssText = 'color:#cdd3da;white-space:nowrap';
-    row.appendChild(meta);
-
-    if (isProgramId(worldProgramId)) {
-      const view = wireBtn(document.createElement('button'));
-      view.textContent = 'VIEW WORLD';
-      view.title = `Open ${label} (${worldProgramId})`;
-      view.style.cssText = btnCss('#7CFFB0') + 'font-size:11px;padding:5px 7px;margin-left:auto';
-      view.onclick = () => this.watchChain(worldProgramId);
-      row.appendChild(view);
-    }
-    return row;
-  }
-
-  findWorldByProgram(programId) {
-    const key = String(programId || '').toLowerCase();
-    return [...(this.worlds?.current || []), ...(this.worlds?.past || [])]
-      .find((world) => String(world.programId || '').toLowerCase() === key) || null;
-  }
-
-  async connectMyWallet() {
-    try {
-      await connectBrowserWallet();
-    } catch (error) {
-      this.myDiggerState = {
-        ...this.myDiggerState,
-        loading: false,
-        error: error?.message || 'Wallet connection failed.',
-      };
-      this.renderMyDiggers();
-    }
   }
 
   // CURRENT / PAST segmented toggle in the lobby's chunky retro style: thick
@@ -480,7 +347,6 @@ export default class LobbyScene extends Phaser.Scene {
     this.loadingWorlds = false;
     this.worlds.current = uniqueWorlds((worlds.current || []).filter((world) => world.programId));
     this.worlds.past = uniqueWorlds((worlds.past || []).filter((world) => world.programId));
-    this.renderMyDiggers();
     this.renderGrid();
   }
 
@@ -642,9 +508,6 @@ export default class LobbyScene extends Phaser.Scene {
   cleanupScene() {
     if (this.agentCountPollTimer) window.clearInterval(this.agentCountPollTimer);
     this.agentCountPollTimer = null;
-    this.myDiggerRequest += 1;
-    this.walletUnsubscribe?.();
-    this.walletUnsubscribe = null;
     this.cleanupDOM();
   }
 }

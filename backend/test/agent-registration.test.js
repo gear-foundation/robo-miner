@@ -119,12 +119,6 @@ test('a dead digger blocks only the current session of its own world', async () 
 
 test('digger registry lists my active digger by normalized owner/world filters', async () => {
   const store = new MemoryStore({
-    worlds: [{
-      id: 'w008',
-      worldId: 'w008',
-      programId: WORLD,
-      sessionId: 8,
-    }],
     diggers: [
       {
         id: '0x1111111111111111111111111111111111111111',
@@ -157,11 +151,6 @@ test('digger registry lists my active digger by normalized owner/world filters',
 
   assert.equal(diggers.length, 1);
   assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');
-  assert.equal(diggers[0].worldProgramId, WORLD);
-  assert.equal(diggers[0].worldCode, 'W008');
-  assert.equal(diggers[0].worldLabel, 'World W008');
-  assert.equal(diggers[0].worldNumber, 8);
-  assert.equal(diggers[0].worldSessionId, 8);
 });
 
 test('digger registry ignores legacy world labels while filtering by current world', async () => {

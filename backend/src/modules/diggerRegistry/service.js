@@ -1,5 +1,4 @@
 import { generateAgentName, withAgentName } from '../agentNames.js';
-import { worldIdentity } from '../worldRegistry/identity.js';
 
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/i;
 
@@ -67,33 +66,14 @@ export class DiggerRegistryService {
     const db = await this.store.read();
     const normalizedOwner = owner ? normalizeAddress(owner) : null;
     const normalizedWorldId = worldId ? normalizeAddress(worldId) : null;
-    const worldsByProgram = new Map(
-      db.worlds
-        .filter((world) => normalizeStoredAddress(world.programId))
-        .map((world) => [normalizeStoredAddress(world.programId), world]),
-    );
     return db.diggers
       .filter((digger) => !seasonId || digger.seasonId === seasonId)
       .filter((digger) => !normalizedWorldId || normalizeStoredAddress(digger.worldId) === normalizedWorldId)
       .filter((digger) => !normalizedOwner || normalizeStoredAddress(digger.owner) === normalizedOwner)
       .filter((digger) => !status || digger.status === status)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-      .map((digger) => withWorldIdentity(digger, worldsByProgram));
+      .map(withAgentName);
   }
-}
-
-function withWorldIdentity(digger, worldsByProgram) {
-  const worldProgramId = normalizeStoredAddress(digger.worldId);
-  const world = worldProgramId ? worldsByProgram.get(worldProgramId) : null;
-  const identity = world ? worldIdentity(world) : null;
-  return withAgentName({
-    ...digger,
-    worldProgramId: world?.programId || worldProgramId || null,
-    worldCode: identity?.worldCode || null,
-    worldLabel: identity?.worldLabel || null,
-    worldNumber: identity?.worldNumber ?? null,
-    worldSessionId: world?.sessionId ?? null,
-  });
 }
 
 export function normalizeAddress(address) {

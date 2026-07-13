@@ -161,28 +161,24 @@ export ROBO_MINER_VARA_RPC="${ROBO_MINER_VARA_RPC:-wss://validator-1-eth.vara.ne
 export ROBO_MINER_ROUTER="${ROBO_MINER_ROUTER:-0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6}"
 ```
 
-If `PASSPHRASE` is not already available, ask the user for it and keep it only
-in local runtime state:
-
-```bash
-if [ -z "${PASSPHRASE:-}" ]; then
-  read -rsp "Vara.eth wallet passphrase: " PASSPHRASE
-  export PASSPHRASE
-  printf "\n"
-fi
-```
-
-Create or load a persistent Vara.eth wallet:
+Create or load a persistent Vara.eth wallet before the action runner starts:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet list
-vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE"
+vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT"
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE" >/dev/null
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" >/dev/null
 ```
 
 If the wallet already exists, `create` may fail with an exists-style error; in
 that case continue with `show`.
+
+Creating without `--passphrase` writes the wallet's local `0600`
+`~/.vara-wallet/.passphrase` file, which `robo_miner_action` resolves through
+its named-wallet session. If this is an existing externally encrypted wallet,
+provision its secret into `~/.vara-wallet/passphrases/<wallet>.passphrase` with
+mode `0600` before the agent starts. Do not place a passphrase in `.env`, logs,
+or a `vara-wallet` command line.
 
 ```bash
 ownerAddress=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
@@ -466,7 +462,6 @@ vara-wallet \
   --chain vara-eth \
   --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$diggerProgramId" Digger/SetWorld \
   --args "[\"$newWorldActorId\"]" \
@@ -781,7 +776,6 @@ needed:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$resVmtProgramId" Vmt/Approve \
   --args "[\"$redeemActorId\"]" \
@@ -794,7 +788,6 @@ Then redeem:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/Redeem \
   --args "[$scrst,$bcrst,$hcrst]" \
@@ -807,7 +800,6 @@ Use cancel/confirm only for a redeem id returned by the redeem contract:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/CancelRedeem \
   --args "[$redeemId]" \
@@ -816,7 +808,6 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
   --json \
   call "$redeemProgramId" Redeem/ConfirmRedeem \
   --args "[$redeemId]" \

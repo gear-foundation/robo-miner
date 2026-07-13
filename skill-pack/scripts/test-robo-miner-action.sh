@@ -38,7 +38,7 @@ setup() {
   export VARA_WALLET_BIN="$FIXTURE"
   export VARA_ETH_NETWORK=hoodi
   export VARA_WALLET_ACCOUNT=action-agent
-  export PASSPHRASE=very-secret-passphrase
+  unset PASSPHRASE VARA_PASSPHRASE
   export ROBO_MINER_DIGGER_PROGRAM_ID=0x1111111111111111111111111111111111111111
   export ROBO_MINER_WORLD_ID=0x2222222222222222222222222222222222222222
   export ROBO_MINER_DIGGER_PROXY_IDL="$ROOT/../assets/idl/digger_proxy.idl"
@@ -83,9 +83,6 @@ assert_log_contains '"idl":'
 assert_log_excludes '--via eth'
 assert_log_excludes '--passphrase'
 assert_eq "$(action_count)" 1
-if grep -F -- "$PASSPHRASE" <<<"$submitted" >/dev/null; then
-  fail 'passphrase leaked to stdout'
-fi
 teardown
 
 setup

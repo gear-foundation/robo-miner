@@ -11,7 +11,6 @@ Keep these values in local runtime state:
 ```text
 VARA_ETH_NETWORK    = Vara.eth network name: mainnet
 VARA_WALLET_ACCOUNT = local vara-wallet account name
-PASSPHRASE          = local secret used to unlock the Vara.eth keystore
 ownerAddress        = EVM address from vara-eth:wallet show, 20 bytes
 ownerActorId        = 0x + 12 zero bytes + ownerAddress without 0x
 ```
@@ -47,20 +46,21 @@ Use `mainnet` for Robo Miner production.
 
 ## Passphrase Handling
 
-If `PASSPHRASE` is missing, ask the user for it and keep it in the current shell
-environment:
+The action runner never receives a passphrase argument. A new `vara-wallet`
+Vara.eth wallet created without `--passphrase` automatically creates the local
+`~/.vara-wallet/.passphrase` file with mode `0600`; later named-wallet calls,
+including `vara-eth:session`, resolve it automatically.
 
-```bash
-if [ -z "${PASSPHRASE:-}" ]; then
-  read -rsp "Vara.eth wallet passphrase: " PASSPHRASE
-  export PASSPHRASE
-  printf "\n"
-fi
-```
+For an existing keystore that was encrypted with a separately supplied secret,
+provision that secret out of band in the secure per-wallet file
+`~/.vara-wallet/passphrases/<wallet>.passphrase` (or the global
+`~/.vara-wallet/.passphrase`) before starting the agent. Keep the containing
+directory private and each passphrase file mode `0600`.
 
-Never print the passphrase, commit it, paste it into logs, or store it in a
-tracked repository file. For long-running local sessions, use a secret store,
-runtime vault, CI secret, or a local env file that is already ignored by git.
+Never print the passphrase, commit it, paste it into logs, put it in the agent
+environment template, or forward it on a `vara-wallet` command line. A secret
+manager or provisioning process may write the local passphrase file before the
+runner starts.
 
 If a command fails with `WRONG_PASSPHRASE`, stop and ask the user for the
 correct local wallet passphrase. Do not try secrets from unrelated wallets.
@@ -77,13 +77,13 @@ export VARA_WALLET_ACCOUNT="${VARA_WALLET_ACCOUNT:-robo-miner-agent}"
 Create a new wallet once:
 
 ```bash
-vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT" --passphrase "$PASSPHRASE"
+vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT"
 ```
 
 Or import an existing wallet once:
 
 ```bash
-vara-wallet vara-eth:wallet import "$VARA_WALLET_ACCOUNT" --private-key 0x... --passphrase "$PASSPHRASE"
+vara-wallet vara-eth:wallet import "$VARA_WALLET_ACCOUNT" --private-key 0x...
 ```
 
 Do not run both `create` and `import` for the same account unless the operator
@@ -97,7 +97,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" >/dev/null
+  >/dev/null
 ```
 
 `vara-eth:wallet keys` can print the private key if stdout is not redirected.
@@ -154,7 +154,7 @@ Vara.eth keystore:
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" >/dev/null
+  >/dev/null
 ```
 
 If that command fails with `ERR_REQUIRE_ESM`, use a modern Node 22 runtime for
@@ -201,8 +201,8 @@ passphrase file, so the passphrase is not forwarded as a command argument:
 robo_miner_action Digger/MoveAgent '[2]'
 ```
 
-Every state-changing Robo Miner Sails call still uses the wallet account,
-passphrase, local IDL, and Vara.eth injected path. The helper expands to:
+Every state-changing Robo Miner Sails call still uses the wallet account, local
+IDL, and Vara.eth injected path. The helper expands to:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
@@ -269,11 +269,12 @@ hard-coded resource-to-WVARA rates.
 
 ## Minimum Wallet Checklist
 
-- `vara-wallet --version` is v0.20.4 or newer.
+- `vara-wallet --version` is v0.20.5 or newer.
 - `VARA_ETH_NETWORK` is `mainnet`.
 - `vara-eth:wallet show "$VARA_WALLET_ACCOUNT"` returns the expected EVM
   address.
-- The passphrase check succeeds with output redirected to `/dev/null`.
+- The passphrase-file-based key check succeeds with output redirected to
+  `/dev/null`.
 - `ownerActorId` is derived from `ownerAddress`.
 - Signed DiggerProxy writes use `robo_miner_action`, which delegates to the
   named-wallet `vara-eth:session` injected-submission path.

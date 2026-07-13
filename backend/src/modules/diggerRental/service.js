@@ -442,10 +442,10 @@ export class DiggerRentalService {
     return db.diggers.find((digger) => (
       digger.owner
       && digger.worldId
-      && normalizeAddress(digger.owner) === owner
-      && normalizeAddress(digger.worldId) === worldId
       && digger.seasonId === seasonId
       && ['active', 'planned'].includes(digger.status)
+      && normalizeStoredAddress(digger.owner) === owner
+      && normalizeStoredAddress(digger.worldId) === worldId
     )) || null;
   }
 
@@ -454,10 +454,10 @@ export class DiggerRentalService {
     return db.rentalRequests.find((request) => (
       request.owner
       && request.worldId
-      && normalizeAddress(request.owner) === owner
-      && normalizeAddress(request.worldId) === worldId
       && request.seasonId === seasonId
       && ['pending', 'running'].includes(request.status)
+      && normalizeStoredAddress(request.owner) === owner
+      && normalizeStoredAddress(request.worldId) === worldId
     )) || null;
   }
 
@@ -604,6 +604,14 @@ export function normalizeAddress(address) {
   const value = String(address || '').trim();
   if (!ADDRESS_RE.test(value)) throw new Error(`Invalid EVM address: ${address}`);
   return `0x${value.slice(2).toLowerCase()}`;
+}
+
+function normalizeStoredAddress(address) {
+  try {
+    return normalizeAddress(address);
+  } catch {
+    return null;
+  }
 }
 
 function selectRentableDiggers(db, diggerProgramIds, seasonId) {

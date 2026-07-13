@@ -47,6 +47,40 @@ test('digger rental request stores owner to active digger and returns existing o
   assert.equal(db.diggers[0].status, 'planned');
 });
 
+test('legacy world labels do not block new digger rentals', async () => {
+  const store = new MemoryStore({
+    diggers: [{
+      id: '0x1111111111111111111111111111111111111111',
+      programId: '0x1111111111111111111111111111111111111111',
+      owner: OWNER,
+      seasonId: 'season-1',
+      worldId: 'w011',
+      status: 'exited',
+    }],
+  });
+  const rental = new DiggerRentalService({
+    store,
+    chain: null,
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const request = await rental.requestDigger({
+    owner: OWNER,
+    worldId: WORLD,
+    seasonId: 'season-2',
+    dryRun: true,
+  });
+  const queued = await rental.enqueueDiggerRequest({
+    owner: OWNER,
+    worldId: WORLD,
+    seasonId: 'season-3',
+  });
+
+  assert.equal(request.status, 'dry-run');
+  assert.equal(queued.status, 'pending');
+});
+
 test('digger registry lists my active digger by normalized owner/world filters', async () => {
   const store = new MemoryStore({
     diggers: [
@@ -78,6 +112,35 @@ test('digger registry lists my active digger by normalized owner/world filters',
     seasonId: 'season-1',
     status: 'active',
   });
+
+  assert.equal(diggers.length, 1);
+  assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');
+});
+
+test('digger registry ignores legacy world labels while filtering by current world', async () => {
+  const store = new MemoryStore({
+    diggers: [
+      {
+        id: '0x1111111111111111111111111111111111111111',
+        programId: '0x1111111111111111111111111111111111111111',
+        owner: OWNER,
+        seasonId: 'season-1',
+        worldId: 'w011',
+        status: 'exited',
+      },
+      {
+        id: '0x2222222222222222222222222222222222222222',
+        programId: '0x2222222222222222222222222222222222222222',
+        owner: OWNER,
+        seasonId: 'season-1',
+        worldId: WORLD,
+        status: 'active',
+      },
+    ],
+  });
+  const registry = new DiggerRegistryService({ store, config: CONFIG });
+
+  const diggers = await registry.list({ owner: OWNER, worldId: WORLD });
 
   assert.equal(diggers.length, 1);
   assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');

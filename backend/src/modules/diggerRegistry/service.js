@@ -21,11 +21,11 @@ export class DiggerRegistryService {
       const existing = db.diggers.find((digger) => normalizeAddress(digger.programId) === normalizedProgramId);
       const ownerDuplicate = normalizedOwner && normalizedWorldId
         ? db.diggers.find((digger) => (
-          normalizeNullableAddress(digger.owner) === normalizedOwner
-          && normalizeNullableAddress(digger.worldId) === normalizedWorldId
-          && digger.seasonId === resolvedSeasonId
+          digger.seasonId === resolvedSeasonId
           && ['active', 'planned'].includes(digger.status)
-          && normalizeAddress(digger.programId) !== normalizedProgramId
+          && normalizeStoredAddress(digger.owner) === normalizedOwner
+          && normalizeStoredAddress(digger.worldId) === normalizedWorldId
+          && normalizeStoredAddress(digger.programId) !== normalizedProgramId
         ))
         : null;
       if (ownerDuplicate) {
@@ -68,8 +68,8 @@ export class DiggerRegistryService {
     const normalizedWorldId = worldId ? normalizeAddress(worldId) : null;
     return db.diggers
       .filter((digger) => !seasonId || digger.seasonId === seasonId)
-      .filter((digger) => !normalizedWorldId || normalizeNullableAddress(digger.worldId) === normalizedWorldId)
-      .filter((digger) => !normalizedOwner || normalizeNullableAddress(digger.owner) === normalizedOwner)
+      .filter((digger) => !normalizedWorldId || normalizeStoredAddress(digger.worldId) === normalizedWorldId)
+      .filter((digger) => !normalizedOwner || normalizeStoredAddress(digger.owner) === normalizedOwner)
       .filter((digger) => !status || digger.status === status)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
       .map(withAgentName);
@@ -82,7 +82,11 @@ export function normalizeAddress(address) {
   return `0x${value.slice(2).toLowerCase()}`;
 }
 
-function normalizeNullableAddress(address) {
+function normalizeStoredAddress(address) {
   if (!address) return null;
-  return normalizeAddress(address);
+  try {
+    return normalizeAddress(address);
+  } catch {
+    return null;
+  }
 }

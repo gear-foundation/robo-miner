@@ -17,7 +17,6 @@
     "deploy-proxy": "tsx scripts/deploy-proxy.ts",
     "deploy-proxy:dry-run": "tsx scripts/deploy-proxy.ts --dry-run",
     "proxy-fleet": "tsx scripts/proxy-fleet.ts",
-    "proxy-fleet:fast": "tsx scripts/proxy-fleet.ts --no-deploy --steps 20 --session-checkpoint 5",
     "fleet-route": "tsx scripts/fleet-route.ts",
     "mint-resources": "tsx scripts/mint-resources.ts",
     "play-agent": "tsx scripts/play-agent.ts",

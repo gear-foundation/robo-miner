@@ -118,23 +118,13 @@ function worldStatusMeta(info = {}) {
 
 function agentCountMeta(info) {
   const max = Number(info.maxAgents ?? info.targetAgents ?? 10);
-  const registered = Number(info.agents);
-  const active = Number(info.activeAgents);
-  const exited = Number(info.exitedAgents);
-  const dead = Number(info.deadAgents);
-  if (!Number.isFinite(registered)) {
+  const active = Number(info.activeAgents ?? info.agents);
+  if (!Number.isFinite(active)) {
     const maxLabel = Number.isFinite(max) ? max : 10;
     return { detail: `agents unknown · ${maxLabel} max` };
   }
-  const cap = Number.isFinite(max) ? max : Math.max(registered, 10);
-  if (!Number.isFinite(active)) return { detail: `${registered}/${cap} agents registered` };
-  const inactive = [
-    Number.isFinite(exited) && exited > 0 ? `${exited} exited` : '',
-    Number.isFinite(dead) && dead > 0 ? `${dead} dead` : '',
-  ].filter(Boolean);
-  return {
-    detail: `${active} active · ${registered}/${cap} registered${inactive.length ? ` · ${inactive.join(', ')}` : ''}`,
-  };
+  const cap = Number.isFinite(max) ? max : Math.max(active, 10);
+  return { detail: `${active}/${cap} active agents` };
 }
 
 export default class LobbyScene extends Phaser.Scene {
@@ -292,10 +282,8 @@ export default class LobbyScene extends Phaser.Scene {
       for (const world of records) {
         const summary = summaries.get(String(world.programId).toLowerCase());
         if (!summary) continue;
-        world.agents = summary.registered;
+        world.agents = summary.active;
         world.activeAgents = summary.active;
-        world.exitedAgents = summary.exited;
-        world.deadAgents = summary.dead;
       }
     } catch (error) {
       console.warn('[discovery] failed to refresh on-chain agent counts', error);
@@ -308,15 +296,11 @@ export default class LobbyScene extends Phaser.Scene {
     const before = worlds.map((world) => JSON.stringify([
       world.agents,
       world.activeAgents,
-      world.exitedAgents,
-      world.deadAgents,
     ]));
     await this.hydrateLiveAgentCounts(worlds);
     if (before.some((summary, index) => summary !== JSON.stringify([
       worlds[index].agents,
       worlds[index].activeAgents,
-      worlds[index].exitedAgents,
-      worlds[index].deadAgents,
     ]))) this.renderGrid();
   }
 

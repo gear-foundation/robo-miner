@@ -1559,12 +1559,14 @@ export default class SpectatorScene extends GameScene {
     if (!this.statsEl) return;
     const ms = this.rt.s.miners;
     const alive = ms.filter((m) => m.alive).length;
+    const registered = ms.length;
+    const exited = ms.filter((m) => m.exited).length;
+    const dead = ms.filter((m) => m.status === 3).length;
     const maxAgents = Number(this.worldMeta?.maxAgents || this.mode.miners || ms.length || 10);
-    const currentAgents = Number(this.worldMeta?.agents ?? ms.length);
     const status = normalizeWorldStatus(this.worldMeta?.status, this.rt);
     const countLabel = status === 'active'
-      ? `${alive}/${maxAgents}`
-      : `${currentAgents}/${maxAgents}`;
+      ? `${alive} active · ${registered}/${maxAgents} registered${exited ? ` · ${exited} exited` : ''}${dead ? ` · ${dead} dead` : ''}`
+      : `${registered}/${maxAgents} registered`;
     const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;

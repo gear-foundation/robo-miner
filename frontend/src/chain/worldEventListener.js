@@ -4,6 +4,7 @@ import { decodeWorldEvent, worldActions, worldQueries } from './world.js';
 const SUBSCRIBE_METHOD = 'program_subscribeBestState';
 const UNSUBSCRIBE_METHOD = 'program_unsubscribeBestState';
 const RECONNECT_MS = 1500;
+const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 
 function bytesToHex(bytes) {
   if (!bytes) return '';
@@ -109,6 +110,52 @@ export async function connectWorldProgram({ programId, idlUrl, config = CHAIN })
     queries: worldQueries(program),
     actions: worldActions(program),
   };
+}
+
+// Arena cards need the contract's current participant state. Discovery is still
+// useful for world metadata, but its indexed `agents` field can lag behind new
+// registrations. One read-only API connection serves the entire card grid.
+export async function readWorldAgentSummaries({ programIds = [], idlUrl, config = CHAIN }) {
+  const ids = [...new Set(programIds
+    .map((programId) => String(programId || '').trim().toLowerCase())
+    .filter(Boolean))];
+  if (ids.length === 0) return new Map();
+
+  const connection = await connectWorldProgram({ programId: ids[0], idlUrl, config });
+  try {
+    const worldQueries = connection.program.services.World.queries;
+    const agentsPayload = connection.queries.agents();
+    const results = await Promise.allSettled(ids.map(async (programId) => {
+      const reply = await connection.api.call.program.calculateReplyForHandle(
+        READ_SOURCE,
+        programId,
+        agentsPayload,
+      );
+      const owners = worldQueries.Agents.decodeResult(reply.payload);
+      const states = await Promise.allSettled(owners.map(async (owner) => {
+        const stateReply = await connection.api.call.program.calculateReplyForHandle(
+          READ_SOURCE,
+          programId,
+          connection.queries.agentOf(owner),
+        );
+        return Number(worldQueries.AgentOf.decodeResult(stateReply.payload)[0]);
+      }));
+      const values = states
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value);
+      return [programId, {
+        registered: owners.length,
+        active: values.filter((status) => status === 1 || status === 2).length,
+        dead: values.filter((status) => status === 3).length,
+        exited: values.filter((status) => status === 4).length,
+      }];
+    }));
+    return new Map(results
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value));
+  } finally {
+    await connection.api?.provider?.disconnect?.();
+  }
 }
 
 export function createWorldEventListener(options) {

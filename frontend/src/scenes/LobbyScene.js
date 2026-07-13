@@ -4,6 +4,7 @@ import { generateWorld } from '../world.js';
 import { roomThumbnail } from '../engine/preview.js';
 import { btnCss, wireBtn, paintThumb, hashStr } from './arenaUI.js';
 import { CHAIN, chainReady, discoveryBaseUrl, discoveryUrl, setNetwork } from '../chain/config.js';
+import { readWorldAgentSummaries } from '../chain/worldEventListener.js';
 import { navigateBack, navigateTo } from '../router.js';
 
 // Agent Arena lobby: a gallery of agent game modes. Each card shows a live
@@ -117,13 +118,23 @@ function worldStatusMeta(info = {}) {
 
 function agentCountMeta(info) {
   const max = Number(info.maxAgents ?? info.targetAgents ?? 10);
-  const agents = Number(info.agents);
-  if (!Number.isFinite(agents)) {
+  const registered = Number(info.agents);
+  const active = Number(info.activeAgents);
+  const exited = Number(info.exitedAgents);
+  const dead = Number(info.deadAgents);
+  if (!Number.isFinite(registered)) {
     const maxLabel = Number.isFinite(max) ? max : 10;
     return { detail: `agents unknown · ${maxLabel} max` };
   }
-  const cap = Number.isFinite(max) ? max : Math.max(agents, 10);
-  return { detail: `${agents}/${cap} agents registered` };
+  const cap = Number.isFinite(max) ? max : Math.max(registered, 10);
+  if (!Number.isFinite(active)) return { detail: `${registered}/${cap} agents registered` };
+  const inactive = [
+    Number.isFinite(exited) && exited > 0 ? `${exited} exited` : '',
+    Number.isFinite(dead) && dead > 0 ? `${dead} dead` : '',
+  ].filter(Boolean);
+  return {
+    detail: `${active} active · ${registered}/${cap} registered${inactive.length ? ` · ${inactive.join(', ')}` : ''}`,
+  };
 }
 
 export default class LobbyScene extends Phaser.Scene {
@@ -138,13 +149,15 @@ export default class LobbyScene extends Phaser.Scene {
     this.tab = 'current'; // current | past
     this.loadingWorlds = CHAIN.enabled;
     this.worlds = { current: [], past: [] };
+    this.agentCountPollTimer = null;
     const W = this.scale.width, H = this.scale.height;
     this.add.graphics().fillStyle(0x20140a, 1).fillRect(0, 0, W, H);
     this.buildDOM();
     this.refreshWorlds();
+    this.agentCountPollTimer = window.setInterval(() => this.refreshLiveAgentCounts(), 10_000);
     this.scale.on('resize', this.onResize, this);
-    this.events.once('shutdown', () => this.destroyDOM());
-    this.events.once('destroy', () => this.destroyDOM());
+    this.events.once('shutdown', () => this.cleanupScene());
+    this.events.once('destroy', () => this.cleanupScene());
   }
 
   onResize() { this.scene.restart(); }
@@ -257,6 +270,7 @@ export default class LobbyScene extends Phaser.Scene {
     if (base) {
       try {
         const worlds = await this.fetchDiscoveryWorlds(base);
+        await this.hydrateLiveAgentCounts(worlds.current);
         this.applyWorlds(worlds);
         return;
       } catch (error) {
@@ -265,6 +279,45 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     this.applyWorlds({ current: configuredFallbackWorlds(), past: [] });
+  }
+
+  async hydrateLiveAgentCounts(worlds = []) {
+    const records = worlds.filter((world) => world?.programId);
+    if (!records.length || !CHAIN.enabled) return;
+    try {
+      const summaries = await readWorldAgentSummaries({
+        programIds: records.map((world) => world.programId),
+        idlUrl: new URL('../chain/world.idl', import.meta.url),
+      });
+      for (const world of records) {
+        const summary = summaries.get(String(world.programId).toLowerCase());
+        if (!summary) continue;
+        world.agents = summary.registered;
+        world.activeAgents = summary.active;
+        world.exitedAgents = summary.exited;
+        world.deadAgents = summary.dead;
+      }
+    } catch (error) {
+      console.warn('[discovery] failed to refresh on-chain agent counts', error);
+    }
+  }
+
+  async refreshLiveAgentCounts() {
+    const worlds = this.worlds.current || [];
+    if (!worlds.length) return;
+    const before = worlds.map((world) => JSON.stringify([
+      world.agents,
+      world.activeAgents,
+      world.exitedAgents,
+      world.deadAgents,
+    ]));
+    await this.hydrateLiveAgentCounts(worlds);
+    if (before.some((summary, index) => summary !== JSON.stringify([
+      worlds[index].agents,
+      worlds[index].activeAgents,
+      worlds[index].exitedAgents,
+      worlds[index].deadAgents,
+    ]))) this.renderGrid();
   }
 
   async fetchDiscoveryWorlds(base) {
@@ -440,5 +493,9 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   cleanupDOM() { document.getElementById('arena-lobby')?.remove(); }
-  destroyDOM() { this.cleanupDOM(); }
+  cleanupScene() {
+    if (this.agentCountPollTimer) window.clearInterval(this.agentCountPollTimer);
+    this.agentCountPollTimer = null;
+    this.cleanupDOM();
+  }
 }

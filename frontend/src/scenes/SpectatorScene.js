@@ -10,6 +10,7 @@ import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
 import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
+import { worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
@@ -1382,6 +1383,8 @@ export default class SpectatorScene extends GameScene {
     title.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px';
     title.textContent = this.mode.label;
     bar.appendChild(title);
+    this.worldTitleEl = title;
+    this.updateWorldTitle();
 
     const stats = document.createElement('div');
     stats.id = 'spec-stats';
@@ -1579,6 +1582,15 @@ export default class SpectatorScene extends GameScene {
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
   }
 
+  updateWorldTitle() {
+    if (!this.worldTitleEl) return;
+    const label = worldLabelFor(this.worldMeta || {});
+    this.worldTitleEl.textContent = label === 'World' ? this.mode.label : label;
+    this.worldTitleEl.title = this.specProgramId
+      ? `${this.worldTitleEl.textContent} - ${this.specProgramId}`
+      : this.worldTitleEl.textContent;
+  }
+
   async refreshWorldMeta() {
     if (this.specArchiveId && this.rt?.archive) {
       this.worldMeta = {
@@ -1587,6 +1599,7 @@ export default class SpectatorScene extends GameScene {
         maxAgents: this.rt.archive.capAgents || this.rt.archive.maxAgents || this.mode.miners,
         endsAt: null,
       };
+      this.updateWorldTitle();
       this.updateHUD();
       return;
     }
@@ -1600,6 +1613,7 @@ export default class SpectatorScene extends GameScene {
       if (found) {
         this.worldMeta = found;
         this.rt?.syncSessionMeta?.(found);
+        this.updateWorldTitle();
         this.updateHUD();
       }
     } catch {

@@ -58,6 +58,9 @@ test('world registry manifest becomes agent match discovery feed', () => {
   assert.deepEqual(discovery.matches[0], {
     id: 'w001',
     worldId: 'w001',
+    worldNumber: 1,
+    worldCode: 'W001',
+    worldLabel: 'World W001',
     sessionKey: 'w001-s3',
     programId: '0x1111111111111111111111111111111111111111',
     status: 'open',
@@ -82,6 +85,8 @@ test('world registry manifest becomes agent match discovery feed', () => {
     archiveUrl: null,
   });
   assert.equal(discovery.matches[1].id, 'w002');
+  assert.equal(discovery.matches[1].worldCode, 'W002');
+  assert.equal(discovery.matches[1].worldLabel, 'World W002');
   assert.equal(discovery.matches[1].status, 'active');
   assert.equal(discovery.matches[1].joinable, true);
   assert.equal(discovery.matches[1].canRegister, true);

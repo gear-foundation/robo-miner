@@ -11,6 +11,7 @@
 // World.Register(owner) while status=open/active → wait for active → play.
 
 import http from 'node:http';
+import { worldIdentity } from '../../worldRegistry/identity.js';
 
 const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
@@ -18,6 +19,7 @@ const JOINABLE_STATUSES = new Set(['open', 'active']);
 
 export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
   const sessionRecord = (w) => {
+    const identity = worldIdentity(w);
     const status = publicStatus(w.status);
     const agents = w.agents ?? 0;
     const maxAgents = w.capAgents ?? 0;
@@ -26,7 +28,7 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     const archiveId = status === 'archived' ? sessionKey : (w.archiveId || null);
     return {
       id: status === 'archived' ? sessionKey : w.id,
-      worldId: w.id,
+      ...identity,
       sessionKey,
       programId: w.programId,
       status, // open | active | archived
@@ -60,7 +62,7 @@ export function createDiscoveryServer({ factory, env = {}, cfg, archives = null,
     gasless: true, // the match's executable balance pays — your EOA needs no funds
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (registration is open or in-game late join is available, slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true; retain match.worldLabel for display and match.programId for chain calls',
       'Send an injected World.Register(owner) to that match.programId',
       'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { worldIdentity } from './identity.js';
 
 const ACTIVE_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
 const PAST_STATUSES = new Set(['finished', 'archived']);
@@ -157,9 +158,10 @@ export function pickCurrentSeason(seasons, now = () => new Date()) {
 }
 
 function normalizeWorld(world, seasonId, syncedAt) {
+  const identity = worldIdentity(world);
   return {
     id: world.id,
-    worldId: world.worldId || world.id,
+    ...identity,
     seasonId,
     status: world.status,
     deployMode: world.deployMode || 'dry-run',
@@ -192,9 +194,10 @@ function normalizeWorld(world, seasonId, syncedAt) {
 }
 
 function publicWorld(world) {
+  const identity = worldIdentity(world);
   return {
     id: world.id,
-    worldId: world.worldId || world.id,
+    ...identity,
     seasonId: world.seasonId,
     status: world.status,
     deployMode: world.deployMode,

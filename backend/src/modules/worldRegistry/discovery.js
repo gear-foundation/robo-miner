@@ -1,3 +1,5 @@
+import { worldIdentity } from './identity.js';
+
 const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-foot)';
 
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
@@ -18,6 +20,7 @@ export function discoveryFromManifest(manifest, config, now = () => new Date()) 
 }
 
 export function sessionRecord(world, config) {
+  const identity = worldIdentity(world);
   const minAgents = numberOr(world.minAgents, config?.factoryLobbyMin ?? 1);
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
   const agents = numberOr(world.agents, 0);
@@ -26,7 +29,7 @@ export function sessionRecord(world, config) {
   const sessionId = world.sessionId ?? world.session ?? null;
   return {
     id: world.id,
-    worldId: world.worldId || world.id,
+    ...identity,
     sessionKey: world.archiveId || `${world.id}-s${sessionId ?? world.seed ?? 0}`,
     programId: world.programId,
     status,
@@ -61,7 +64,7 @@ export function registerInfo(config) {
     gasless: true,
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true (registration is open or in-game late join is available, slotsFree > 0)',
+      'GET /matches and pick a match where joinable=true; retain match.worldLabel for display and match.programId for chain calls',
       'Send an injected World.Register(owner) to that match.programId',
       'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
       'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',

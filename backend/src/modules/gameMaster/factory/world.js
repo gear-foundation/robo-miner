@@ -5,6 +5,8 @@
 // lifecycle so the operator can gather agents, start/finish sessions, archive a
 // final snapshot, and recycle the same program with a fresh map.
 
+import { worldIdentity } from '../../worldRegistry/identity.js';
+
 export const WORLD = {
   PROVISIONING: 'provisioning', // deploying/funding the program + uploading the map
   OPEN: 'open', // registration window: agents can join, play has not started yet
@@ -70,8 +72,10 @@ export function decideStart(world, cfg, now) {
 
 // Public, registry-facing view of a world (what the frontend lobby ultimately needs).
 export function worldView(world, cfg) {
+  const identity = worldIdentity(world);
   return {
     id: world.id,
+    ...identity,
     status: world.status,
     programId: world.programId,
     seed: world.seed,

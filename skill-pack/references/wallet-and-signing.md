@@ -201,19 +201,6 @@ passphrase file, so the passphrase is not forwarded as a command argument:
 robo_miner_action Digger/MoveAgent '[2]'
 ```
 
-Every state-changing Robo Miner Sails call still uses the wallet account, local
-IDL, and Vara.eth injected path. The helper expands to:
-
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  call "$programId" Service/Method \
-  --args '[]' \
-  --idl "$IDL_PATH" \
-  --via injected
-```
-
 Read-only calls do not need `--account`, `--passphrase`, or `--via injected`.
 
 ## Balance and Fuel Diagnostics

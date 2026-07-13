@@ -253,13 +253,6 @@ robo_miner_action() {
     robo_miner_action_error INVALID_MODE 'ROBO_MINER_ACTION_MODE must be submitted or reply'
     return 1
   }
-  if [[ "$mode" == 'submitted' ]]; then
-    case "${ROBO_MINER_SESSION_MODE:-on}" in
-      on) robo_miner_session_start || return 1 ;;
-      off) ;;
-      *) robo_miner_action_error INVALID_SESSION_MODE 'ROBO_MINER_SESSION_MODE must be on or off'; return 1 ;;
-    esac
-  fi
   [[ "$timeout_ms" =~ ^[0-9]+$ && "$delay_ms" =~ ^[0-9]+$ && "$max_delay_ms" =~ ^[0-9]+$ ]] || {
     robo_miner_action_error INVALID_TIMEOUT 'confirmation timing values must be non-negative integers'
     return 1
@@ -275,6 +268,15 @@ robo_miner_action() {
       robo_miner_action_error INVALID_WORLD 'Digger/SetWorld requires one 32-byte ActorId argument'
       return 1
     }
+  fi
+  if [[ "$mode" == 'submitted' ]]; then
+    case "${ROBO_MINER_SESSION_MODE:-on}" in
+      on) robo_miner_session_start || return 1 ;;
+      off) ;;
+      *) robo_miner_action_error INVALID_SESSION_MODE 'ROBO_MINER_SESSION_MODE must be on or off'; return 1 ;;
+    esac
+  fi
+  if [[ "$method" == 'Digger/SetWorld' ]]; then
     pre_json="$(robo_miner_proxy_world)" || {
       robo_miner_action_error PRECONDITION_FAILED 'could not read Digger.World before submission'
       return 1

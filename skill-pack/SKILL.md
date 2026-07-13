@@ -110,11 +110,9 @@ new CLI process per query or write. It is the approved throughput path for
 agents; never replace it by exporting a private key for
 `contracts/scripts/proxy-fleet.ts`.
 
-Each raw request is `{id, program, method, args, idl?}`. Queries return decoded
-Sails results; functions are submitted on the injected rail and return stable
-`txHash` and `messageId`. The helper performs this transport work but the agent
-must still prove every function from fresh world state before sending a
-dependent action.
+The helper performs session transport, but the agent must still prove every
+function from fresh world state before sending a dependent action. See
+`references/wallet-and-signing.md` for the session protocol and credentials.
 
 ## Core Loop
 

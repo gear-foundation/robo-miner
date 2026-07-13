@@ -37,11 +37,10 @@ with a read-only query.
 For a long-lived agent process, `vara-wallet >= 0.20.5` provides
 `vara-eth:session`: it keeps the encrypted named-wallet signer and Vara.eth
 connection in one process. `robo_miner_action` uses it by default for both its
-preflight/confirmation reads and submitted functions. Send raw NDJSON
-`{id,program,method,args,idl?}` records only when implementing another approved
-agent adapter. Retain the same sequence/state confirmation rule before any
-dependent action. This is the only approved persistent agent path. Do not
-extract a private key to use the contract operator scripts.
+preflight/confirmation reads and submitted functions. Retain the same
+sequence/state confirmation rule before any dependent action. This is the only
+approved persistent agent path. Do not extract a private key to use the
+contract operator scripts. See `wallet-and-signing.md` for session details.
 
 DiggerProxy is a forwarding proxy. A successful proxy transaction, returned
 message id, `Success`, or `Forwarded` event proves only that the proxy accepted

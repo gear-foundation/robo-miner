@@ -146,6 +146,12 @@ if robo_miner_action Digger/MoveAgent '{"direction":2}' >/dev/null 2>&1; then
   fail 'non-array JSON arguments unexpectedly succeeded'
 fi
 assert_eq "$(wc -l < "$FAKE_WALLET_LOG" | tr -d ' ')" 0
+if invalid_world="$(robo_miner_action Digger/SetWorld '["0x1"]' 2>/dev/null)"; then
+  fail 'invalid world unexpectedly succeeded'
+fi
+assert_eq "$(jq -r '.error.code' <<<"$invalid_world")" INVALID_WORLD
+assert_log_contains '--version'
+assert_log_excludes 'vara-eth:session'
 
 setup
 export FAKE_WALLET_VERSION=0.20.3

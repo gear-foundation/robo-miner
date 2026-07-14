@@ -82,3 +82,31 @@ test('best-state reader subscribes to worlds discovered after startup', async ()
   assert.deepEqual(started, [second]);
   assert.equal(reader.programs.length, 2);
 });
+
+test('best-state reader reconnects when the subscription RPC returns an error', () => {
+  const programId = '0x0000000000000000000000000000000000000001';
+  const warnings = [];
+  let closes = 0;
+  const reader = new BestStateEventReader({
+    config: { rootDir: process.cwd(), varaEthWs: 'ws://example.invalid' },
+    programs: [{ programType: 'world', programId }],
+    logger: { warn: (event, fields) => warnings.push({ event, fields }) },
+  });
+  const ws = { close: () => { closes += 1; } };
+  const sub = {
+    key: `world:${programId}`,
+    program: reader.programs[0],
+    subscriptionId: null,
+    ws,
+  };
+  reader.subscriptions.set(sub.key, sub);
+
+  reader.handleMessage(sub, JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    error: { code: -32000, message: 'temporary subscription failure' },
+  }));
+
+  assert.equal(closes, 1);
+  assert.equal(warnings[0].event, 'best_state.rpc.error');
+});

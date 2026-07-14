@@ -172,6 +172,9 @@ export class BestStateEventReader {
         programId: sub.program.programId,
         error: rpcErrorMessage(message.error),
       });
+      if (!sub.subscriptionId && sub.ws === this.subscriptions.get(sub.key)?.ws) {
+        sub.ws?.close?.();
+      }
       return;
     }
 

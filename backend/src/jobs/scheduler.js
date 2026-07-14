@@ -12,6 +12,7 @@ import { IndexerProjector } from '../modules/indexer/projector.js';
 import { SnapshotReader } from '../modules/indexer/snapshotReader.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
+import { BestStateWatcherSupervisor } from './bestStateWatcherSupervisor.js';
 
 const logger = createLogger('scheduler');
 
@@ -49,9 +50,14 @@ async function main() {
 
   const config = loadConfig();
   const store = createStore(config);
-  let bestStateReader = null;
+  const bestStateSupervisor = new BestStateWatcherSupervisor({
+    startReader: () => startBestStateWatcher({ store, config }),
+    logger,
+    retryBaseMs: Math.max(1_000, config.wsReconnectDelay || 5_000),
+    retryMaxMs: 60_000,
+  });
   const jobs = {
-    registry: () => runRegistry({ store, config, bestStateReader }),
+    registry: () => runRegistry({ store, config, bestStateSupervisor }),
     snapshot: () => runSnapshot({ store, config }),
     lifecycle: () => runLifecycle({ store, config }),
     worldBalance: () => runWorldBalance({ store, config }),
@@ -81,11 +87,7 @@ async function main() {
   });
 
   await runNamed('registry', jobs.registry);
-  try {
-    bestStateReader = await startBestStateWatcher({ store, config });
-  } catch (error) {
-    logger.error('best_state.start.failed', errorFields(error));
-  }
+  await bestStateSupervisor.ensureStarted();
 
   schedule('registry', jobs.registry, config.schedulerRegistryMs, false);
   schedule('snapshot', jobs.snapshot, config.schedulerSnapshotMs);
@@ -115,10 +117,10 @@ async function runNamed(name, fn) {
   }
 }
 
-async function runRegistry({ store, config, bestStateReader = null }) {
+async function runRegistry({ store, config, bestStateSupervisor = null }) {
   const manifest = await new WorldRegistryService({ store, config }).syncFromGameMaster();
-  const addedPrograms = bestStateReader
-    ? await bestStateReader.addPrograms((await buildIndexerConfig({ store, config })).indexerPrograms)
+  const addedPrograms = bestStateSupervisor
+    ? await bestStateSupervisor.addPrograms((await buildIndexerConfig({ store, config })).indexerPrograms)
     : [];
   return {
     season: manifest.season?.id,

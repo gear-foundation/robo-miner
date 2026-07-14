@@ -151,6 +151,8 @@ test('digger registry lists my active digger by normalized owner/world filters',
 
   assert.equal(diggers.length, 1);
   assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');
+  assert.equal(Object.hasOwn(diggers[0], 'executableBalance'), false);
+  assert.equal(diggers[0].lastObservedExecutableBalance, null);
 });
 
 test('digger registry ignores legacy world labels while filtering by current world', async () => {
@@ -180,6 +182,29 @@ test('digger registry ignores legacy world labels while filtering by current wor
 
   assert.equal(diggers.length, 1);
   assert.equal(diggers[0].programId, '0x2222222222222222222222222222222222222222');
+});
+
+test('digger registry labels an observed executable balance with its observation time', async () => {
+  const programId = '0x3333333333333333333333333333333333333333';
+  const observedAt = '2026-06-11T01:00:00.000Z';
+  const store = new MemoryStore({
+    diggers: [{
+      id: programId,
+      programId,
+      owner: OWNER,
+      seasonId: 'season-1',
+      worldId: WORLD,
+      status: 'active',
+      executableBalance: '108085080827500',
+      executableBalanceObservedAt: observedAt,
+    }],
+  });
+  const registry = new DiggerRegistryService({ store, config: CONFIG });
+  const [digger] = await registry.list({ owner: OWNER });
+
+  assert.equal(digger.lastObservedExecutableBalance, '108085080827500');
+  assert.equal(digger.lastObservedExecutableBalanceAt, observedAt);
+  assert.equal(Object.hasOwn(digger, 'executableBalance'), false);
 });
 
 test('queued live digger rental returns pending and completes to active digger', async () => {
@@ -214,6 +239,11 @@ test('queued live digger rental returns pending and completes to active digger',
           topUpTxHash: '0xtopup',
           initTxHash: '0xinit',
         };
+      },
+      async verifyDiggerReady({ programId, owner, worldId }) {
+        assert.equal(programId, '0x4444444444444444444444444444444444444444');
+        assert.equal(owner, OWNER);
+        assert.equal(worldId, WORLD);
       },
     },
     config: CONFIG,
@@ -256,6 +286,7 @@ test('queued live digger rentals can be processed as a scheduler batch', async (
           initTxHash: '0xinit',
         };
       },
+      async verifyDiggerReady() {},
     },
     config: CONFIG,
     now: fixedNow,
@@ -271,6 +302,69 @@ test('queued live digger rentals can be processed as a scheduler batch', async (
   const db = await store.read();
   assert.equal(db.rentalRequests[0].status, 'confirmed');
   assert.equal(db.diggers[0].status, 'active');
+});
+
+test('queued rental stays unpublished when proxy readiness verification fails', async () => {
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({ store, chain: null, config: CONFIG, now: fixedNow });
+  const queued = await rental.enqueueDiggerRequest({ owner: OWNER, worldId: WORLD });
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() {
+        return { programId: '0x6666666666666666666666666666666666666666' };
+      },
+      async verifyDiggerReady() {
+        throw new Error('proxy owner/world query timed out');
+      },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  await assert.rejects(() => processor.processQueuedDiggerRequest(queued.requestId), /timed out/);
+  const db = await store.read();
+  assert.equal(db.rentalRequests[0].status, 'failed');
+  assert.equal(db.rentalRequests[0].programId, null);
+  assert.equal(db.diggers.length, 0);
+});
+
+test('daily grant idempotency still records the freshly observed executable balance', async () => {
+  const programId = '0x7777777777777777777777777777777777777777';
+  const observed = 108085080827500n;
+  const store = new MemoryStore({
+    worlds: [{ id: WORLD, status: 'active' }],
+    diggers: [{
+      id: programId,
+      programId,
+      owner: OWNER,
+      seasonId: 'season-1',
+      worldId: WORLD,
+      status: 'active',
+      targetExecBalance: CONFIG.diggerDailyExecTarget.toString(),
+      executableBalance: CONFIG.diggerDailyExecTarget.toString(),
+    }],
+    fuelGrants: [{
+      id: 'today',
+      idempotencyKey: `season-1:${programId}:2026-06-11:daily-rental`,
+      status: 'confirmed',
+    }],
+  });
+  const rental = new DiggerRentalService({
+    store,
+    chain: {
+      async readExecutableBalance() { return observed; },
+      async topUpExecutableBalance() { throw new Error('must not top up twice in one day'); },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const results = await rental.runDailyTopUp({ dryRun: false });
+  assert.equal(results[0].reason, 'already_granted_today');
+  const db = await store.read();
+  assert.equal(db.diggers[0].executableBalance, observed.toString());
+  assert.equal(db.diggers[0].executableBalanceObservedAt, fixedNow().toISOString());
 });
 
 function fixedNow() {

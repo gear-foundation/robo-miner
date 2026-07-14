@@ -46,10 +46,12 @@ Use `mainnet` for Robo Miner production.
 
 ## Passphrase Handling
 
-The action runner never receives a passphrase argument. A new `vara-wallet`
-Vara.eth wallet created without `--passphrase` automatically creates the local
-`~/.vara-wallet/.passphrase` file with mode `0600`; later named-wallet calls,
-including `vara-eth:session`, resolve it automatically.
+The action runner never receives a passphrase argument. `vara-wallet` v0.20.5
+requires a passphrase to create a Vara.eth wallet; provide it only through a
+one-time secure provisioning process using `--passphrase` or
+`VARA_PASSPHRASE`. After creation, store it in the local `0600` per-wallet or
+global passphrase file so later named-wallet calls, including
+`vara-eth:session`, resolve it automatically.
 
 For an existing keystore that was encrypted with a separately supplied secret,
 provision that secret out of band in the secure per-wallet file

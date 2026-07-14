@@ -19,11 +19,9 @@ Use this order when backend responses disagree with the skill:
 2. Fresh chain reads through `vara-wallet`.
 3. Backend discovery/rental projections.
 
-`/matches` may return legacy `register.steps` telling a client to send injected
-`World.Register(owner)`. Ignore those steps in this skill. They are not
-authoritative for player agents. Register only through the rented DiggerProxy
-with `robo_miner_action Digger/Register '[]'` after sourcing the reviewed
-bundled action helper.
+`/matches` instructs clients to request a rented DiggerProxy and register only
+through it with `robo_miner_action Digger/Register '[]'` after sourcing the
+reviewed bundled action helper. Never register directly with `World.Register`.
 
 ## Discovery
 

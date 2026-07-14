@@ -294,53 +294,17 @@ If `World/Config` returns fewer than 16 values, do not use the ladder exchange
 formula from this section; report the older interface and ask before assuming
 legacy rates.
 
-Send rented DiggerProxy writes through `vara-wallet` Vara.eth injected calls:
+Send rented DiggerProxy writes through the reviewed action helper. It uses the
+wallet's local `0600` passphrase file and never forwards a passphrase on an
+action command line:
 
 ```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Register \
-  --args '[]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/SetWorld \
-  --args "[\"$newWorldActorId\"]" \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/MoveAgent \
-  --args '[2]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/Drill \
-  --args '[1]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --passphrase "$PASSPHRASE" \
-  --json \
-  call "$diggerProgramId" Digger/PlaceLadder \
-  --args '[4]' \
-  --idl "$ROBO_MINER_DIGGER_PROXY_IDL" \
-  --via injected
+source "$ROBO_MINER_SKILL_ROOT/scripts/robo-miner-action.sh"
+robo_miner_action Digger/Register '[]'
+robo_miner_action Digger/SetWorld "[\"$newWorldActorId\"]"
+robo_miner_action Digger/MoveAgent '[2]'
+robo_miner_action Digger/Drill '[1]'
+robo_miner_action Digger/PlaceLadder '[4]'
 ```
 
 Supported proxy action methods:

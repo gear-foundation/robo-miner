@@ -57,7 +57,7 @@ export class WorldRegistryService {
   async getLiveWorlds() {
     await this.ensureConfiguredWorlds();
     const db = await this.store.read();
-    return db.worlds
+    return resolveLiveWorlds(db.worlds).worlds
       .filter((world) => ACTIVE_STATUSES.has(world.status))
       .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)));
   }
@@ -66,7 +66,8 @@ export class WorldRegistryService {
     await this.ensureConfiguredWorlds();
     const db = await this.store.read();
     const season = pickCurrentSeason(db.seasons, this.now) || this.makeSeason(db.worlds);
-    const worlds = [...db.worlds].sort((a, b) => String(b.startsAt).localeCompare(String(a.startsAt)));
+    const resolved = resolveLiveWorlds(db.worlds);
+    const worlds = [...resolved.worlds].sort((a, b) => String(b.startsAt).localeCompare(String(a.startsAt)));
     return {
       schemaVersion: 1,
       generatedAt: this.now().toISOString(),
@@ -74,6 +75,7 @@ export class WorldRegistryService {
       active: worlds.filter((world) => ACTIVE_STATUSES.has(world.status)).map(publicWorld),
       past: worlds.filter((world) => PAST_STATUSES.has(world.status)).map(publicWorld),
       worlds: worlds.map(publicWorld),
+      diagnostics: { worldProgramCollisions: resolved.collisions },
     };
   }
 
@@ -143,6 +145,49 @@ export class WorldRegistryService {
       updatedAt: this.now().toISOString(),
     };
   }
+}
+
+export function resolveLiveWorlds(worlds) {
+  const byProgram = new Map();
+  for (const world of worlds) {
+    if (!ACTIVE_STATUSES.has(world.status) || !world.programId) continue;
+    const key = String(world.programId).toLowerCase();
+    const group = byProgram.get(key) || [];
+    group.push(world);
+    byProgram.set(key, group);
+  }
+  const dropped = new Set();
+  const collisions = [];
+  for (const [programId, group] of byProgram) {
+    if (group.length < 2) continue;
+    const ranked = [...group].sort(compareLiveWorldFreshness);
+    const winner = ranked[0];
+    const runnerUp = ranked[1];
+    if (sameFreshness(winner, runnerUp)) {
+      for (const world of group) dropped.add(world.id);
+      collisions.push({ programId, resolution: 'omitted_tie', keptWorldId: null, droppedWorldIds: group.map((world) => world.id) });
+    } else {
+      for (const world of ranked.slice(1)) dropped.add(world.id);
+      collisions.push({ programId, resolution: 'kept_newest', keptWorldId: winner.id, droppedWorldIds: ranked.slice(1).map((world) => world.id) });
+    }
+  }
+  return { worlds: worlds.filter((world) => !dropped.has(world.id)), collisions };
+}
+
+function compareLiveWorldFreshness(left, right) {
+  return freshness(right.sourceUpdatedAt) - freshness(left.sourceUpdatedAt)
+    || freshness(right.startsAt) - freshness(left.startsAt)
+    || String(left.id).localeCompare(String(right.id));
+}
+
+function sameFreshness(left, right) {
+  return freshness(left.sourceUpdatedAt) === freshness(right.sourceUpdatedAt)
+    && freshness(left.startsAt) === freshness(right.startsAt);
+}
+
+function freshness(value) {
+  const timestamp = Date.parse(value || '');
+  return Number.isFinite(timestamp) ? timestamp : -Infinity;
 }
 
 export function pickCurrentSeason(seasons, now = () => new Date()) {

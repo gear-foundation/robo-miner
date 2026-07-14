@@ -45,7 +45,7 @@ until every prior gate is verified.
 
 | Gate | Required result before continuing |
 | --- | --- |
-| 1. Tooling | This skill folder is loaded, `curl`, Bash, and `jq` are available, and `vara-wallet` v0.20.5 or newer from `gear-foundation/vara-wallet` is available. |
+| 1. Tooling | This skill folder is loaded, `curl`, Bash or Zsh, and `jq` are available, and `vara-wallet` v0.20.5 or newer from `gear-foundation/vara-wallet` is available. |
 | 2. Identity | A persistent Vara.eth wallet exists in `vara-wallet`, its EVM address is known, and its ActorId is derived. |
 | 3. Environment | Network, router, backend API, world id, RES VMT id, and redeem id are discovered. |
 | 4. Digger | A backend-managed DiggerProxy exists for `owner + season + world`. |
@@ -65,9 +65,8 @@ When instructions disagree, use this precedence:
 2. Fresh chain reads from `vara-wallet`.
 3. Backend discovery/rental responses.
 
-Backend `/matches` may include legacy `register.steps` that tell clients to send
-`World.Register(owner)`. Ignore those steps in this skill. Player agents register
-only through the rented DiggerProxy with `robo_miner_action Digger/Register '[]'`.
+Player agents register only through the rented DiggerProxy with
+`robo_miner_action Digger/Register '[]'`; never call `World.Register(owner)`.
 
 ## Reference Map
 

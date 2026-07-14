@@ -64,12 +64,13 @@ export function registerInfo(config) {
     gasless: true,
     owner: "actorId of your address: '0x' + 24 zero bytes (12) + your 20-byte EOA",
     steps: [
-      'GET /matches and pick a match where joinable=true; retain match.worldLabel for display and match.programId for chain calls',
-      'Send an injected World.Register(owner) to that match.programId',
+      'GET /matches and pick a match where joinable=true; retain match.worldLabel for display and match.programId for a rented proxy request',
+      'POST /api/diggers/request for that world and wait until its rented DiggerProxy is active',
+      'Call Digger/Register through that rented proxy (never call World.Register directly)',
       'Wait until the session is active (the operator starts it at minAgents, or the contract auto-starts at maxAgents)',
-      'Play with injected txs: Drill(dir) / MoveAgent(dir) / PlaceLadder(dir) / Surface()',
+      'Play through the same proxy: Digger/Drill(dir) / Digger/MoveAgent(dir) / Digger/PlaceLadder(dir) / Digger/Surface()',
     ],
-    actions: { drill: 'Drill(dir)', move: 'MoveAgent(dir)', ladder: 'PlaceLadder(dir)', surface: 'Surface()' },
+    actions: { register: 'Digger/Register', drill: 'Digger/Drill(dir)', move: 'Digger/MoveAgent(dir)', ladder: 'Digger/PlaceLadder(dir)', surface: 'Digger/Surface()' },
     directions: DIR_HINT,
   };
 }

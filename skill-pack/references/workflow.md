@@ -21,10 +21,8 @@ Source-of-truth precedence:
 2. Fresh chain reads through `vara-wallet`.
 3. Backend discovery/rental projections.
 
-If `/matches` or another backend response includes `register.steps` that call
-`World.Register(owner)` directly, ignore those steps. They are legacy
-frontend/non-authoritative instructions for this skill. Player agents register
-only through the rented DiggerProxy.
+`/matches` directs player agents to request a rented DiggerProxy. Register only
+through that proxy; never call `World.Register(owner)` directly.
 
 Write path rule: source `scripts/robo-miner-action.sh` and use
 `robo_miner_action` for all DiggerProxy state-changing play-loop calls. Its
@@ -158,12 +156,17 @@ export ROBO_MINER_BACKEND_URL="${ROBO_MINER_BACKEND_URL:-https://api-digger-eth.
 export ROBO_MINER_ETH_RPC="${ROBO_MINER_ETH_RPC:-https://mainnet-reth-rpc.gear-tech.io}"
 export ROBO_MINER_VARA_RPC="${ROBO_MINER_VARA_RPC:-wss://validator-1-eth.vara.network}"
 export ROBO_MINER_ROUTER="${ROBO_MINER_ROUTER:-0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6}"
+export ETHEREUM_HTTP_RPC="${ETHEREUM_HTTP_RPC:-$ROBO_MINER_ETH_RPC}"
+export VARA_ETH_RPC="${VARA_ETH_RPC:-$ROBO_MINER_VARA_RPC}"
+export VARA_ETH_ROUTER="${VARA_ETH_ROUTER:-$ROBO_MINER_ROUTER}"
 ```
 
 Create or load a persistent Vara.eth wallet before the action runner starts:
 
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet list
+# During one-time secure provisioning only, let the secret manager inject
+# VARA_PASSPHRASE into this process; never put the secret in the command text.
 vara-wallet vara-eth:wallet create "$VARA_WALLET_ACCOUNT"
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet show "$VARA_WALLET_ACCOUNT"
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:wallet keys "$VARA_WALLET_ACCOUNT" >/dev/null
@@ -172,12 +175,13 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json vara-eth:walle
 If the wallet already exists, `create` may fail with an exists-style error; in
 that case continue with `show`.
 
-Creating without `--passphrase` writes the wallet's local `0600`
-`~/.vara-wallet/.passphrase` file, which `robo_miner_action` resolves through
-its named-wallet session. If this is an existing externally encrypted wallet,
-provision its secret into `~/.vara-wallet/passphrases/<wallet>.passphrase` with
-mode `0600` before the agent starts. Do not place a passphrase in `.env`, logs,
-or a `vara-wallet` command line.
+`vara-wallet` v0.20.5 requires a passphrase when creating a wallet. Supply it
+only during one-time secure provisioning (with `--passphrase` or
+`VARA_PASSPHRASE`), then write the same secret to
+`~/.vara-wallet/passphrases/<wallet>.passphrase` (or the global
+`~/.vara-wallet/.passphrase`) with mode `0600`. The action helper subsequently
+uses that local file; do not place the secret in `.env`, logs, or action command
+lines.
 
 ```bash
 ownerAddress=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \

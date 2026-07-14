@@ -34,6 +34,7 @@ setup() {
   export FAKE_AGENT_SEEN="$TMPDIR_TEST/agent-seen"
   export FAKE_SET_WORLD_SUBMITTED="$TMPDIR_TEST/set-world-submitted"
   export FAKE_REGISTER_SUBMITTED="$TMPDIR_TEST/register-submitted"
+  export FAKE_SESSION_FAILURE_COUNT="$TMPDIR_TEST/session-failures"
   : > "$FAKE_WALLET_LOG"
   export VARA_WALLET_BIN="$FIXTURE"
   export VARA_ETH_NETWORK=hoodi
@@ -48,6 +49,9 @@ setup() {
   export ROBO_MINER_CONFIRM_MAX_DELAY_MS=2
   unset FAKE_AGENT_MODE
   unset FAKE_REGISTER_MODE
+  unset FAKE_SESSION_TRANSIENT_FAILURES
+  unset FAKE_SESSION_STATUS
+  unset FAKE_WALLET_VERSION
   unset ROBO_MINER_WALLET_VERSION_VERIFIED
 }
 
@@ -69,6 +73,14 @@ robo_miner_world_agents >/dev/null
 assert_eq "$(grep -c 'vara-eth:session' "$FAKE_WALLET_LOG")" 1
 assert_log_contains '"method":"World/Session"'
 assert_log_contains '"method":"World/Agents"'
+teardown
+
+setup
+export FAKE_SESSION_TRANSIENT_FAILURES=2
+retried="$(robo_miner_action Digger/MoveAgent '[2]')"
+assert_eq "$(jq -r '.confirmation.status' <<<"$retried")" confirmed
+assert_eq "$(grep -c '"method":"World/Session"' "$FAKE_WALLET_LOG")" 3
+assert_eq "$(action_count)" 1
 teardown
 
 setup
@@ -159,5 +171,13 @@ if robo_miner_action Digger/MoveAgent '[2]' >/dev/null 2>&1; then
   fail 'outdated wallet unexpectedly succeeded'
 fi
 assert_log_contains '--version'
+
+if command -v zsh >/dev/null 2>&1; then
+  setup
+  zsh_output="$(HELPER="$HELPER" zsh -fc 'set -eu; source "$HELPER"; robo_miner_action Digger/MoveAgent "[2]"; robo_miner_session_stop')"
+  assert_eq "$(jq -r '.confirmation.status' <<<"$zsh_output")" confirmed
+  assert_log_contains 'vara-eth:session'
+  teardown
+fi
 
 echo 'robo-miner action helper tests passed'

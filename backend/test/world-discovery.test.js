@@ -101,6 +101,27 @@ test('world registry manifest becomes agent match discovery feed', () => {
   assert.equal(discovery.sessions[2].joinable, false);
 });
 
+test('world registry resolves duplicate live program ids and reports ties', async () => {
+  const registry = new WorldRegistryService({
+    store: new MemoryStore(),
+    config: CONFIG,
+    now: () => new Date('2026-06-15T00:00:00.000Z'),
+  });
+  await registry.syncWorldRecords([
+    { id: 'older', status: 'active', programId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', startsAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-02T00:00:00.000Z' },
+    { id: 'newer', status: 'active', programId: '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', startsAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-03T00:00:00.000Z' },
+    { id: 'tie-a', status: 'active', programId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', startsAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-03T00:00:00.000Z' },
+    { id: 'tie-b', status: 'waiting_agents', programId: '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB', startsAt: '2026-06-01T00:00:00.000Z', updatedAt: '2026-06-03T00:00:00.000Z' },
+  ]);
+  const manifest = await registry.getManifest();
+  assert.deepEqual(manifest.active.map((world) => world.id), ['newer']);
+  assert.deepEqual(manifest.worlds.map((world) => world.id), ['newer']);
+  assert.deepEqual(manifest.diagnostics.worldProgramCollisions, [
+    { programId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', resolution: 'kept_newest', keptWorldId: 'newer', droppedWorldIds: ['older'] },
+    { programId: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', resolution: 'omitted_tie', keptWorldId: null, droppedWorldIds: ['tie-a', 'tie-b'] },
+  ]);
+});
+
 test('world registry seeds configured program ids into discovery when store is empty', async () => {
   const ids = [
     '0xb0860e1262e3677a65e24f821c8b6e4e5f5cd04b',

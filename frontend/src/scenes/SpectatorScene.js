@@ -1594,9 +1594,9 @@ export default class SpectatorScene extends GameScene {
         #spec-logbtn{margin-left:0!important}
         #spec-logbtn{font-size:12px!important;padding:0!important}
         #spec-console{top:52px!important;width:min(360px,100vw)!important}
-        #spec-roster{left:8px;right:8px;top:auto;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-height:68vh;transform:translateY(calc(100% + 16px));opacity:0;pointer-events:none;transition-property:transform,opacity;transition-duration:.18s;transition-timing-function:cubic-bezier(.16,1,.3,1)}
+        #spec-roster{left:8px;right:8px;top:auto;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-height:36vh;transform:translateY(calc(100% + 16px));opacity:0;pointer-events:none;transition-property:transform,opacity;transition-duration:.18s;transition-timing-function:cubic-bezier(.16,1,.3,1)}
         #spec-roster.is-open{transform:translateY(0);opacity:1;pointer-events:auto}
-        #spec-roster-list{max-height:34vh}
+        #spec-roster-list{max-height:20vh}
       }
       @media (prefers-reduced-motion:reduce){#spec-roster,#spec-roster *{transition-duration:0ms!important}}
     `;

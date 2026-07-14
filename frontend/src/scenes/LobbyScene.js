@@ -41,6 +41,8 @@ function normalizeWorldRecord(world) {
     canRegister: world.canRegister,
     canPlay: world.canPlay,
     agents: world.agents,
+    activeAgents: world.activeAgents ?? world.agents,
+    registeredAgents: world.registeredAgents ?? world.agents,
     minAgents,
     maxAgents,
     archiveId: past ? world.archiveId : null,
@@ -292,6 +294,9 @@ export default class LobbyScene extends Phaser.Scene {
         if (!summary) continue;
         world.agents = summary.active;
         world.activeAgents = summary.active;
+        world.registeredAgents = summary.registered;
+        const maxAgents = Number(world.maxAgents ?? 10);
+        if (Number.isFinite(maxAgents)) world.slotsFree = Math.max(0, maxAgents - summary.registered);
       }
     } catch (error) {
       console.warn('[discovery] failed to refresh on-chain agent counts', error);

@@ -83,14 +83,17 @@ test('best-state listener reconnects and delivers registration plus digging even
   FakeWebSocket.instances = [];
   const events = [];
   const subscriptions = [];
-  let reconnect = null;
+  const timers = [];
   const listener = new WorldBestStateListener({
     program: programWithEvents(),
     programId: PROGRAM_ID,
     config: { varaEthWs: 'wss://example.test' },
     WebSocketCtor: FakeWebSocket,
-    setTimer: (fn) => { reconnect = fn; return 1; },
-    clearTimer: () => {},
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms, cleared: false });
+      return timers.length - 1;
+    },
+    clearTimer: (id) => { timers[id].cleared = true; },
     onEvent: (event) => events.push(event),
     onSubscribed: (state) => subscriptions.push(state),
   });
@@ -99,7 +102,7 @@ test('best-state listener reconnects and delivers registration plus digging even
   const first = FakeWebSocket.instances[0];
   first.open();
   assert.deepEqual(first.sent, [{ jsonrpc: '2.0', id: 1, method: 'program_subscribeBestState', params: [PROGRAM_ID] }]);
-  first.receive({ jsonrpc: '2.0', id: 1, result: 'subscription-1' });
+  first.receive({ jsonrpc: '2.0', id: 1, result: 5980674656729392 });
 
   const messages = [
     { id: 'registered-message', destination: ZERO, payload: 'registered' },
@@ -112,11 +115,40 @@ test('best-state listener reconnects and delivers registration plus digging even
   assert.deepEqual(subscriptions, [{ reconnected: false }]);
 
   first.close();
-  reconnect();
+  timers.find((timer) => timer.ms === 1500 && !timer.cleared).fn();
   const second = FakeWebSocket.instances[1];
   second.open();
-  second.receive({ jsonrpc: '2.0', id: 2, result: 'subscription-2' });
+  second.receive({ jsonrpc: '2.0', id: 2, result: 5980674656729393 });
   assert.deepEqual(subscriptions, [{ reconnected: false }, { reconnected: true }]);
+  listener.stop();
+});
+
+test('best-state listener reconnects when subscription acknowledgement is missing', async () => {
+  FakeWebSocket.instances = [];
+  const errors = [];
+  const timers = [];
+  const listener = new WorldBestStateListener({
+    program: programWithEvents(),
+    programId: PROGRAM_ID,
+    config: { varaEthWs: 'wss://example.test' },
+    WebSocketCtor: FakeWebSocket,
+    subscriptionAckMs: 10,
+    setTimer: (fn, ms) => {
+      timers.push({ fn, ms, cleared: false });
+      return timers.length - 1;
+    },
+    clearTimer: (id) => { timers[id].cleared = true; },
+    onError: (error) => errors.push(error.message),
+  });
+
+  await listener.start();
+  const first = FakeWebSocket.instances[0];
+  first.open();
+  timers.find((timer) => timer.ms === 10 && !timer.cleared).fn();
+
+  assert.equal(first.readyState, FakeWebSocket.CLOSED);
+  assert.match(errors[0], /acknowledgement timed out/i);
+  assert.equal(timers.some((timer) => timer.ms === 1500 && !timer.cleared), true);
   listener.stop();
 });
 

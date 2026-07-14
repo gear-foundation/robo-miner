@@ -30,7 +30,8 @@ export class WorldRegistryService {
       });
 
       for (const world of sourceWorlds) {
-        upsertById(db.worlds, normalizeWorld(world, season.id, syncedAt));
+        const existing = db.worlds.find((item) => item.id === world.id) || null;
+        upsertById(db.worlds, normalizeWorld(world, season.id, syncedAt, existing));
       }
 
       db.jobRuns.push({
@@ -202,13 +203,24 @@ export function pickCurrentSeason(seasons, now = () => new Date()) {
     }) || seasons.find((season) => season.status === 'active') || null;
 }
 
-function normalizeWorld(world, seasonId, syncedAt) {
+function normalizeWorld(world, seasonId, syncedAt, existing = null) {
   const identity = worldIdentity(world);
+  const factoryOwners = Array.isArray(world.admission?.registeredAgents)
+    ? world.admission.registeredAgents
+    : [];
+  const factoryRegisteredAgents = factoryOwners.length;
+  const preserveChainState = hasCurrentChainState(existing, world);
+  const activeAgents = preserveChainState
+    ? numberOr(existing.activeAgents, numberOr(existing.agents, 0))
+    : numberOr(world.activeAgents, 0);
+  const registeredAgents = preserveChainState
+    ? numberOr(existing.registeredAgents, Array.isArray(existing.owners) ? existing.owners.length : 0)
+    : factoryRegisteredAgents;
   return {
     id: world.id,
     ...identity,
     seasonId,
-    status: world.status,
+    status: preserveChainState ? existing.status : world.status,
     deployMode: world.deployMode || 'dry-run',
     codeId: world.codeId || null,
     programId: world.programId || null,
@@ -219,16 +231,20 @@ function normalizeWorld(world, seasonId, syncedAt) {
     endsAt: world.endsAt || null,
     sessionMs: world.sessionMs || null,
     sessionAutofinish: Boolean(world.sessionAutofinish),
-    agents: world.admission?.registeredAgents?.length || 0,
+    agents: activeAgents,
+    activeAgents,
+    registeredAgents,
     minAgents: world.admission?.minAgents || 0,
     targetAgents: world.admission?.targetAgents || 0,
-    owners: Array.isArray(world.admission?.registeredAgents) ? world.admission.registeredAgents : [],
-    sessionId: world.sessionId ?? null,
+    owners: preserveChainState ? (existing.owners || []) : factoryOwners,
+    activeOwners: preserveChainState ? (existing.activeOwners || []) : [],
+    sessionId: preserveChainState ? existing.sessionId : (world.sessionId ?? null),
     mapHash: world.map?.hash || null,
     map: world.paths?.map || null,
     snapshot: world.paths?.snapshot || null,
     events: world.paths?.events || null,
-    chain: world.chain || {},
+    chain: preserveChainState ? { ...(world.chain || {}), ...(existing.chain || {}) } : (world.chain || {}),
+    chainUpdatedAt: preserveChainState ? existing.chainUpdatedAt : null,
     finishedAt: world.finishedAt || world.chain?.finishedAt || null,
     archivedAt: world.archivedAt || null,
     archiveId: world.archiveId || null,
@@ -256,6 +272,8 @@ function publicWorld(world) {
     sessionMs: world.sessionMs,
     sessionAutofinish: Boolean(world.sessionAutofinish),
     agents: world.agents,
+    activeAgents: numberOr(world.activeAgents, numberOr(world.agents, 0)),
+    registeredAgents: numberOr(world.registeredAgents, Array.isArray(world.owners) ? world.owners.length : 0),
     minAgents: world.minAgents,
     targetAgents: world.targetAgents,
     owners: world.owners || [],
@@ -286,15 +304,19 @@ function configuredWorldRecord({ index, programId, seasonId, config, now }) {
     sessionMs: config.sessionMs || 30 * 60 * 1000,
     sessionAutofinish: Boolean(config.factorySessionAutofinish),
     agents: 0,
+    activeAgents: 0,
+    registeredAgents: 0,
     minAgents: config.factoryLobbyMin || 1,
     targetAgents: config.factoryLobbyCap || 10,
     owners: [],
+    activeOwners: [],
     sessionId: null,
     mapHash: null,
     map: null,
     snapshot: null,
     events: null,
     chain: {},
+    chainUpdatedAt: null,
     finishedAt: null,
     archivedAt: null,
     archiveId: null,
@@ -307,6 +329,23 @@ function configuredWorldRecord({ index, programId, seasonId, config, now }) {
 
 function sameProgram(left, right) {
   return String(left || '').toLowerCase() === String(right || '').toLowerCase();
+}
+
+function hasCurrentChainState(existing, source) {
+  if (!existing?.chainUpdatedAt || !sameProgram(existing.programId, source.programId)) return false;
+  const existingSessionId = sessionIdOf(existing);
+  const sourceSessionId = sessionIdOf(source);
+  return existingSessionId !== null && sourceSessionId !== null && existingSessionId === sourceSessionId;
+}
+
+function sessionIdOf(world) {
+  const value = world?.sessionId ?? world?.session?.id ?? null;
+  return value === null || value === undefined ? null : String(value);
+}
+
+function numberOr(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function upsertById(items, next) {

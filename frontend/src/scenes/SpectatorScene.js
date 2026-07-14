@@ -10,7 +10,7 @@ import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
 import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
-import { worldLabelFor } from '../chain/worldIdentity.js';
+import { worldCodeFor, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
 import {
   canFollowSpectatorAgent,
@@ -28,6 +28,11 @@ const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse a
 const CHUNK_TILES = 8;
 const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
 const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
+const AGENT_BUBBLE_MARGIN = 10;
+const AGENT_BUBBLE_HUD_CLEARANCE = 54;
+const AGENT_BUBBLE_BELOW_GAP = 12;
+const HUD_MOBILE_WIDTH = 640;
+const HUD_COMPACT_WIDTH = 1120;
 
 function sfxSources(name) {
   return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
@@ -198,6 +203,26 @@ function earnedResourceTotals(agent = {}, currentBanked = null) {
   return maxResourceTotals(agent.surfacedResources, accounted);
 }
 
+const VARA_EXECUTABLE_UNIT = 1_000_000_000_000n;
+
+function formatExecutionBalance(value) {
+  if (value === undefined || value === null || value === '') return null;
+  try {
+    const raw = BigInt(value);
+    const whole = raw / VARA_EXECUTABLE_UNIT;
+    const fraction = raw % VARA_EXECUTABLE_UNIT;
+    if (fraction === 0n) return `${whole} VARA`;
+    const decimal = fraction
+      .toString()
+      .padStart(12, '0')
+      .replace(/0+$/, '')
+      .slice(0, 3);
+    return `${whole}.${decimal} VARA`;
+  } catch {
+    return null;
+  }
+}
+
 function agentBubbleIcon(kind, color = '#333') {
   const style = 'display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:-4px;flex:0 0 18px';
   if (kind === 'status') {
@@ -211,6 +236,9 @@ function agentBubbleIcon(kind, color = '#333') {
   }
   if (kind === 'bag') {
     return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M6 6V5c0-2 6-2 6 0v1" fill="none" stroke="#3b2a18" stroke-width="1.8" stroke-linecap="round"/><path d="M3.5 6.5h11l-1 9h-9z" fill="#b9823a" stroke="#3b2a18" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 8h8M6 12h5" stroke="#e7bd70" stroke-width="1.4"/></svg></span>`;
+  }
+  if (kind === 'fuel') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M5 3h8v12H5z" fill="#6ee7a8" stroke="#234b36" stroke-width="1.5"/><path d="M7 5h4M7 9h4" stroke="#234b36" stroke-width="1.4"/><path d="M13 6h1.5v6H13" fill="none" stroke="#234b36" stroke-width="1.4" stroke-linejoin="round"/></svg></span>`;
   }
   if (kind === 'bank') {
     return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 8h12v7H3z" fill="#d6d9dd" stroke="#3a3a3a" stroke-width="1.4"/><path d="M2 8l7-5 7 5z" fill="#f0f2f4" stroke="#3a3a3a" stroke-width="1.4" stroke-linejoin="round"/><path d="M5 8v7M9 8v7M13 8v7" stroke="#8a8f96" stroke-width="1.3"/><path d="M2 15h14" stroke="#3a3a3a" stroke-width="1.6"/></svg></span>`;
@@ -1250,6 +1278,7 @@ export default class SpectatorScene extends GameScene {
     if (this.agentBubbleContentEl) {
       this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(agent, null);
     }
+    this.agentBubbleSize = null;
     this.agentBubbleEl.removeAttribute('title');
     this.agentBubbleEl.style.display = 'block';
     this.agentBubbleMiner = agent;
@@ -1271,6 +1300,7 @@ export default class SpectatorScene extends GameScene {
       if (this.agentBubbleContentEl) {
         this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
       }
+      this.agentBubbleSize = null;
       this.updateHUD();
       this.positionAgentBubble();
     } catch {
@@ -1303,6 +1333,7 @@ export default class SpectatorScene extends GameScene {
     const cargo = resourceTotal(carried);
     const bankedTotal = resourceTotal(banked);
     const address = displayAddress(agent.owner);
+    const executionBalance = formatExecutionBalance(detail?.executableBalance ?? agent.executableBalance);
     const agentName = this.agentDisplayName(agent);
     const hasReadableName = agentName && !/^0x/i.test(agentName);
     const addressLink = `<a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
@@ -1312,6 +1343,7 @@ export default class SpectatorScene extends GameScene {
         <div style="min-width:0">
           ${hasReadableName ? `<b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(agentName)}</b>` : ''}
           ${addressLink}
+          ${executionBalance ? `<div title="Current executable balance of this agent proxy" style="display:flex;align-items:center;gap:4px;margin-top:5px;font-size:11px;color:#5b4127;white-space:nowrap">${agentBubbleIcon('fuel')}balance: <b style="color:#222">${escapeHtml(executionBalance)}</b></div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#333;white-space:nowrap;padding-top:2px">
           ${agentBubbleIcon('status', status.color)}${escapeHtml(status.label)}
@@ -1340,6 +1372,7 @@ export default class SpectatorScene extends GameScene {
   hideAgentBubble() {
     if (this.agentBubbleEl) this.agentBubbleEl.style.display = 'none';
     this.agentBubbleMiner = null;
+    this.agentBubbleSize = null;
     clearTimeout(this._agentBubbleTimer);
   }
 
@@ -1350,10 +1383,45 @@ export default class SpectatorScene extends GameScene {
     const m = this.agentBubbleMiner;
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
     const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
+    const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
     const side = m.facing === 'left' ? -1 : 1;
-    this.agentBubbleEl.style.left = `${sx + side * 36}px`;
-    this.agentBubbleEl.style.top = `${sy}px`;
-    this.agentBubbleEl.style.setProperty('--tail-x', side > 0 ? '38%' : '62%');
+    const size = this.agentBubbleSize || {
+      width: this.agentBubbleEl.offsetWidth,
+      height: this.agentBubbleEl.offsetHeight,
+    };
+    this.agentBubbleSize = size;
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const halfWidth = size.width / 2;
+    const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
+    const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);
+    const left = Phaser.Math.Clamp(sx + side * 36, minLeft, maxLeft);
+    const below = sy - size.height - AGENT_BUBBLE_MARGIN < AGENT_BUBBLE_HUD_CLEARANCE;
+    const belowTop = Phaser.Math.Clamp(
+      robotBottom + AGENT_BUBBLE_BELOW_GAP,
+      AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN,
+      Math.max(AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN, viewportHeight - size.height - AGENT_BUBBLE_MARGIN),
+    );
+    const tailX = Phaser.Math.Clamp(sx - left + halfWidth, 18, Math.max(18, size.width - 18));
+
+    this.agentBubbleEl.style.left = `${left}px`;
+    this.agentBubbleEl.style.top = `${below ? belowTop : sy}px`;
+    this.agentBubbleEl.style.transform = below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
+    this.agentBubbleEl.style.setProperty('--tail-x', `${tailX}px`);
+    this.setAgentBubbleTailPlacement(below);
+  }
+
+  setAgentBubbleTailPlacement(below) {
+    const outer = this.agentBubbleOuterTail;
+    const inner = this.agentBubbleInnerTail;
+    if (!outer || !inner) return;
+    for (const [tail, size, offset, color] of [[outer, 8, 8, '#222'], [inner, 6, 5, '#fff']]) {
+      tail.style.top = below ? `-${offset}px` : '';
+      tail.style.bottom = below ? '' : `-${offset}px`;
+      tail.style.borderTop = below ? '0' : `${size}px solid ${color}`;
+      tail.style.borderBottom = below ? `${size}px solid ${color}` : '0';
+    }
   }
 
   cameraViewportChanged() {
@@ -1491,13 +1559,11 @@ export default class SpectatorScene extends GameScene {
   buildHUD() {
     const bar = document.createElement('div');
     bar.id = 'spec-hud';
-    bar.style.cssText = `position:fixed;left:0;top:0;width:100%;height:46px;z-index:20;
-      display:flex;align-items:center;gap:14px;padding:0 14px;box-sizing:border-box;
-      background:linear-gradient(#000c,#0007);font-family:'Courier New',monospace;color:#fff`;
+    bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;z-index:20;box-sizing:border-box;background:linear-gradient(#000c,#0007);font-family:\'Courier New\',monospace;color:#fff';
 
     const back = wireBtn(document.createElement('button'));
     back.textContent = '← BACK';
-    back.style.cssText = btnCss('#cdd3da') + 'font-size:14px;padding:6px 13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    back.title = 'Back to arena';
     back.onclick = () => this.goLobby();
     bar.appendChild(back);
 
@@ -1527,13 +1593,11 @@ export default class SpectatorScene extends GameScene {
 
     const stats = document.createElement('div');
     stats.id = 'spec-stats';
-    stats.style.cssText = 'margin-left:auto;font-size:14px';
     bar.appendChild(stats);
 
     const soundBtn = wireBtn(document.createElement('button'));
     soundBtn.id = 'spec-soundbtn';
     soundBtn.title = 'Sound';
-    soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;margin-left:14px;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     soundBtn.onclick = () => this.cycleSpectatorVolume();
     bar.appendChild(soundBtn);
     this.soundBtn = soundBtn;
@@ -1550,8 +1614,11 @@ export default class SpectatorScene extends GameScene {
     this.logBtn = logBtn;
 
     document.body.appendChild(bar);
+    this.hudBar = bar;
+    this.backBtn = back;
     this.statsEl = stats;
     this.buildConsole();
+    this.applyHUDLayout();
     this.buildAgentBubble();
     this.buildSpectatorRoster();
     this.updateHUD();
@@ -1590,9 +1657,9 @@ export default class SpectatorScene extends GameScene {
       .spec-dossier-actions button:active{transform:scale(.96)}
       #spec-diggers-btn{display:none}
       @media (max-width:760px){
-        #spec-hud{height:52px!important;gap:7px!important;padding:0 8px!important}
+        #spec-hud{height:52px!important;grid-template-rows:42px!important;gap:7px!important;padding:0 8px!important}
         #spec-hud>div:not(#spec-stats){display:none}
-        #spec-stats{display:none}
+        #spec-stats{display:none!important}
         #spec-diggers-btn{display:block!important}
         #spec-soundbtn,#spec-logbtn{width:40px!important;height:36px!important}
         #spec-soundbtn{margin-left:auto!important}
@@ -1745,25 +1812,28 @@ export default class SpectatorScene extends GameScene {
       font-size: 14px; padding: 9px 12px; border-radius: 9px;
       border: 2px solid #222; box-shadow: 3px 3px 0 rgba(0,0,0,0.28);
       white-space: normal; pointer-events: auto; z-index: 18;
-      display: none; min-width: 238px; max-width: 304px;
+      display: none; min-width: min(238px, calc(100vw - 20px)); max-width: calc(100vw - 20px);
+      box-sizing: border-box;
     `;
     bubble.innerHTML = `<div id="spec-agent-bubble-content"></div>
-      <div style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
+      <div data-agent-bubble-tail="outer" style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
         width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
         border-top:8px solid #222;pointer-events:none"></div>
-      <div style="position:absolute;bottom:-5px;left:var(--tail-x, 42%);transform:translateX(-50%);
+      <div data-agent-bubble-tail="inner" style="position:absolute;bottom:-5px;left:var(--tail-x, 42%);transform:translateX(-50%);
         width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
         border-top:6px solid #fff;pointer-events:none"></div>`;
     document.body.appendChild(bubble);
     this.agentBubbleEl = bubble;
     this.agentBubbleContentEl = bubble.querySelector('#spec-agent-bubble-content');
+    this.agentBubbleOuterTail = bubble.querySelector('[data-agent-bubble-tail="outer"]');
+    this.agentBubbleInnerTail = bubble.querySelector('[data-agent-bubble-tail="inner"]');
   }
 
   // Slide-out terminal that streams agent actions as if they were on-chain txs.
   buildConsole() {
     const c = document.createElement('div');
     c.id = 'spec-console';
-    c.style.cssText = `position:fixed;right:0;top:46px;bottom:0;width:360px;z-index:19;
+    c.style.cssText = `position:fixed;right:0;top:46px;bottom:0;width:min(360px,100vw);z-index:19;
       transform:translateX(100%);transition:transform .18s ease;
       background:rgba(7,11,9,.86);backdrop-filter:blur(2px);border-left:2px solid #2f6a3f;
       box-shadow:-6px 0 24px rgba(0,0,0,.4);font-family:'Courier New',monospace;
@@ -1781,6 +1851,63 @@ export default class SpectatorScene extends GameScene {
       </div>`;
     document.body.appendChild(c);
     this.consoleEl = c;
+  }
+
+  applyHUDLayout() {
+    if (!this.hudBar || !this.backBtn || !this.statsEl || !this.soundBtn || !this.logBtn) return;
+    const width = window.innerWidth;
+    const layout = width < HUD_MOBILE_WIDTH ? 'mobile' : width < HUD_COMPACT_WIDTH ? 'compact' : 'desktop';
+    this.hudLayout = layout;
+
+    if (layout === 'desktop') {
+      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:14px;padding:0 14px';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px;white-space:nowrap';
+      this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.cameraStateEl.style.display = 'block';
+      this.backBtn.textContent = '← BACK';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'font-size:14px;padding:6px 13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    } else if (layout === 'compact') {
+      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
+      this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.cameraStateEl.style.display = 'none';
+      this.backBtn.textContent = '←';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:38px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:38px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'width:54px;height:38px;padding:0;font-size:13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    } else {
+      this.hudBar.style.cssText += ';height:76px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 48px;grid-template-rows:42px 26px;align-items:center;gap:0 7px;padding:4px 8px;background:#102033;border-bottom:2px solid #000';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
+      this.statsEl.style.cssText = 'grid-column:1 / -1;grid-row:2;display:flex;align-items:center;justify-content:flex-start;gap:10px;min-width:0;width:100%;font-size:13px;white-space:nowrap';
+      this.cameraStateEl.style.display = 'none';
+      this.backBtn.textContent = '←';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:36px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:36px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'width:48px;height:36px;padding:0;font-size:12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    }
+
+    this.backBtn.style.gridColumn = '1';
+    this.backBtn.style.gridRow = '1';
+    this.diggersBtn.style.gridColumn = layout === 'mobile' ? '2' : '';
+    this.diggersBtn.style.gridRow = layout === 'mobile' ? '1' : '';
+    this.worldTitleEl.style.gridColumn = '2';
+    this.worldTitleEl.style.gridRow = '1';
+    this.cameraStateEl.style.gridColumn = '3';
+    this.cameraStateEl.style.gridRow = '1';
+    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '4';
+    this.statsEl.style.gridRow = layout === 'mobile' ? '2' : '1';
+    this.soundBtn.style.gridColumn = layout === 'desktop' ? '5' : '4';
+    this.soundBtn.style.gridRow = '1';
+    this.logBtn.style.gridColumn = layout === 'desktop' ? '6' : '5';
+    this.logBtn.style.gridRow = '1';
+    this.consoleEl.style.top = layout === 'mobile' ? '76px' : layout === 'compact' ? '52px' : '46px';
+    this.updateWorldTitle();
+    this.refreshSoundButton();
   }
 
   toggleConsole() {
@@ -1893,12 +2020,28 @@ export default class SpectatorScene extends GameScene {
       : NaN;
     const stateLabel = status === 'unknown' ? 'LIVE' : hudStateLabel(status, remainingMs);
     const banked = ms.reduce((totals, m) => addResourceTotals(totals, earnedResourceTotals(m)), { scrst: 0, bcrst: 0, hcrst: 0 });
-    const bankedTotal = resourceTotal(banked);
-    this.statsEl.innerHTML =
-      `<span style="color:#9bb0a4">${stateLabel}</span>　` +
-      `agents <b>${countLabel}</b>　` +
-      `<span title="total earned crystals">◇ <b>${bankedTotal}</b></span>` +
-      (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
+    const diamond = this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '';
+    if (this.hudLayout === 'desktop') {
+      const bankedTotal = resourceTotal(banked);
+      this.statsEl.innerHTML =
+        `<span style="color:#9bb0a4">${stateLabel}</span>　` +
+        `agents <b>${countLabel}</b>　` +
+        `<span title="total earned crystals">◇ <b>${bankedTotal}</b></span>` +
+        diamond;
+    } else if (this.hudLayout === 'compact') {
+      const fullResources = `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>`;
+      this.statsEl.innerHTML =
+        `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${statusLabel(status)}</span>　` +
+        `agents <b>${countLabel}</b>　${fullResources}${diamond}`;
+    } else {
+      const mobileStatus = status === 'active' ? 'LIVE' : statusLabel(status);
+      this.statsEl.innerHTML =
+        `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${mobileStatus}</span>` +
+        `<span title="active agents"><b>${countLabel}</b> AG</span>` +
+        `<span title="earned SCRST">S <b>${banked.scrst}</b></span>` +
+        `<span title="earned BCRST">B <b>${banked.bcrst}</b></span>` +
+        `<span title="earned HCRST">H <b>${banked.hcrst}</b>${this.rt.match.diamondFound ? ' 💎' : ''}</span>`;
+    }
     this.updateCameraState();
     this.syncSpectatorRoster();
   }
@@ -1918,10 +2061,12 @@ export default class SpectatorScene extends GameScene {
   updateWorldTitle() {
     if (!this.worldTitleEl) return;
     const label = worldLabelFor(this.worldMeta || {});
-    this.worldTitleEl.textContent = label === 'World' ? this.mode.label : label;
+    const code = worldCodeFor(this.worldMeta || {});
+    const fullLabel = label === 'World' ? this.mode.label : label;
+    this.worldTitleEl.textContent = this.hudLayout === 'desktop' ? fullLabel : (code || fullLabel);
     this.worldTitleEl.title = this.specProgramId
-      ? `${this.worldTitleEl.textContent} - ${this.specProgramId}`
-      : this.worldTitleEl.textContent;
+      ? `${fullLabel} - ${this.specProgramId}`
+      : fullLabel;
   }
 
   async refreshWorldMeta() {

@@ -7,6 +7,7 @@ import {
 } from './resourceAccounting.js';
 
 const WORLD_LIVE_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
+const ACTIVE_AGENT_STATES = new Set([1, 2]);
 
 export class IndexerProjector {
   constructor({ store, config, now = () => new Date() }) {
@@ -111,6 +112,9 @@ function applyWorldSnapshot(db, snapshot, config) {
   const owners = (snapshot.agents || [])
     .filter((agent) => !agent.error)
     .map((agent) => actorKey(agent.owner));
+  const activeOwners = (snapshot.agents || [])
+    .filter((agent) => !agent.error && ACTIVE_AGENT_STATES.has(Number(agent.state?.[0])))
+    .map((agent) => actorKey(agent.owner));
   if (world) {
     world.session = {
       id: sessionId,
@@ -121,8 +125,8 @@ function applyWorldSnapshot(db, snapshot, config) {
     world.sessionId = sessionId;
     world.seed = String(snapshot.session?.[1] || world.seed || '0');
     world.status = worldStatusFromSession(status, world.status);
-    world.owners = owners;
-    world.agents = owners.length;
+    setWorldParticipants(world, owners, activeOwners);
+    world.chainUpdatedAt = snapshot.capturedAt;
     world.updatedAt = snapshot.capturedAt;
     applySnapshotTiming(world, status, snapshot, config);
   }
@@ -254,6 +258,7 @@ function applyWorldEvent(db, event, config) {
       stats.spawnedAt = stats.spawnedAt || event.timestamp;
       stats.x = toNumber(a);
       stats.y = toNumber(b);
+      setWorldParticipantActive(world, ownerActor, true);
       break;
     case 'AgentMoved':
       stats.moves += 1;
@@ -282,6 +287,7 @@ function applyWorldEvent(db, event, config) {
     case 'AgentSurfaced':
       stats.surfaced += 1;
       applySurfaceAccounting(stats, { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) });
+      setWorldParticipantActive(world, ownerActor, true);
       break;
     case 'AgentDied':
       digger.status = 'dead';
@@ -289,11 +295,13 @@ function applyWorldEvent(db, event, config) {
       stats.x = toNumber(a);
       stats.y = toNumber(b);
       stats.death = { x: toNumber(a), y: toNumber(b), cause: toNumber(c), at: event.timestamp };
+      setWorldParticipantActive(world, ownerActor, false);
       break;
     case 'AgentExited':
       digger.status = 'exited';
       stats.status = 'exited';
       stats.exitedAt = event.timestamp;
+      setWorldParticipantActive(world, ownerActor, false);
       break;
     case 'ResourcesMinted':
       applyMintAccounting(stats, { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) });
@@ -306,6 +314,7 @@ function applyWorldEvent(db, event, config) {
   }
 
   digger.updatedAt = event.timestamp;
+  if (world) world.chainUpdatedAt = event.timestamp;
 }
 
 function applyWorldSessionEvent(world, event, sessionId, status, config) {
@@ -315,17 +324,16 @@ function applyWorldSessionEvent(world, event, sessionId, status, config) {
   world.status = status;
   applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status });
   world.updatedAt = event.timestamp;
+  world.chainUpdatedAt = event.timestamp;
 }
 
 function applyWorldRegistration(world, ownerActor, sessionId, timestamp) {
   if (!world) return;
-  const owners = new Set((world.owners || []).map(actorKey));
-  owners.add(ownerActor);
-  world.owners = [...owners];
-  world.agents = world.owners.length;
+  setWorldParticipantActive(world, ownerActor, false);
   world.sessionId = sessionId;
   if (world.status !== 'active') world.status = 'waiting_agents';
   world.updatedAt = timestamp;
+  world.chainUpdatedAt = timestamp;
 }
 
 function applyWorldAdminEvent(_db, event, world, config) {
@@ -338,8 +346,7 @@ function applyWorldAdminEvent(_db, event, world, config) {
       world.seed = String(event.args[1] ?? world.seed ?? '');
       world.sessionId = sessionId;
       world.session = { ...(world.session || {}), id: sessionId, seed: world.seed, status: 0, actionSeq: '0' };
-      world.agents = 0;
-      world.owners = [];
+      setWorldParticipants(world, [], []);
       applyWorldSessionTiming(world, { config, timestamp: event.timestamp, status: 'waiting_agents' });
       break;
     case 'SessionStarted':
@@ -358,6 +365,32 @@ function applyWorldAdminEvent(_db, event, world, config) {
       break;
   }
   world.updatedAt = event.timestamp;
+  world.chainUpdatedAt = event.timestamp;
+}
+
+function setWorldParticipants(world, owners = [], activeOwners = []) {
+  if (!world) return;
+  const registered = uniqueActors(owners);
+  const registeredSet = new Set(registered);
+  const active = uniqueActors(activeOwners).filter((owner) => registeredSet.has(owner));
+  world.owners = registered;
+  world.activeOwners = active;
+  world.registeredAgents = registered.length;
+  world.activeAgents = active.length;
+  world.agents = active.length;
+}
+
+function setWorldParticipantActive(world, ownerActor, active) {
+  if (!world || !ownerActor) return;
+  const owners = uniqueActors([...(world.owners || []), ownerActor]);
+  const activeOwners = new Set(uniqueActors(world.activeOwners || []));
+  if (active) activeOwners.add(ownerActor);
+  else activeOwners.delete(ownerActor);
+  setWorldParticipants(world, owners, [...activeOwners]);
+}
+
+function uniqueActors(owners) {
+  return [...new Set((owners || []).map(actorKey).filter(Boolean))];
 }
 
 function applySnapshotTiming(world, status, snapshot, config) {

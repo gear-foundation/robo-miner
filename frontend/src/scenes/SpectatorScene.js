@@ -1607,6 +1607,10 @@ export default class SpectatorScene extends GameScene {
       this.stopSpectatorFollow();
     };
     window.addEventListener('keydown', this._spectatorKeyHandler);
+    // On phones the roster is the spectator mode, not a secondary tool hidden
+    // behind a discovery click. The toolbar button remains available to collapse
+    // it when a viewer wants an uninterrupted map.
+    this.toggleSpectatorRoster(Boolean(window.matchMedia?.('(max-width: 760px)').matches));
     this.syncSpectatorRoster();
   }
 

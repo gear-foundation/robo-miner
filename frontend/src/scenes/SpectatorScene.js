@@ -31,6 +31,8 @@ const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
 const AGENT_BUBBLE_MARGIN = 10;
 const AGENT_BUBBLE_HUD_CLEARANCE = 54;
 const AGENT_BUBBLE_BELOW_GAP = 12;
+const AGENT_BUBBLE_TAIL_SIZE = 8;
+const AGENT_BUBBLE_ABOVE_GAP = 8;
 const HUD_MOBILE_WIDTH = 640;
 const HUD_COMPACT_WIDTH = 1120;
 
@@ -1382,7 +1384,10 @@ export default class SpectatorScene extends GameScene {
     const zoom = cam.zoom || 1;
     const m = this.agentBubbleMiner;
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
-    const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
+    const robotTop = (m.drawY * TILE - cam.scrollY) * zoom;
+    // The tail is 8 CSS px tall. Leave a visible gap above the robot instead
+    // of letting the card appear to sit on its head.
+    const sy = robotTop - AGENT_BUBBLE_TAIL_SIZE - AGENT_BUBBLE_ABOVE_GAP;
     const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,

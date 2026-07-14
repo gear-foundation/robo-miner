@@ -1168,13 +1168,22 @@ export default class SpectatorScene extends GameScene {
     if (!this.rt?.s?.miners?.length) return null;
     const cam = this.cameras.main;
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
-    return this.rt.s.miners.find((m) => {
-      if (m.exited || !canFollowSpectatorAgent(m)) return false;
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const m of this.rt.s.miners) {
+      if (m.exited || !canFollowSpectatorAgent(m)) continue;
       const cx = m.drawX * TILE + TILE / 2;
       const cy = m.drawY * TILE + TILE / 2;
-      return Math.abs(worldPoint.x - cx) <= TILE * 0.62 &&
-        Math.abs(worldPoint.y - cy) <= TILE * 0.74;
-    });
+      const dx = worldPoint.x - cx;
+      const dy = worldPoint.y - cy;
+      if (Math.abs(dx) > TILE * 0.62 || Math.abs(dy) > TILE * 0.74) continue;
+      const distance = dx * dx + dy * dy;
+      if (distance < nearestDistance) {
+        nearest = m;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
   }
 
   selectedSpectatorAgent() {
@@ -1570,6 +1579,22 @@ export default class SpectatorScene extends GameScene {
       const cx = f.x * TILE + TILE / 2, cy = f.y * TILE + TILE / 2;
       g.fillStyle(0xff7a1f, 0.25 * a); g.fillCircle(cx, cy, r);
       g.lineStyle(4, 0xffd14a, a); g.strokeCircle(cx, cy, r);
+    }
+    const selected = this.selectedSpectatorAgent();
+    if (selected && canFollowSpectatorAgent(selected)) {
+      const cx = (selected.drawX + 0.5) * TILE;
+      const cy = (selected.drawY + 0.5) * TILE;
+      const inset = TILE * 0.43;
+      const corner = TILE * 0.18;
+      g.lineStyle(3, 0xffdd55, 0.95);
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy - inset, cx - inset + corner, cy - inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy - inset, cx - inset, cy - inset + corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy - inset, cx + inset - corner, cy - inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy - inset, cx + inset, cy - inset + corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy + inset, cx - inset + corner, cy + inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy + inset, cx - inset, cy + inset - corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy + inset, cx + inset - corner, cy + inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy + inset, cx + inset, cy + inset - corner));
     }
     if (this.selectionPulse) {
       const agent = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === this.selectionPulse.key);

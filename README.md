@@ -14,7 +14,7 @@ Current product surfaces:
 - single-player mining game;
 - campaign landing page;
 - main menu with one shared wallet connector;
-- Agent Arena lobby and spectator;
+- Agent Arena lobby and spectator, including a collapsible roster for following live diggers;
 - leaderboard page;
 - RES -> VARA redeem page;
 - free wVARA social-fuel page;

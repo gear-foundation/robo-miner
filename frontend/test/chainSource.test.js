@@ -55,3 +55,38 @@ test('chain source keeps realtime animation when the stream is current', async (
 
   assert.equal(source.snapshotReason, undefined);
 });
+
+test('chain source includes the selected agent proxy executable balance in inspection details', async () => {
+  const source = Object.create(ChainSource.prototype);
+  source._program = {
+    services: {
+      World: {
+        queries: {
+          AgentOf: { decodeResult: () => [1, 3, 4, 1, 40, 0, 0, 0, 0, 0, 0, 10, 8] },
+          InventoryOf: { decodeResult: () => [0, 0, 0, 0, 0, 0] },
+          OwnerOf: { decodeResult: () => OWNER },
+        },
+      },
+    },
+  };
+  source._q = {
+    agentOf: () => 'agent-state',
+    inventoryOf: () => 'inventory',
+    ownerOf: () => 'owner',
+  };
+  source._call = async (payload) => payload;
+  source._readExecutableBalance = async () => ({
+    programId: '0x1111111111111111111111111111111111111111',
+    executableBalance: 120_000_000_000_000n,
+  });
+  source.syncAgentDetail = (_owner, detail) => {
+    source.syncedDetail = detail;
+    return null;
+  };
+
+  const detail = await source.inspectAgent(OWNER);
+
+  assert.equal(detail.proxyProgramId, '0x1111111111111111111111111111111111111111');
+  assert.equal(detail.executableBalance, '120000000000000');
+  assert.equal(source.syncedDetail.executableBalance, '120000000000000');
+});

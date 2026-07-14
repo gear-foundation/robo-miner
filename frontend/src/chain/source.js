@@ -472,6 +472,7 @@ export class ChainSource {
     this._pending = []; // events buffered from the subscription between frames
     this._api = null;
     this._program = null;
+    this._readExecutableBalance = null;
     this._eventListener = null;
     this._polling = false;
     this._playbackGroups = [];
@@ -525,6 +526,7 @@ export class ChainSource {
     this._program = connection.program;
     this._q = connection.queries;
     this._act = connection.actions;
+    this._readExecutableBalance = connection.readExecutableBalance;
   }
 
   // 2) Load the world for display. The map is generated OFF-CHAIN by us
@@ -682,10 +684,11 @@ export class ChainSource {
   async inspectAgent(owner) {
     if (!owner || !this._program || !this._q) return null;
     const Wq = this._program.services.World.queries;
-    const [stateResult, inventoryResult, ownerResult] = await Promise.allSettled([
+    const [stateResult, inventoryResult, ownerResult, balanceResult] = await Promise.allSettled([
       this._call(this._q.agentOf(owner)),
       this._call(this._q.inventoryOf(owner)),
       this._call(this._q.ownerOf(owner)),
+      this._readExecutableBalance?.(owner) ?? Promise.resolve(null),
     ]);
     const detail = { owner };
     if (stateResult.status === 'fulfilled') {
@@ -696,6 +699,10 @@ export class ChainSource {
     }
     if (ownerResult.status === 'fulfilled') {
       detail.walletOwner = String(Wq.OwnerOf.decodeResult(ownerResult.value));
+    }
+    if (balanceResult.status === 'fulfilled' && balanceResult.value) {
+      detail.proxyProgramId = balanceResult.value.programId;
+      detail.executableBalance = String(balanceResult.value.executableBalance);
     }
     this.syncAgentDetail(owner, detail);
     return detail;
@@ -709,6 +716,10 @@ export class ChainSource {
       inventory: detail.inventory,
     });
     if (miner) {
+      if (detail.executableBalance !== undefined && detail.executableBalance !== null) {
+        miner.executableBalance = String(detail.executableBalance);
+        miner.proxyProgramId = detail.proxyProgramId || miner.proxyProgramId || null;
+      }
       this._recomputeTeamScore();
       this._lastAgents = new Map(this.s.miners.map((item) => [item.owner, { ...item }]));
     }

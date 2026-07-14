@@ -115,7 +115,7 @@ function decodeProgramEvent(program, payload) {
 export async function connectWorldProgram({ programId, idlUrl, config = CHAIN }) {
   const { Buffer } = await import('buffer');
   globalThis.Buffer ||= Buffer;
-  const { WsVaraEthProvider, createVaraEthApi } = await import('@vara-eth/api');
+  const { WsVaraEthProvider, createVaraEthApi, getMirrorClient } = await import('@vara-eth/api');
   const { createPublicClient, http } = await import('viem');
   const { SailsProgram } = await import('sails-js');
   const { SailsIdlParser } = await import('sails-js/parser');
@@ -140,7 +140,37 @@ export async function connectWorldProgram({ programId, idlUrl, config = CHAIN })
     program,
     queries: worldQueries(program),
     actions: worldActions(program),
+    readExecutableBalance: async (actorOrAddress) => readExecutableBalance({
+      api,
+      publicClient,
+      getMirrorClient,
+      actorOrAddress,
+    }),
   };
+}
+
+async function readExecutableBalance({ api, publicClient, getMirrorClient, actorOrAddress }) {
+  const programId = evmAddressFromActorId(actorOrAddress);
+  if (!programId) throw new Error('Agent proxy has no valid EVM address');
+
+  const mirror = getMirrorClient({ address: programId, publicClient });
+  const stateHash = await mirror.stateHash();
+  if (!stateHash || /^0x0{64}$/i.test(String(stateHash))) {
+    throw new Error(`Agent proxy ${programId} has no Mirror state`);
+  }
+  const state = await api.query.program.readState(stateHash);
+  return {
+    programId,
+    executableBalance: BigInt(state.executableBalance),
+  };
+}
+
+function evmAddressFromActorId(value) {
+  const raw = typeof value === 'string' ? value : bytesToHex(value);
+  const hex = String(raw || '').trim().toLowerCase();
+  if (/^0x[0-9a-f]{40}$/.test(hex)) return hex;
+  if (/^0x0{24}[0-9a-f]{40}$/.test(hex)) return `0x${hex.slice(-40)}`;
+  return null;
 }
 
 // Arena cards need the contract's current participant state. Discovery is still

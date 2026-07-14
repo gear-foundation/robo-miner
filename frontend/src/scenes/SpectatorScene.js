@@ -197,6 +197,26 @@ function earnedResourceTotals(agent = {}, currentBanked = null) {
   return maxResourceTotals(agent.surfacedResources, accounted);
 }
 
+const VARA_EXECUTABLE_UNIT = 1_000_000_000_000n;
+
+function formatExecutionBalance(value) {
+  if (value === undefined || value === null || value === '') return null;
+  try {
+    const raw = BigInt(value);
+    const whole = raw / VARA_EXECUTABLE_UNIT;
+    const fraction = raw % VARA_EXECUTABLE_UNIT;
+    if (fraction === 0n) return `${whole} VARA`;
+    const decimal = fraction
+      .toString()
+      .padStart(12, '0')
+      .replace(/0+$/, '')
+      .slice(0, 3);
+    return `${whole}.${decimal} VARA`;
+  } catch {
+    return null;
+  }
+}
+
 function agentBubbleIcon(kind, color = '#333') {
   const style = 'display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;vertical-align:-4px;flex:0 0 18px';
   if (kind === 'status') {
@@ -210,6 +230,9 @@ function agentBubbleIcon(kind, color = '#333') {
   }
   if (kind === 'bag') {
     return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M6 6V5c0-2 6-2 6 0v1" fill="none" stroke="#3b2a18" stroke-width="1.8" stroke-linecap="round"/><path d="M3.5 6.5h11l-1 9h-9z" fill="#b9823a" stroke="#3b2a18" stroke-width="1.5" stroke-linejoin="round"/><path d="M5 8h8M6 12h5" stroke="#e7bd70" stroke-width="1.4"/></svg></span>`;
+  }
+  if (kind === 'fuel') {
+    return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M5 3h8v12H5z" fill="#6ee7a8" stroke="#234b36" stroke-width="1.5"/><path d="M7 5h4M7 9h4" stroke="#234b36" stroke-width="1.4"/><path d="M13 6h1.5v6H13" fill="none" stroke="#234b36" stroke-width="1.4" stroke-linejoin="round"/></svg></span>`;
   }
   if (kind === 'bank') {
     return `<span style="${style}"><svg viewBox="0 0 18 18" width="17" height="17" aria-hidden="true"><path d="M3 8h12v7H3z" fill="#d6d9dd" stroke="#3a3a3a" stroke-width="1.4"/><path d="M2 8l7-5 7 5z" fill="#f0f2f4" stroke="#3a3a3a" stroke-width="1.4" stroke-linejoin="round"/><path d="M5 8v7M9 8v7M13 8v7" stroke="#8a8f96" stroke-width="1.3"/><path d="M2 15h14" stroke="#3a3a3a" stroke-width="1.6"/></svg></span>`;
@@ -1200,6 +1223,7 @@ export default class SpectatorScene extends GameScene {
     const cargo = resourceTotal(carried);
     const bankedTotal = resourceTotal(banked);
     const address = displayAddress(agent.owner);
+    const executionBalance = formatExecutionBalance(detail?.executableBalance ?? agent.executableBalance);
     const agentName = this.agentDisplayName(agent);
     const hasReadableName = agentName && !/^0x/i.test(agentName);
     const addressLink = `<a href="${escapeHtml(addressScanUrl(agent.owner))}" target="_blank" rel="noreferrer"
@@ -1209,6 +1233,7 @@ export default class SpectatorScene extends GameScene {
         <div style="min-width:0">
           ${hasReadableName ? `<b style="display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(agentName)}</b>` : ''}
           ${addressLink}
+          ${executionBalance ? `<div title="Current executable balance of this agent proxy" style="display:flex;align-items:center;gap:4px;margin-top:5px;font-size:11px;color:#5b4127;white-space:nowrap">${agentBubbleIcon('fuel')}balance: <b style="color:#222">${escapeHtml(executionBalance)}</b></div>` : ''}
         </div>
         <div style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:700;color:#333;white-space:nowrap;padding-top:2px">
           ${agentBubbleIcon('status', status.color)}${escapeHtml(status.label)}

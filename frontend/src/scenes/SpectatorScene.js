@@ -1387,7 +1387,12 @@ export default class SpectatorScene extends GameScene {
     if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleMiner) return;
     const cam = this.cameras.main;
     const zoom = cam.zoom || 1;
-    const m = this.agentBubbleMiner;
+    const bubbleKey = spectatorAgentKey(this.agentBubbleMiner);
+    const m = this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === bubbleKey) || this.agentBubbleMiner;
+    // The renderer consumes the live miner object. Refresh the bubble's
+    // reference each frame so interpolation and camera follow cannot leave the
+    // overlay attached to a stale coordinate snapshot.
+    this.agentBubbleMiner = m;
     const visual = robotVisualAnchor(
       m.drawX * TILE + TILE / 2,
       m.drawY * TILE + TILE / 2,

@@ -17,7 +17,7 @@ const DIR_HINT = '0=up 1=right 2=down 3=left (4=current, for place_ladder under-
 const PAST_STATUSES = new Set(['finished', 'retired', 'archived']);
 const JOINABLE_STATUSES = new Set(['open', 'active']);
 
-export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8780, log = console.log }) {
+export function createDiscoveryServer({ factory, env = {}, cfg, archives = null, port = 8781, log = console.log }) {
   const sessionRecord = (w) => {
     const identity = worldIdentity(w);
     const status = publicStatus(w.status);

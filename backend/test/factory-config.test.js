@@ -17,6 +17,7 @@ test('mainnet profile drives the factory config', () => {
     assert.equal(c.sessionAutofinish, false);
     const e = loadChainEnv();
     assert.equal(e.network, 'mainnet');
+    assert.equal(e.discoveryPort, 8781);
     assert.equal(e.router, MAINNET.ROUTER);
     assert.equal(e.codeId, MAINNET.WORLD_CODE_ID);
     assert.equal(e.codeId, '0xd1255c81d69594019a90e94aa06c682bde08037492b48cb53e6d24d90caac22f');
@@ -37,6 +38,7 @@ test('testnet profile drives the factory config', () => {
     assert.equal(c.lobbyMin, 1);
     const e = loadChainEnv();
     assert.equal(e.network, 'testnet');
+    assert.equal(e.discoveryPort, 8781);
     assert.equal(e.router, TESTNET.ROUTER);
     assert.equal(e.varaWs, TESTNET.VARA_WS);
     assert.equal(e.codeId, TESTNET.WORLD_CODE_ID);

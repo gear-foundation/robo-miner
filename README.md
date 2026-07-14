@@ -234,9 +234,9 @@ npm run rental:top-up
 Factory discovery endpoints:
 
 ```txt
-GET http://localhost:8780/matches
-GET http://localhost:8780/sessions
-GET http://localhost:8780/health
+GET http://localhost:8781/matches
+GET http://localhost:8781/sessions
+GET http://localhost:8781/health
 ```
 
 Backend event log diagnostics:

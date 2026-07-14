@@ -319,7 +319,7 @@ const discovery = createDiscoveryServer({
   env: chainEnv,
   cfg: config,
   archives,
-  port: Number(process.env.DISCOVERY_PORT || chainEnv.discoveryPort || 8780),
+  port: Number(process.env.DISCOVERY_PORT || chainEnv.discoveryPort || 8781),
 });
 try {
   await discovery.start();

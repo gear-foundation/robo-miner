@@ -235,11 +235,21 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --idl "$ROBO_MINER_DIGGER_PROXY_IDL"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  balance "$diggerProgramId"
+  vara-eth:state read "$diggerProgramId"
 
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wvara balance "$ownerAddress"
 ```
+
+Read the current DiggerProxy execution fuel only from
+`programState.executableBalance` in the `vara-eth:state read` response. The
+value is in base units (`1 VARA = 10^12`). `programState.balance`,
+`vara-wallet balance`, Ethereum `eth_getBalance`, and ERC-20 WVARA balances are
+different balance domains and must not be reported as executable balance.
+
+Backend rental responses expose `targetExecBalance`, which is the refill policy
+target, not a live balance. Do not use backend digger metadata to diagnose
+current execution fuel; query Vara.eth state directly every time.
 
 If `Digger/Owner` does not equal `ownerActorId`, stop because this wallet does
 not own the proxy. If `Digger/World` does not equal the selected world ActorId,
@@ -254,7 +264,11 @@ the player settlement flow from `workflow.md` to `Surface`, `MintResources`, and
 `Redeem`. Before estimating payout or choosing redeem amounts, query the live
 redeem contract for `Redeem/ScrstRate`, `Redeem/BcrstRate`,
 `Redeem/HcrstRate`, `Redeem/VaraUnit`, and `Redeem/AvailableReserve`; never use
-hard-coded resource-to-WVARA rates.
+hard-coded resource-to-WVARA rates. After the injected redeem reply, wait for
+the Redeem Mirror L1 `Message` event, claim its `claimedId` with
+`vara-eth:mailbox claim` using the same owner wallet, and verify the owner WVARA
+balance increased. Never report payment from a backend value, reserve decrease,
+or the digger program address.
 
 ## Minimum Wallet Checklist
 
@@ -267,3 +281,5 @@ hard-coded resource-to-WVARA rates.
 - `ownerActorId` is derived from `ownerAddress`.
 - Signed DiggerProxy writes use `robo_miner_action`, which delegates to the
   named-wallet `vara-eth:session` injected-submission path.
+- Redeem settlement uses the owner wallet for `vara-eth:mailbox claim`, then
+  verifies the owner WVARA balance before reporting success.

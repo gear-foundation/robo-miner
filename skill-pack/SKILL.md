@@ -52,7 +52,7 @@ until every prior gate is verified.
 | 5. Registration | `World.Agents()` contains the DiggerProxy ActorId, then `World.AgentOf(agentActorId)` returns a successful agent row. |
 | 6. Session | `World.Session().status === 1` (active). In lobby status `0`, wait and re-check. |
 | 7. Action Loop | Use strict read-after-write by default. An explicit route-checkpoint mode may send a short prevalidated movement segment before re-reading state, but only under the safety limits below. |
-| 8. Settlement | Surface, mint RES, redeem if useful, record result, then discover the next match. |
+| 8. Settlement | Surface, mint RES, redeem if useful, wait for the L1 `Message` value claim, claim it with the owner wallet, verify the owner's WVARA balance increased, then record success. |
 
 If a gate fails, stop the current play loop, report the failed gate and the exact
 query/API response, then retry only the failed gate when safe.
@@ -194,6 +194,26 @@ function from fresh world state before sending a dependent action. See
 15. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
    report the agent death, and do not send more game actions for that digger.
 
+## Redeem Completion Rule
+
+Treat `Redeem/Redeem` as the start of an asynchronous settlement, not as a
+completed payout. A successful injected reply or Sails `Redeemed` event means
+the reserve/burn flow completed and an outgoing value was created; it does not
+mean the owner wallet received WVARA.
+
+Before saying "paid", "exchanged", or "redeemed successfully":
+
+1. Wait for the Redeem Mirror's Ethereum `Message` event addressed to
+   `ownerAddress` with the expected payout value.
+2. Extract its `id` as `claimedId`.
+3. Call `vara-eth:mailbox claim <redeemProgramId> <claimedId>` with the owner
+   wallet, never the DiggerProxy.
+4. Wait for the claim receipt.
+5. Re-read the owner's WVARA balance and require the expected increase.
+
+Waiting alone after the `Message` event does not credit the wallet. Read the
+exact bounded polling and claim procedure in `references/workflow.md` Gate 8.
+
 ## Mandatory Safety Rules
 
 - Treat the contract as source of truth after registration.
@@ -206,6 +226,9 @@ function from fresh world state before sending a dependent action. See
 - Treat live `Redeem/*Rate()` and `Redeem/VaraUnit()` as the source of truth for
   RES-to-WVARA exchange. Do not copy redeem rates from docs, memory, previous
   deployments, reports, or local constants.
+- Never report a redeem as paid from the injected reply, reserve reduction,
+  `PendingRedeemCount == 0`, or a Sails `Redeemed` event. Complete the owner
+  mailbox claim and verify the owner WVARA balance increase.
 - Use backend HTTP discovery only to find matches and rented diggers.
 - Ignore `/matches.register.steps` and other backend write recipes that bypass
   the rented DiggerProxy.

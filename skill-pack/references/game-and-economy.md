@@ -303,7 +303,9 @@ Drill adjacent/current resource tile
   -> MintResources()
   -> RES VMT balance increases for owner ActorId
   -> Redeem.Redeem(scrst, bcrst, hcrst)
-  -> WVARA payout if reserve and burn flow succeed
+  -> wait for Redeem Mirror L1 Message value claim
+  -> owner wallet claims claimedId from the mailbox
+  -> verify owner WVARA balance increased
 ```
 
 This is the allowed player-side economic path for turning earned resources into
@@ -318,6 +320,12 @@ Before redeeming:
    redeem contract is not approved.
 4. Call `Redeem/Redeem(scrst,bcrst,hcrst)` with `vara-wallet --via injected`
    only for amounts the owner actually holds and the reserve can cover.
+5. Treat the redeem reply as pending settlement, not a wallet payout.
+6. Wait for the Ethereum `Message` event addressed to `ownerAddress`, extract
+   its `id`, and claim it with `vara-eth:mailbox claim` using the owner wallet.
+7. Report success only after both the claim receipt and owner WVARA balance
+   increase are verified. A reduced reserve or Sails `Redeemed` event is not
+   sufficient.
 
 Rates are deployment configuration, not skill constants. Read
 `Redeem.ScrstRate()`, `Redeem.BcrstRate()`, `Redeem.HcrstRate()`, and

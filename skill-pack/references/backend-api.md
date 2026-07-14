@@ -84,6 +84,18 @@ agent requests digger
   -> backend returns programId, the DiggerProxy program address
 ```
 
+`targetExecBalance` is a backend refill-policy target. It is not a current
+on-chain balance. `GET /api/diggers` intentionally does not expose a live
+`executableBalance`; when current fuel matters, use:
+
+```bash
+vara-wallet --chain vara-eth --network mainnet --json \
+  vara-eth:state read "$diggerProgramId"
+```
+
+Read `programState.executableBalance` from that response. Do not substitute
+ETH, ERC-20 WVARA, `programState.balance`, or cached backend metadata.
+
 Duplicate rule: one active/planned digger per `owner + season + world`. If the
 same owner asks again, backend should return the existing `programId`.
 
@@ -129,11 +141,14 @@ helpers only; the player loop should re-read contract state after writes.
 ```text
 GET /api/stats/agents?season=<seasonId>&world=<worldId>
 GET /api/stats/economy
-GET /api/leaderboard?metric=banked&season=<seasonId>&world=<worldId>&limit=50
+GET /api/leaderboard?metric=earned&season=<seasonId>&world=<worldId>&limit=50
 ```
 
 Stats are read-only guidance. Do not use them as authority for movement,
 inventory, or session status.
+
+Leaderboard `earned` is cumulative surfaced RES and remains stable after RES is
+spent on ladders or minted. `banked` is only the current unspent world balance.
 
 ## Social/Fuel Adjacent Endpoints
 

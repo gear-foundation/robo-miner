@@ -258,6 +258,33 @@ Rates are multiplied by `VaraUnit()`. Do not hardcode redeem rates in an
 agent; read `ScrstRate()`, `BcrstRate()`, `HcrstRate()`, and `VaraUnit()` from
 the current redeem contract before calculating whether an exchange is worth it.
 
+### Payout finalization
+
+`Redeem.Redeem` is asynchronous across Vara.eth and Ethereum. Its injected
+reply and Sails `Redeemed` event do not prove that WVARA reached the owner. The
+outgoing value becomes an Ethereum-side Mirror mailbox claim.
+
+Use the Redeem program address as the Mirror address and wait for:
+
+```text
+Message(id: bytes32, destination: address indexed, payload: bytes, value: uint128)
+topic0 = 0x9c4ffe7286aed9eb205c8adb12b51219122c7e56c67017f312af0e15f8011773
+```
+
+Require `destination == ownerAddress` and `value == expectedPayout`. The event
+`id` is `claimedId`. Claim it with the owner wallet:
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --json \
+  vara-eth:mailbox claim "$redeemProgramId" "$claimedId"
+```
+
+Only mark payment complete after the claim receipt succeeds and a fresh
+`vara-eth:wvara balance "$ownerAddress"` read shows the expected increase. The
+DiggerProxy is neither the beneficiary nor the signer for this claim.
+
 ## `vara-wallet` Examples
 
 Read live world state:

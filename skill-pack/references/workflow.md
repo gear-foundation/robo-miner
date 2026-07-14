@@ -788,6 +788,19 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
 
 Then redeem:
 
+First record the owner's wallet balance and current Ethereum block. Use the
+block as the lower bound for this redeem's L1 value claim:
+
+```bash
+wvaraBefore=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  vara-eth:wvara balance "$ownerAddress" | jq -r '.balance')
+
+redeemStartBlock=$(curl -fsS "$ROBO_MINER_ETH_RPC" \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' \
+  | jq -r '.result')
+```
+
 ```bash
 vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --account "$VARA_WALLET_ACCOUNT" \
@@ -797,6 +810,67 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
   --idl "$ROBO_MINER_REDEEM_IDL" \
   --via injected
 ```
+
+The injected reply is not the wallet payout. Do not report "paid",
+"exchanged", or "redeemed successfully" yet.
+
+Wait for the Redeem Mirror's Ethereum
+`Message(bytes32,address,bytes,uint128)` event. Its indexed destination must be
+the owner wallet, not `diggerProgramId`:
+
+```bash
+messageTopic=0x9c4ffe7286aed9eb205c8adb12b51219122c7e56c67017f312af0e15f8011773
+ownerTopic="0x000000000000000000000000${ownerAddress#0x}"
+
+claimLog=$(curl -fsS "$ROBO_MINER_ETH_RPC" \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc \
+    --arg mirror "$redeemProgramId" \
+    --arg from "$redeemStartBlock" \
+    --arg topic0 "$messageTopic" \
+    --arg owner "$ownerTopic" \
+    '{jsonrpc:"2.0",id:1,method:"eth_getLogs",params:[{address:$mirror,fromBlock:$from,toBlock:"latest",topics:[$topic0,$owner]}]}')" \
+  | jq -c '.result[-1] // empty')
+```
+
+Poll every 10 seconds for up to 10 minutes. If no matching log appears, report
+`settlement pending L1 finalization` with `redeemProgramId`, `ownerAddress`,
+`redeemStartBlock`, and the redeem reply/event ids. Do not submit a second
+redeem and do not claim that the first one failed.
+
+For this event ABI, the first 32-byte word in `data` is `claimedId`; the third
+word is the claim value:
+
+```bash
+eventData=$(printf '%s' "$claimLog" | jq -r '.data')
+claimedId="0x${eventData:2:64}"
+claimValueHex="0x${eventData:130:64}"
+```
+
+Require `claimValueHex` to equal the live payout calculated above. If multiple
+matching events exist, select by value and block/transaction timing. Never use
+the injected request message id as `claimedId` and never guess an id.
+
+Claim with the owner wallet:
+
+```bash
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --json \
+  vara-eth:mailbox claim "$redeemProgramId" "$claimedId"
+```
+
+Wait for a successful claim receipt, then verify the user-visible result:
+
+```bash
+wvaraAfter=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  vara-eth:wvara balance "$ownerAddress" | jq -r '.balance')
+```
+
+Settlement is complete only when the claim receipt succeeded and
+`wvaraAfter - wvaraBefore` equals the expected payout. Backend projections,
+reserve reduction, `PendingRedeemCount == 0`, and a Sails `Redeemed` event are
+diagnostic evidence, not wallet-payment proof.
 
 Use cancel/confirm only for a redeem id returned by the redeem contract:
 
@@ -838,8 +912,17 @@ falling stone, event-confirmed chest dynamite, or inferred from last action.
   `vara-wallet message send --payload <encodedPayload>` only as raw-reply
   diagnostics.
 - Balance/fuel error: re-check `Digger/Owner`, `Digger/World`,
-  `Digger/Status`, and the proxy balance with `vara-wallet`. If the proxy
+  `Digger/Status`, and run `vara-wallet --chain vara-eth --network mainnet
+  --json vara-eth:state read "$diggerProgramId"`. Read only
+  `programState.executableBalance`; backend `targetExecBalance`, ETH, WVARA,
+  `programState.balance`, and `vara-wallet balance` are not current execution
+  fuel. If the proxy
   executable balance is depleted, report it and wait for backend refill/operator
   action. If executable balance is available and the agent has banked resources,
   use the player settlement flow: `Surface -> MintResources -> Redeem`. Do not
   call world `Admin/*` methods or transfer operator funds.
+- Redeem reply received but owner balance unchanged: do not repeat
+  `Redeem/Redeem`. Poll the Redeem Mirror `Message` event, claim its
+  `claimedId` with the owner wallet through `vara-eth:mailbox claim`, and verify
+  the WVARA balance. If the L1 event has not appeared, report settlement pending
+  finalization; if claim fails, report the exact claim id and transaction error.

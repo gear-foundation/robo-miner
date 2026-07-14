@@ -10,7 +10,7 @@ import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
 import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
-import { worldLabelFor } from '../chain/worldIdentity.js';
+import { worldCodeFor, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
@@ -25,6 +25,8 @@ const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
 const AGENT_BUBBLE_MARGIN = 10;
 const AGENT_BUBBLE_HUD_CLEARANCE = 54;
 const AGENT_BUBBLE_BELOW_GAP = 12;
+const HUD_MOBILE_WIDTH = 640;
+const HUD_COMPACT_WIDTH = 1120;
 
 function sfxSources(name) {
   return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
@@ -1410,13 +1412,11 @@ export default class SpectatorScene extends GameScene {
   buildHUD() {
     const bar = document.createElement('div');
     bar.id = 'spec-hud';
-    bar.style.cssText = `position:fixed;left:0;top:0;width:100%;height:46px;z-index:20;
-      display:flex;align-items:center;gap:14px;padding:0 14px;box-sizing:border-box;
-      background:linear-gradient(#000c,#0007);font-family:'Courier New',monospace;color:#fff`;
+    bar.style.cssText = 'position:fixed;left:0;top:0;width:100%;z-index:20;box-sizing:border-box;background:linear-gradient(#000c,#0007);font-family:\'Courier New\',monospace;color:#fff';
 
     const back = wireBtn(document.createElement('button'));
     back.textContent = '← BACK';
-    back.style.cssText = btnCss('#cdd3da') + 'font-size:14px;padding:6px 13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    back.title = 'Back to arena';
     back.onclick = () => this.goLobby();
     bar.appendChild(back);
 
@@ -1429,13 +1429,11 @@ export default class SpectatorScene extends GameScene {
 
     const stats = document.createElement('div');
     stats.id = 'spec-stats';
-    stats.style.cssText = 'margin-left:auto;font-size:14px';
     bar.appendChild(stats);
 
     const soundBtn = wireBtn(document.createElement('button'));
     soundBtn.id = 'spec-soundbtn';
     soundBtn.title = 'Sound';
-    soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;margin-left:14px;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     soundBtn.onclick = () => this.cycleSpectatorVolume();
     bar.appendChild(soundBtn);
     this.soundBtn = soundBtn;
@@ -1445,14 +1443,17 @@ export default class SpectatorScene extends GameScene {
     const logBtn = wireBtn(document.createElement('button'));
     logBtn.id = 'spec-logbtn';
     logBtn.textContent = '⛓ TX LOG';
-    logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    logBtn.title = 'Transaction log';
     logBtn.onclick = () => this.toggleConsole();
     bar.appendChild(logBtn);
     this.logBtn = logBtn;
 
     document.body.appendChild(bar);
+    this.hudBar = bar;
+    this.backBtn = back;
     this.statsEl = stats;
     this.buildConsole();
+    this.applyHUDLayout();
     this.buildAgentBubble();
     this.updateHUD();
   }
@@ -1487,7 +1488,7 @@ export default class SpectatorScene extends GameScene {
   buildConsole() {
     const c = document.createElement('div');
     c.id = 'spec-console';
-    c.style.cssText = `position:fixed;right:0;top:46px;bottom:0;width:360px;z-index:19;
+    c.style.cssText = `position:fixed;right:0;top:46px;bottom:0;width:min(360px,100vw);z-index:19;
       transform:translateX(100%);transition:transform .18s ease;
       background:rgba(7,11,9,.86);backdrop-filter:blur(2px);border-left:2px solid #2f6a3f;
       box-shadow:-6px 0 24px rgba(0,0,0,.4);font-family:'Courier New',monospace;
@@ -1505,6 +1506,56 @@ export default class SpectatorScene extends GameScene {
       </div>`;
     document.body.appendChild(c);
     this.consoleEl = c;
+  }
+
+  applyHUDLayout() {
+    if (!this.hudBar || !this.backBtn || !this.statsEl || !this.soundBtn || !this.logBtn) return;
+    const width = window.innerWidth;
+    const layout = width < HUD_MOBILE_WIDTH ? 'mobile' : width < HUD_COMPACT_WIDTH ? 'compact' : 'desktop';
+    this.hudLayout = layout;
+
+    if (layout === 'desktop') {
+      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;align-items:center;gap:14px;padding:0 14px';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px;white-space:nowrap';
+      this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.backBtn.textContent = '← BACK';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'font-size:14px;padding:6px 13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = '⛓ TX LOG';
+      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    } else if (layout === 'compact') {
+      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
+      this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.backBtn.textContent = '←';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:38px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:38px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'width:54px;height:38px;padding:0;font-size:13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    } else {
+      this.hudBar.style.cssText += ';height:76px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 48px;grid-template-rows:42px 26px;align-items:center;gap:0 7px;padding:4px 8px;background:#102033;border-bottom:2px solid #000';
+      this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
+      this.statsEl.style.cssText = 'grid-column:1 / -1;grid-row:2;display:flex;align-items:center;justify-content:flex-start;gap:10px;min-width:0;width:100%;font-size:13px;white-space:nowrap';
+      this.backBtn.textContent = '←';
+      this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:36px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:36px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'width:48px;height:36px;padding:0;font-size:12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    }
+
+    this.backBtn.style.gridColumn = '1';
+    this.backBtn.style.gridRow = '1';
+    this.worldTitleEl.style.gridColumn = '2';
+    this.worldTitleEl.style.gridRow = '1';
+    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '3';
+    this.statsEl.style.gridRow = layout === 'mobile' ? '2' : '1';
+    this.soundBtn.style.gridColumn = '4';
+    this.soundBtn.style.gridRow = '1';
+    this.logBtn.style.gridColumn = '5';
+    this.logBtn.style.gridRow = '1';
+    this.consoleEl.style.top = layout === 'mobile' ? '76px' : layout === 'compact' ? '52px' : '46px';
+    this.updateWorldTitle();
+    this.refreshSoundButton();
   }
 
   toggleConsole() {
@@ -1619,20 +1670,42 @@ export default class SpectatorScene extends GameScene {
     const banked = ms.reduce((totals, m) => addResourceTotals(totals, earnedResourceTotals(m)), { scrst: 0, bcrst: 0, hcrst: 0 });
     const fps = Math.round(this.game.loop.actualFps);
     const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
+    const diamond = this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '';
+    if (this.hudLayout === 'desktop') {
+      this.statsEl.innerHTML =
+        `<span style="color:${fc}">${fps} fps</span>　` +
+        `${stateLabel}　agents <b>${countLabel}</b>　` +
+        `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
+        diamond;
+      return;
+    }
+
+    const fullResources = `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>`;
+    if (this.hudLayout === 'compact') {
+      this.statsEl.innerHTML =
+        `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${statusLabel(status)}</span>　` +
+        `agents <b>${countLabel}</b>　${fullResources}${diamond}`;
+      return;
+    }
+
+    const mobileStatus = status === 'active' ? 'LIVE' : statusLabel(status);
     this.statsEl.innerHTML =
-      `<span style="color:${fc}">${fps} fps</span>　` +
-      `${stateLabel}　agents <b>${countLabel}</b>　` +
-      `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
-      (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
+      `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${mobileStatus}</span>` +
+      `<span title="active agents"><b>${countLabel}</b> AG</span>` +
+      `<span title="earned SCRST">S <b>${banked.scrst}</b></span>` +
+      `<span title="earned BCRST">B <b>${banked.bcrst}</b></span>` +
+      `<span title="earned HCRST">H <b>${banked.hcrst}</b>${this.rt.match.diamondFound ? ' 💎' : ''}</span>`;
   }
 
   updateWorldTitle() {
     if (!this.worldTitleEl) return;
     const label = worldLabelFor(this.worldMeta || {});
-    this.worldTitleEl.textContent = label === 'World' ? this.mode.label : label;
+    const code = worldCodeFor(this.worldMeta || {});
+    const fullLabel = label === 'World' ? this.mode.label : label;
+    this.worldTitleEl.textContent = this.hudLayout === 'desktop' ? fullLabel : (code || fullLabel);
     this.worldTitleEl.title = this.specProgramId
-      ? `${this.worldTitleEl.textContent} - ${this.specProgramId}`
-      : this.worldTitleEl.textContent;
+      ? `${fullLabel} - ${this.specProgramId}`
+      : fullLabel;
   }
 
   async refreshWorldMeta() {

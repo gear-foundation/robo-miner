@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1.0 - 2026-07-14
+
+### Changed
+
+- Made the digger roster collapsible by default, with a clear open/close control and selected-digger marker.
+
+### Fixed
+
+- Kept the map details bubble attached to the live digger after realtime snapshots refresh its position.
+
 ## 0.1.0.0 - 2026-07-14
 
 ### Added

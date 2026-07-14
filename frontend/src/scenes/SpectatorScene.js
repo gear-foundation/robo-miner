@@ -1629,7 +1629,8 @@ export default class SpectatorScene extends GameScene {
     style.id = 'spec-roster-style';
     style.textContent = `
       #spec-camera-state{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.35px}
-      #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden}
+      #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden;transform:translateX(calc(-100% - 18px));opacity:0;pointer-events:none;transition:transform .18s cubic-bezier(.16,1,.3,1),opacity .18s ease}
+      #spec-roster.is-open{transform:translateX(0);opacity:1;pointer-events:auto}
       #spec-roster button{font-family:inherit;cursor:pointer;touch-action:manipulation}
       #spec-roster button:focus-visible,#spec-diggers-btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
       #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
@@ -1655,12 +1656,10 @@ export default class SpectatorScene extends GameScene {
       .spec-dossier-actions{display:flex;gap:7px;margin-top:7px}
       .spec-dossier-actions button{min-height:28px;padding:4px 8px;border:1px solid #000;border-radius:5px;background:#7cffb0;color:#13241a;font-size:11px;font-weight:bold;letter-spacing:.35px;box-shadow:2px 2px 0 rgba(0,0,0,.28);transition-property:transform,filter;transition-duration:.1s}
       .spec-dossier-actions button:active{transform:scale(.96)}
-      #spec-diggers-btn{display:none}
       @media (max-width:760px){
         #spec-hud{height:52px!important;grid-template-rows:42px!important;gap:7px!important;padding:0 8px!important}
         #spec-hud>div:not(#spec-stats){display:none}
         #spec-stats{display:none!important}
-        #spec-diggers-btn{display:block!important}
         #spec-soundbtn,#spec-logbtn{width:40px!important;height:36px!important}
         #spec-soundbtn{margin-left:auto!important}
         #spec-logbtn{margin-left:0!important}
@@ -1689,10 +1688,9 @@ export default class SpectatorScene extends GameScene {
       this.stopSpectatorFollow();
     };
     window.addEventListener('keydown', this._spectatorKeyHandler);
-    // On phones the roster is the spectator mode, not a secondary tool hidden
-    // behind a discovery click. The toolbar button remains available to collapse
-    // it when a viewer wants an uninterrupted map.
-    this.toggleSpectatorRoster(Boolean(window.matchMedia?.('(max-width: 760px)').matches));
+    // Start with the roster available, but let the toolbar reclaim the mine view
+    // at every breakpoint.
+    this.toggleSpectatorRoster(true);
     this.syncSpectatorRoster();
   }
 
@@ -1700,6 +1698,17 @@ export default class SpectatorScene extends GameScene {
     this.rosterOpen = Boolean(open);
     this.rosterEl?.classList.toggle('is-open', this.rosterOpen);
     this.diggersBtn?.setAttribute('aria-expanded', String(this.rosterOpen));
+    this.updateDiggerButton();
+  }
+
+  updateDiggerButton() {
+    if (!this.diggersBtn) return;
+    const count = this.rt?.s?.miners?.length || 0;
+    const label = `DIGGERS ${count} ${this.rosterOpen ? '▾' : '▸'}`;
+    const state = this.rosterOpen ? 'expanded' : 'collapsed';
+    if (this.diggersBtn.textContent !== label) this.diggersBtn.textContent = label;
+    this.diggersBtn.title = `Digger list ${state}. Activate to ${this.rosterOpen ? 'collapse' : 'expand'}.`;
+    this.diggersBtn.setAttribute('aria-label', `Digger list ${state}`);
   }
 
   agentRosterStatus(agent) {
@@ -1774,8 +1783,7 @@ export default class SpectatorScene extends GameScene {
     const alive = miners.filter((agent) => agent.alive).length;
     const rosterCount = `${alive}/${miners.length}`;
     if (this.rosterCountEl && this.rosterCountEl.textContent !== rosterCount) this.rosterCountEl.textContent = rosterCount;
-    const diggerCount = `DIGGERS ${miners.length}`;
-    if (this.diggersBtn && this.diggersBtn.textContent !== diggerCount) this.diggersBtn.textContent = diggerCount;
+    this.updateDiggerButton();
     this.renderSelectedDossier();
   }
 
@@ -1860,7 +1868,7 @@ export default class SpectatorScene extends GameScene {
     this.hudLayout = layout;
 
     if (layout === 'desktop') {
-      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:14px;padding:0 14px';
+      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:0 14px';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       this.cameraStateEl.style.display = 'block';
@@ -1870,7 +1878,7 @@ export default class SpectatorScene extends GameScene {
       this.logBtn.textContent = 'TX';
       this.logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     } else if (layout === 'compact') {
-      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
+      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) auto 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       this.cameraStateEl.style.display = 'none';
@@ -1893,17 +1901,17 @@ export default class SpectatorScene extends GameScene {
 
     this.backBtn.style.gridColumn = '1';
     this.backBtn.style.gridRow = '1';
-    this.diggersBtn.style.gridColumn = layout === 'mobile' ? '2' : '';
-    this.diggersBtn.style.gridRow = layout === 'mobile' ? '1' : '';
-    this.worldTitleEl.style.gridColumn = '2';
+    this.diggersBtn.style.gridColumn = '2';
+    this.diggersBtn.style.gridRow = '1';
+    this.worldTitleEl.style.gridColumn = '3';
     this.worldTitleEl.style.gridRow = '1';
-    this.cameraStateEl.style.gridColumn = '3';
+    this.cameraStateEl.style.gridColumn = '4';
     this.cameraStateEl.style.gridRow = '1';
-    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '4';
+    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : layout === 'desktop' ? '5' : '4';
     this.statsEl.style.gridRow = layout === 'mobile' ? '2' : '1';
-    this.soundBtn.style.gridColumn = layout === 'desktop' ? '5' : '4';
+    this.soundBtn.style.gridColumn = layout === 'desktop' ? '6' : layout === 'compact' ? '5' : '4';
     this.soundBtn.style.gridRow = '1';
-    this.logBtn.style.gridColumn = layout === 'desktop' ? '6' : '5';
+    this.logBtn.style.gridColumn = layout === 'desktop' ? '7' : layout === 'compact' ? '6' : '5';
     this.logBtn.style.gridRow = '1';
     this.consoleEl.style.top = layout === 'mobile' ? '76px' : layout === 'compact' ? '52px' : '46px';
     this.updateWorldTitle();

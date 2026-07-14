@@ -1384,7 +1384,6 @@ export default class SpectatorScene extends GameScene {
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
     const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
     const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
-    const side = m.facing === 'left' ? -1 : 1;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,
       height: this.agentBubbleEl.offsetHeight,
@@ -1396,7 +1395,9 @@ export default class SpectatorScene extends GameScene {
     const halfWidth = size.width / 2;
     const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
     const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);
-    const left = Phaser.Math.Clamp(sx + side * 36, minLeft, maxLeft);
+    // Keep the card centered over its digger. Only viewport clamping may move
+    // the card sideways, in which case the tail points back to the digger.
+    const left = Phaser.Math.Clamp(sx, minLeft, maxLeft);
     const below = sy - size.height - AGENT_BUBBLE_MARGIN < AGENT_BUBBLE_HUD_CLEARANCE;
     const belowTop = Phaser.Math.Clamp(
       robotBottom + AGENT_BUBBLE_BELOW_GAP,

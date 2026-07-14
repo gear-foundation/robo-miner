@@ -14,6 +14,7 @@ import { worldCodeFor, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
 import {
   canFollowSpectatorAgent,
+  findSpectatorAgent,
   localCargoCount,
   spectatorAgentKey,
   spectatorDepth,
@@ -1179,13 +1180,11 @@ export default class SpectatorScene extends GameScene {
   }
 
   selectedSpectatorAgent() {
-    if (!this.selectedAgentKey) return null;
-    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.selectedAgentKey) || null;
+    return findSpectatorAgent(this.rt?.s?.miners, this.selectedAgentKey);
   }
 
   followSpectatorAgent() {
-    if (!this.followAgentKey) return null;
-    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.followAgentKey) || null;
+    return findSpectatorAgent(this.rt?.s?.miners, this.followAgentKey);
   }
 
   selectSpectatorAgent(agent, { follow = true } = {}) {
@@ -1289,7 +1288,7 @@ export default class SpectatorScene extends GameScene {
     this.agentBubbleSize = null;
     this.agentBubbleEl.removeAttribute('title');
     this.agentBubbleEl.style.display = 'block';
-    this.agentBubbleMiner = agent;
+    this.agentBubbleKey = spectatorAgentKey(agent);
     this.positionAgentBubble();
     clearTimeout(this._agentBubbleTimer);
     this._agentBubbleTimer = setTimeout(() => this.hideAgentBubble(), ms);
@@ -1302,11 +1301,13 @@ export default class SpectatorScene extends GameScene {
     try {
       const detail = await this.rt.inspectAgent(agent.owner);
       if (this._agentInspectRequestId !== requestId) return;
-      if (!this.agentBubbleMiner || !sameDisplayAddress(this.agentBubbleMiner.owner, agent.owner)) return;
-      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
-      if (synced && sameDisplayAddress(synced.owner, agent.owner)) this.agentBubbleMiner = synced;
+      const key = spectatorAgentKey(agent);
+      if (this.agentBubbleKey !== key) return;
+      this.rt.syncAgentDetail?.(agent.owner, detail);
+      const liveAgent = findSpectatorAgent(this.rt?.s?.miners, key);
+      if (!liveAgent) return this.hideAgentBubble();
       if (this.agentBubbleContentEl) {
-        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
+        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(liveAgent, detail);
       }
       this.agentBubbleSize = null;
       this.updateHUD();
@@ -1379,16 +1380,17 @@ export default class SpectatorScene extends GameScene {
 
   hideAgentBubble() {
     if (this.agentBubbleEl) this.agentBubbleEl.style.display = 'none';
-    this.agentBubbleMiner = null;
+    this.agentBubbleKey = null;
     this.agentBubbleSize = null;
     clearTimeout(this._agentBubbleTimer);
   }
 
   positionAgentBubble() {
-    if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleMiner) return;
+    if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleKey) return;
+    const m = findSpectatorAgent(this.rt?.s?.miners, this.agentBubbleKey);
+    if (!m) return this.hideAgentBubble();
     const cam = this.cameras.main;
     const zoom = cam.zoom || 1;
-    const m = this.agentBubbleMiner;
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
     const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
     const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;

@@ -29,7 +29,13 @@
 import { RealtimeWorld } from '../engine/realtime.js';
 import { BLOCK } from '../config.js';
 import { CHAIN, CHAIN_PLAYBACK, chainReady, discoveryBaseUrl } from './config.js';
-import { connectWorldProgram, createWorldEventListener } from './worldEventListener.js';
+import {
+  calculateWorldReply,
+  connectWorldProgram,
+  createWorldEventListener,
+  ensureVaraEthProviderConnected,
+  isVaraEthConnectionError,
+} from './worldEventListener.js';
 import { skinFromAddress } from '../render/robot.js';
 
 // Pick the data source. Local engine today; the chain source once a World
@@ -508,6 +514,7 @@ export class ChainSource {
       config: CHAIN,
     });
     this._api = connection.api;
+    this._provider = connection.provider;
     this._program = connection.program;
     this._q = connection.queries;
     this._act = connection.actions;
@@ -557,6 +564,9 @@ export class ChainSource {
       onEvent: (event) => this._queuePlaybackEvent(event),
       onError: (error) => {
         this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
+      },
+      onSubscribed: ({ reconnected }) => {
+        if (reconnected) this._requestSnapshotReload('best-state reconnected');
       },
     });
     await this._eventListener.start();
@@ -636,14 +646,18 @@ export class ChainSource {
     let lastError;
     for (let i = 0; i < attempts; i += 1) {
       try {
-        const reply = await this._api.call.program.calculateReplyForHandle(
-          READ_SOURCE,
-          this.programId,
+        await ensureVaraEthProviderConnected(this._provider);
+        const reply = await calculateWorldReply({
+          api: this._api,
+          provider: this._provider,
+          source: READ_SOURCE,
+          programId: this.programId,
           payload,
-        );
+        });
         return reply.payload;
       } catch (error) {
         lastError = error;
+        if (isVaraEthConnectionError(error) && i < attempts - 1) continue;
         // "not found state hash" (RpcError 8000) is transient: the validator
         // briefly lacks the program's current state during a recycle/reset or
         // sync lag. Retry instead of hard-failing the whole spectator.
@@ -1703,6 +1717,6 @@ export class ChainSource {
 
   dispose() {
     this._eventListener?.stop?.();
-    this._api?.provider?.disconnect?.();
+    this._provider?.disconnect?.();
   }
 }

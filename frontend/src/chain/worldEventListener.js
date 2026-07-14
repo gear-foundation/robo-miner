@@ -6,6 +6,32 @@ const UNSUBSCRIBE_METHOD = 'program_unsubscribeBestState';
 const RECONNECT_MS = 1500;
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 
+export function isVaraEthConnectionError(error) {
+  return /websocket (is )?(disconnected|connection (closed|failed))|call connect\(\)|failed to connect to websocket/i
+    .test(String(error?.message || error || ''));
+}
+
+export async function ensureVaraEthProviderConnected(provider) {
+  if (!provider || typeof provider.connect !== 'function') {
+    throw new Error('Vara.eth WebSocket provider is unavailable');
+  }
+  if (provider.isConnected === true || provider.connectionState === 'connected') return;
+  await provider.connect();
+}
+
+export async function calculateWorldReply({ api, provider, source, programId, payload }) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await ensureVaraEthProviderConnected(provider);
+    try {
+      return await api.call.program.calculateReplyForHandle(source, programId, payload);
+    } catch (error) {
+      if (attempt === 0 && isVaraEthConnectionError(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error('Vara.eth query retry exhausted');
+}
+
 function bytesToHex(bytes) {
   if (!bytes) return '';
   if (typeof bytes === 'string') return bytes;
@@ -93,7 +119,11 @@ export async function connectWorldProgram({ programId, idlUrl, config = CHAIN })
   const { SailsProgram } = await import('sails-js');
   const { SailsIdlParser } = await import('sails-js/parser');
 
-  const provider = new WsVaraEthProvider(config.varaEthWs);
+  // Do not rely on the SDK's fire-and-forget auto-connect. createVaraEthApi()
+  // initializes the Ethereum client, not this provider, so a first read could
+  // otherwise race a disconnected WebSocket.
+  const provider = new WsVaraEthProvider(config.varaEthWs, { autoConnect: false });
+  await ensureVaraEthProviderConnected(provider);
   const publicClient = createPublicClient({ transport: http(config.ethRpc) });
   const api = await createVaraEthApi(provider, publicClient, config.routerAddress);
 
@@ -126,18 +156,22 @@ export async function readWorldAgentSummaries({ programIds = [], idlUrl, config 
     const worldQueries = connection.program.services.World.queries;
     const agentsPayload = connection.queries.agents();
     const results = await Promise.allSettled(ids.map(async (programId) => {
-      const reply = await connection.api.call.program.calculateReplyForHandle(
-        READ_SOURCE,
+      const reply = await calculateWorldReply({
+        api: connection.api,
+        provider: connection.provider,
+        source: READ_SOURCE,
         programId,
-        agentsPayload,
-      );
+        payload: agentsPayload,
+      });
       const owners = worldQueries.Agents.decodeResult(reply.payload);
       const states = await Promise.allSettled(owners.map(async (owner) => {
-        const stateReply = await connection.api.call.program.calculateReplyForHandle(
-          READ_SOURCE,
+        const stateReply = await calculateWorldReply({
+          api: connection.api,
+          provider: connection.provider,
+          source: READ_SOURCE,
           programId,
-          connection.queries.agentOf(owner),
-        );
+          payload: connection.queries.agentOf(owner),
+        });
         return Number(worldQueries.AgentOf.decodeResult(stateReply.payload)[0]);
       }));
       const values = states
@@ -164,31 +198,39 @@ export function createWorldEventListener(options) {
 
 export class WorldBestStateListener {
   constructor({
-    api,
     program,
     programId,
     config = CHAIN,
     onEvent = () => {},
     onError = () => {},
+    onSubscribed = () => {},
+    WebSocketCtor = globalThis.WebSocket,
+    reconnectMs = RECONNECT_MS,
+    setTimer = setTimeout,
+    clearTimer = clearTimeout,
   } = {}) {
-    this.api = api;
     this.program = program;
     this.programId = programId;
     this.config = config;
     this.onEvent = onEvent;
     this.onError = onError;
+    this.onSubscribed = onSubscribed;
+    this.WebSocketCtor = WebSocketCtor;
+    this.reconnectMs = reconnectMs;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
     this.ws = null;
     this.requestId = 0;
+    this.subscriptionRequestId = null;
     this.subscriptionId = null;
-    this.unsubscribeFn = null;
     this.started = false;
+    this.hasSubscribed = false;
     this.reconnectTimer = null;
     this.seen = new Set();
   }
 
   async start() {
     this.started = true;
-    if (await this.startLibrarySubscription()) return;
     this.connectRaw();
   }
 
@@ -196,57 +238,30 @@ export class WorldBestStateListener {
 
   stop() {
     this.started = false;
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.reconnectTimer) this.clearTimer(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.unsubscribeFn?.();
-    this.unsubscribeFn = null;
     this.unsubscribe();
     this.ws?.close?.();
     this.ws = null;
+    this.subscriptionRequestId = null;
+    this.subscriptionId = null;
+    this.hasSubscribed = false;
     this.seen.clear();
-  }
-
-  async startLibrarySubscription() {
-    const subscribe = this.api?.query?.program?.subscribeBestState;
-    if (typeof subscribe !== 'function') return false;
-
-    try {
-      const unsubscribe = await subscribe.call(
-        this.api.query.program,
-        this.programId,
-        (bestState) => this.handleBestState(bestState),
-        (error) => this.handleSubscriptionError(error),
-      );
-      if (!this.started) {
-        unsubscribe?.();
-        return true;
-      }
-      this.unsubscribeFn = unsubscribe;
-      return true;
-    } catch (error) {
-      this.handleSubscriptionError(error);
-      return false;
-    }
-  }
-
-  handleSubscriptionError(error) {
-    this.onError(error instanceof Error ? error : new Error(rpcErrorMessage(error)));
-    if (error?.code === -32601) this.stop();
   }
 
   connectRaw() {
     if (!this.started || !this.config.varaEthWs || !this.programId) return;
-    if (typeof WebSocket === 'undefined') {
+    if (typeof this.WebSocketCtor !== 'function') {
       this.onError(new Error('WebSocket is not available in this browser'));
       return;
     }
 
-    const ws = new WebSocket(this.config.varaEthWs);
+    const ws = new this.WebSocketCtor(this.config.varaEthWs);
     this.ws = ws;
 
     ws.onopen = () => {
       this.subscriptionId = null;
-      this.send(SUBSCRIBE_METHOD, [this.programId]);
+      this.subscriptionRequestId = this.send(SUBSCRIBE_METHOD, [this.programId]);
     };
     ws.onmessage = (message) => this.handleMessage(message.data);
     ws.onerror = () => {
@@ -255,27 +270,28 @@ export class WorldBestStateListener {
     ws.onclose = () => {
       if (this.ws === ws) this.ws = null;
       this.subscriptionId = null;
+      this.subscriptionRequestId = null;
       if (this.started) this.scheduleReconnect();
     };
   }
 
   scheduleReconnect() {
     if (this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = this.setTimer(() => {
       this.reconnectTimer = null;
       this.connectRaw();
-    }, RECONNECT_MS);
+    }, this.reconnectMs);
   }
 
   send(method, params = []) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return null;
+    if (!this.ws || this.ws.readyState !== this.WebSocketCtor.OPEN) return null;
     const id = ++this.requestId;
     this.ws.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
     return id;
   }
 
   unsubscribe() {
-    if (!this.subscriptionId || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (!this.subscriptionId || !this.ws || this.ws.readyState !== this.WebSocketCtor.OPEN) return;
     this.send(UNSUBSCRIBE_METHOD, [this.subscriptionId]);
     this.subscriptionId = null;
   }
@@ -293,12 +309,20 @@ export class WorldBestStateListener {
     }
 
     if (message.error) {
-      this.handleSubscriptionError(message.error);
+      const error = new Error(rpcErrorMessage(message.error));
+      this.onError(error);
+      if (message.error?.code === -32601) this.stop();
+      else this.ws?.close?.();
       return;
     }
 
     if (message.id && typeof message.result === 'string') {
       this.subscriptionId = message.result;
+      if (message.id === this.subscriptionRequestId) {
+        const reconnected = this.hasSubscribed;
+        this.hasSubscribed = true;
+        this.onSubscribed({ reconnected });
+      }
       return;
     }
 

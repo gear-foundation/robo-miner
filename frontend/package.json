@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "test": "node --test test/*.test.js",
     "check:idl": "node scripts/check-idl-sync.mjs",
     "prebuild": "npm run check:idl",
     "build": "vite build",

@@ -17,6 +17,7 @@ import { navigateBack, navigateTo } from '../router.js';
 // current worlds, past snapshots, statuses, and agent counts. Configured env
 // program ids are only a fallback when discovery is unavailable.
 const ARENA_MODES = ['coop-gem', 'coop-race', 'coop-timed', 'arena'];
+const LIVE_AGENT_COUNT_POLL_MS = 5_000;
 
 function isPastStatus(status) {
   return ['finished', 'retired', 'archived'].includes(String(status || '').toLowerCase());
@@ -146,11 +147,12 @@ export default class LobbyScene extends Phaser.Scene {
     this.loadingWorlds = CHAIN.enabled;
     this.worlds = { current: [], past: [] };
     this.agentCountPollTimer = null;
+    this.agentCountRefreshPromise = null;
     const W = this.scale.width, H = this.scale.height;
     this.add.graphics().fillStyle(0x20140a, 1).fillRect(0, 0, W, H);
     this.buildDOM();
     this.refreshWorlds();
-    this.agentCountPollTimer = window.setInterval(() => this.refreshLiveAgentCounts(), 10_000);
+    this.agentCountPollTimer = window.setInterval(() => this.refreshLiveAgentCounts(), LIVE_AGENT_COUNT_POLL_MS);
     this.scale.on('resize', this.onResize, this);
     this.events.once('shutdown', () => this.cleanupScene());
     this.events.once('destroy', () => this.cleanupScene());
@@ -297,17 +299,23 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   async refreshLiveAgentCounts() {
+    if (this.agentCountRefreshPromise) return this.agentCountRefreshPromise;
     const worlds = this.worlds.current || [];
     if (!worlds.length) return;
-    const before = worlds.map((world) => JSON.stringify([
-      world.agents,
-      world.activeAgents,
-    ]));
-    await this.hydrateLiveAgentCounts(worlds);
-    if (before.some((summary, index) => summary !== JSON.stringify([
-      worlds[index].agents,
-      worlds[index].activeAgents,
-    ]))) this.renderGrid();
+    this.agentCountRefreshPromise = (async () => {
+      const before = worlds.map((world) => JSON.stringify([
+        world.agents,
+        world.activeAgents,
+      ]));
+      await this.hydrateLiveAgentCounts(worlds);
+      if (before.some((summary, index) => summary !== JSON.stringify([
+        worlds[index].agents,
+        worlds[index].activeAgents,
+      ]))) this.renderGrid();
+    })().finally(() => {
+      this.agentCountRefreshPromise = null;
+    });
+    return this.agentCountRefreshPromise;
   }
 
   async fetchDiscoveryWorlds(base) {
@@ -508,6 +516,7 @@ export default class LobbyScene extends Phaser.Scene {
   cleanupScene() {
     if (this.agentCountPollTimer) window.clearInterval(this.agentCountPollTimer);
     this.agentCountPollTimer = null;
+    this.agentCountRefreshPromise = null;
     this.cleanupDOM();
   }
 }

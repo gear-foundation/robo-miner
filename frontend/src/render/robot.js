@@ -59,25 +59,6 @@ export function pickRandomBodyColor() {
   return BODY_COLOR_IDS[Math.floor(Math.random() * BODY_COLOR_IDS.length)];
 }
 
-// Shared overlay anchor for UI that needs to track the visible robot, rather
-// than its logical map tile. Keep the hat offsets in sync with drawHat().
-export function robotVisualAnchor(cx, cy, size, opts = {}) {
-  const shake = opts.shake || { x: 0, y: 0 };
-  const s = size / 48;
-  const P = (v) => Math.max(1, Math.round(v * s));
-  const x = Math.round(cx - size / 2 + (shake.x || 0));
-  const y = Math.round(cy - size / 2 + (shake.y || 0));
-  const hat = opts.hat || 'none';
-  let top = y + P(2); // antenna / diamond on an un-hatted robot
-
-  if (hat === 'party') top = y - P(4);
-  else if (hat === 'top') top = y - P(2);
-  else if (hat === 'beanie') top = y - P(1);
-  else if (hat !== 'none') top = y;
-
-  return { x: x + size / 2, top, bottom: y + P(48) };
-}
-
 // Tiny adapter that lets `drawRobot` (built around Phaser's Graphics
 // API) render onto a regular HTML `<canvas>` 2D context. Used by menu
 // previews and inventory avatars where we don't have a Phaser scene.

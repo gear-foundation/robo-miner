@@ -6,7 +6,7 @@ import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
 import { CHAIN, addressExplorerUrl, discoveryBaseUrl } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
-import { drawRobot as drawSharedRobot, robotVisualAnchor } from '../render/robot.js';
+import { drawRobot as drawSharedRobot } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
 import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
@@ -31,8 +31,6 @@ const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
 const AGENT_BUBBLE_MARGIN = 10;
 const AGENT_BUBBLE_HUD_CLEARANCE = 54;
 const AGENT_BUBBLE_BELOW_GAP = 12;
-const AGENT_BUBBLE_TAIL_SIZE = 8;
-const AGENT_BUBBLE_ABOVE_GAP = 8;
 const HUD_MOBILE_WIDTH = 640;
 const HUD_COMPACT_WIDTH = 1120;
 
@@ -1127,7 +1125,9 @@ export default class SpectatorScene extends GameScene {
       const dying = !m.alive && m.respawnAtMs != null; // show the squashed corpse until respawn
       if (!m.alive && !dying) continue;
       const digging = !!(m.act && m.act.kind === 'dig') && !dying;
-      const shake = this.spectatorRobotShake(m, time, digging);
+      const shake = digging
+        ? { x: (Math.floor(time / 55) % 2 === 0) ? 1 : -1, y: (Math.floor(time / 80) % 2 === 0) ? 1 : 0 }
+        : { x: 0, y: 0 };
       drawSharedRobot(g, m.drawX * TILE + TILE / 2, m.drawY * TILE + TILE / 2, TILE, {
         facing: m.facing, digging, time, hasDiamond: m.hasDiamond,
         shake, squashed: dying, hat: m.hat, bodyColor: m.color, tier: 1,
@@ -1143,14 +1143,6 @@ export default class SpectatorScene extends GameScene {
         }
       }
     }
-  }
-
-  spectatorRobotShake(agent, time = this.time?.now || 0, digging = Boolean(agent?.act && agent.act.kind === 'dig')) {
-    if (!digging) return { x: 0, y: 0 };
-    return {
-      x: (Math.floor(time / 55) % 2 === 0) ? 1 : -1,
-      y: (Math.floor(time / 80) % 2 === 0) ? 1 : 0,
-    };
   }
 
   handleAgentPointerClick(pointer) {
@@ -1396,46 +1388,23 @@ export default class SpectatorScene extends GameScene {
     if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleMiner) return;
     const cam = this.cameras.main;
     const zoom = cam.zoom || 1;
-    const bubbleKey = spectatorAgentKey(this.agentBubbleMiner);
-    const m = this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === bubbleKey) || this.agentBubbleMiner;
-    // The renderer consumes the live miner object. Refresh the bubble's
-    // reference each frame so interpolation and camera follow cannot leave the
-    // overlay attached to a stale coordinate snapshot.
-    this.agentBubbleMiner = m;
-    const visual = robotVisualAnchor(
-      m.drawX * TILE + TILE / 2,
-      m.drawY * TILE + TILE / 2,
-      TILE,
-      { hat: m.hat, shake: this.spectatorRobotShake(m) },
-    );
-    const canvasRect = this.game?.canvas?.getBoundingClientRect?.();
-    const canvasScaleX = canvasRect ? canvasRect.width / cam.width : 1;
-    const canvasScaleY = canvasRect ? canvasRect.height / cam.height : 1;
-    const canvasLeft = canvasRect?.left || 0;
-    const canvasTop = canvasRect?.top || 0;
-    // Phaser renders into canvas coordinates, while the bubble is a fixed DOM
-    // node in CSS viewport coordinates. Account for the canvas rect and any
-    // mobile CSS/device scaling before positioning the DOM node.
-    const sx = canvasLeft + (cam.x + (visual.x - cam.scrollX) * zoom) * canvasScaleX;
-    const robotTop = canvasTop + (cam.y + (visual.top - cam.scrollY) * zoom) * canvasScaleY;
-    // The tail is 8 CSS px tall. Leave a visible gap above the robot instead
-    // of letting the card appear to sit on its head.
-    const sy = robotTop - AGENT_BUBBLE_TAIL_SIZE - AGENT_BUBBLE_ABOVE_GAP;
-    const robotBottom = canvasTop + (cam.y + (visual.bottom - cam.scrollY) * zoom) * canvasScaleY;
+    const m = this.agentBubbleMiner;
+    const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
+    const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
+    const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
+    const side = m.facing === 'left' ? -1 : 1;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,
       height: this.agentBubbleEl.offsetHeight,
     };
     this.agentBubbleSize = size;
 
-    const viewportWidth = window.visualViewport?.width || window.innerWidth;
-    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
     const halfWidth = size.width / 2;
     const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
     const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);
-    // Keep the card centered over its digger. Only viewport clamping may move
-    // the card sideways, in which case the tail points back to the digger.
-    const left = Phaser.Math.Clamp(sx, minLeft, maxLeft);
+    const left = Phaser.Math.Clamp(sx + side * 36, minLeft, maxLeft);
     const below = sy - size.height - AGENT_BUBBLE_MARGIN < AGENT_BUBBLE_HUD_CLEARANCE;
     const belowTop = Phaser.Math.Clamp(
       robotBottom + AGENT_BUBBLE_BELOW_GAP,

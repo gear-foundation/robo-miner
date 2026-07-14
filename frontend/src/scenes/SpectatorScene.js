@@ -1688,9 +1688,8 @@ export default class SpectatorScene extends GameScene {
       this.stopSpectatorFollow();
     };
     window.addEventListener('keydown', this._spectatorKeyHandler);
-    // Start with the roster available, but let the toolbar reclaim the mine view
-    // at every breakpoint.
-    this.toggleSpectatorRoster(true);
+    // Keep the mine unobstructed on entry. The toolbar button opens the roster.
+    this.toggleSpectatorRoster(false);
     this.syncSpectatorRoster();
   }
 

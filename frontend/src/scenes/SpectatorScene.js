@@ -1562,7 +1562,7 @@ export default class SpectatorScene extends GameScene {
       #spec-roster button:focus-visible,#spec-diggers-btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
       #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
       #spec-roster-dossier{padding:0;background:#17212b;border-bottom:1px solid #2f6a3f}
-      #spec-roster-list{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0;scrollbar-width:thin;scrollbar-color:#2f6a3f #101820}
+      #spec-roster-list{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0;scrollbar-width:thin;scrollbar-color:#2f6a3f #101820;touch-action:pan-y;-webkit-overflow-scrolling:touch}
       .spec-agent-row{position:relative;width:100%;min-height:54px;display:block;text-align:left;padding:7px 10px;box-sizing:border-box;background:transparent;color:#f1e6cf;border:0;border-bottom:1px solid #294150;border-radius:0;transition-property:transform,background-color,border-color,box-shadow;transition-duration:.12s;transition-timing-function:ease-out}
       .spec-agent-row:hover{background:#1a2a34}
       .spec-agent-row:active{transform:scale(.96)}
@@ -1683,18 +1683,27 @@ export default class SpectatorScene extends GameScene {
         this.rosterRows.set(key, row);
       }
       const selected = key === this.selectedAgentKey;
-      row.innerHTML = this.agentRosterRowHtml(agent);
-      row.setAttribute('aria-pressed', String(selected));
-      row.setAttribute('aria-disabled', String(agent.exited));
-      row.title = agent.exited ? 'Exited digger, details only' : `Follow ${this.agentDisplayName(agent)}`;
-      this.rosterListEl.appendChild(row);
+      const html = this.agentRosterRowHtml(agent);
+      const pressed = String(selected);
+      const disabled = String(agent.exited);
+      const title = agent.exited ? 'Exited digger, details only' : `Follow ${this.agentDisplayName(agent)}`;
+      if (row._spectatorHtml !== html) {
+        row.innerHTML = html;
+        row._spectatorHtml = html;
+      }
+      if (row.getAttribute('aria-pressed') !== pressed) row.setAttribute('aria-pressed', pressed);
+      if (row.getAttribute('aria-disabled') !== disabled) row.setAttribute('aria-disabled', disabled);
+      if (row.title !== title) row.title = title;
+      if (row.parentElement !== this.rosterListEl) this.rosterListEl.appendChild(row);
     }
     for (const [key, row] of this.rosterRows) {
       if (!live.has(key)) { row.remove(); this.rosterRows.delete(key); }
     }
     const alive = miners.filter((agent) => agent.alive).length;
-    if (this.rosterCountEl) this.rosterCountEl.textContent = `${alive}/${miners.length}`;
-    if (this.diggersBtn) this.diggersBtn.textContent = `DIGGERS ${miners.length}`;
+    const rosterCount = `${alive}/${miners.length}`;
+    if (this.rosterCountEl && this.rosterCountEl.textContent !== rosterCount) this.rosterCountEl.textContent = rosterCount;
+    const diggerCount = `DIGGERS ${miners.length}`;
+    if (this.diggersBtn && this.diggersBtn.textContent !== diggerCount) this.diggersBtn.textContent = diggerCount;
     this.renderSelectedDossier();
   }
 
@@ -1702,10 +1711,17 @@ export default class SpectatorScene extends GameScene {
     if (!this.rosterDossierEl) return;
     const agent = this.selectedSpectatorAgent();
     if (!agent) {
-      this.rosterDossierEl.innerHTML = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to follow</div>';
+      const html = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to follow</div>';
+      if (this._rosterDossierHtml !== html) {
+        this.rosterDossierEl.innerHTML = html;
+        this._rosterDossierHtml = html;
+      }
       return;
     }
-    this.rosterDossierEl.innerHTML = this.agentDossierHtml(agent);
+    const html = this.agentDossierHtml(agent);
+    if (this._rosterDossierHtml === html) return;
+    this.rosterDossierEl.innerHTML = html;
+    this._rosterDossierHtml = html;
     const follow = this.rosterDossierEl.querySelector('[data-spec-follow]');
     if (follow) {
       follow.onclick = () => {

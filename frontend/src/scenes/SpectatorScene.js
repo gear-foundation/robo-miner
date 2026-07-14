@@ -6,7 +6,7 @@ import { GAME_MODES } from '../engine/index.js';
 import { createWorldSource } from '../chain/source.js';
 import { CHAIN, addressExplorerUrl, discoveryBaseUrl } from '../chain/config.js';
 import { createSquad } from '../engine/agents.js';
-import { drawRobot as drawSharedRobot } from '../render/robot.js';
+import { drawRobot as drawSharedRobot, robotVisualAnchor } from '../render/robot.js';
 import { generateAgentName } from '../agentNames.js';
 import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
@@ -1127,10 +1127,7 @@ export default class SpectatorScene extends GameScene {
       const dying = !m.alive && m.respawnAtMs != null; // show the squashed corpse until respawn
       if (!m.alive && !dying) continue;
       const digging = !!(m.act && m.act.kind === 'dig') && !dying;
-      // Same dig shake as single-player drawRobot.
-      const shake = digging
-        ? { x: (Math.floor(time / 55) % 2 === 0) ? 1 : -1, y: (Math.floor(time / 80) % 2 === 0) ? 1 : 0 }
-        : { x: 0, y: 0 };
+      const shake = this.spectatorRobotShake(m, time, digging);
       drawSharedRobot(g, m.drawX * TILE + TILE / 2, m.drawY * TILE + TILE / 2, TILE, {
         facing: m.facing, digging, time, hasDiamond: m.hasDiamond,
         shake, squashed: dying, hat: m.hat, bodyColor: m.color, tier: 1,
@@ -1146,6 +1143,14 @@ export default class SpectatorScene extends GameScene {
         }
       }
     }
+  }
+
+  spectatorRobotShake(agent, time = this.time?.now || 0, digging = Boolean(agent?.act && agent.act.kind === 'dig')) {
+    if (!digging) return { x: 0, y: 0 };
+    return {
+      x: (Math.floor(time / 55) % 2 === 0) ? 1 : -1,
+      y: (Math.floor(time / 80) % 2 === 0) ? 1 : 0,
+    };
   }
 
   handleAgentPointerClick(pointer) {
@@ -1383,12 +1388,18 @@ export default class SpectatorScene extends GameScene {
     const cam = this.cameras.main;
     const zoom = cam.zoom || 1;
     const m = this.agentBubbleMiner;
-    const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
-    const robotTop = (m.drawY * TILE - cam.scrollY) * zoom;
+    const visual = robotVisualAnchor(
+      m.drawX * TILE + TILE / 2,
+      m.drawY * TILE + TILE / 2,
+      TILE,
+      { hat: m.hat, shake: this.spectatorRobotShake(m) },
+    );
+    const sx = (visual.x - cam.scrollX) * zoom;
+    const robotTop = (visual.top - cam.scrollY) * zoom;
     // The tail is 8 CSS px tall. Leave a visible gap above the robot instead
     // of letting the card appear to sit on its head.
     const sy = robotTop - AGENT_BUBBLE_TAIL_SIZE - AGENT_BUBBLE_ABOVE_GAP;
-    const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
+    const robotBottom = (visual.bottom - cam.scrollY) * zoom;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,
       height: this.agentBubbleEl.offsetHeight,

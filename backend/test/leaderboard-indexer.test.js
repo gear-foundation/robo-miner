@@ -145,6 +145,9 @@ test('world snapshots preserve dead and exited digger statuses', async () => {
   }]);
 
   let db = await store.read();
+  assert.equal(db.worlds[0].registeredAgents, 3);
+  assert.equal(db.worlds[0].activeAgents, 1);
+  assert.equal(db.worlds[0].agents, 1);
   assert.equal(db.diggers.find((digger) => digger.actorId === OWNER).status, 'active');
   assert.equal(db.diggers.find((digger) => digger.actorId === OWNER_2).status, 'dead');
   const exited = db.diggers.find((digger) => digger.actorId?.endsWith('1111111111111111111111111111111111111111'));
@@ -202,10 +205,14 @@ test('world snapshot updates public world session status and agent count', async
     seasonId: 'season-1',
     status: 'waiting_agents',
     agents: 2,
+    activeAgents: 2,
+    registeredAgents: 2,
     owners: [OWNER, OWNER_2],
+    activeOwners: [OWNER, OWNER_2],
     sessionId: '3',
     seed: '4290832138',
     session: { id: '3', seed: '4290832138', status: 0, actionSeq: '0' },
+    chainUpdatedAt: '2026-06-11T00:00:05.000Z',
     updatedAt: '2026-06-11T00:00:05.000Z',
   });
 

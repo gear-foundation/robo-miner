@@ -5,6 +5,7 @@ const SUBSCRIBE_METHOD = 'program_subscribeBestState';
 const UNSUBSCRIBE_METHOD = 'program_unsubscribeBestState';
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const DEFAULT_RECONNECT_MS = 1500;
+const DEFAULT_SUBSCRIPTION_ACK_MS = 8000;
 
 export class BestStateEventReader {
   constructor({
@@ -13,6 +14,7 @@ export class BestStateEventReader {
     onEvents = async () => {},
     logger = null,
     reconnectMs = DEFAULT_RECONNECT_MS,
+    subscriptionAckMs = DEFAULT_SUBSCRIPTION_ACK_MS,
   }) {
     this.config = config;
     this.programs = (programs.length > 0 ? programs : config.indexerPrograms || programsFromConfig(config))
@@ -21,6 +23,7 @@ export class BestStateEventReader {
     this.onEvents = onEvents;
     this.logger = logger;
     this.reconnectMs = reconnectMs;
+    this.subscriptionAckMs = subscriptionAckMs;
     this.sailsByType = new Map();
     this.subscriptions = new Map();
     this.seen = new Set();
@@ -65,6 +68,7 @@ export class BestStateEventReader {
     for (const sub of this.subscriptions.values()) {
       if (sub.reconnectTimer) clearTimeout(sub.reconnectTimer);
       sub.reconnectTimer = null;
+      this.clearSubscriptionAckTimer(sub);
       this.unsubscribe(sub);
       sub.ws?.close?.();
       sub.ws = null;
@@ -98,7 +102,9 @@ export class BestStateEventReader {
       program,
       ws: null,
       requestId: 0,
+      subscriptionRequestId: null,
       subscriptionId: null,
+      subscriptionAckTimer: null,
       reconnectTimer: null,
     };
     this.subscriptions.set(key, sub);
@@ -111,11 +117,13 @@ export class BestStateEventReader {
     sub.ws = ws;
 
     attachWs(ws, 'open', () => {
+      if (sub.ws !== ws) return;
       sub.subscriptionId = null;
-      this.send(sub, SUBSCRIBE_METHOD, [sub.program.programId]);
+      sub.subscriptionRequestId = this.send(sub, SUBSCRIBE_METHOD, [sub.program.programId]);
+      this.startSubscriptionAckTimer(sub, ws);
     });
     attachWs(ws, 'message', (message) => {
-      this.handleMessage(sub, message?.data ?? message);
+      if (sub.ws === ws) this.handleMessage(sub, message?.data ?? message);
     });
     attachWs(ws, 'error', (error) => {
       this.logger?.warn?.('best_state.ws.error', {
@@ -123,10 +131,14 @@ export class BestStateEventReader {
         programId: sub.program.programId,
         error: errorMessage(error),
       });
+      if (sub.ws === ws) ws.close?.();
     });
     attachWs(ws, 'close', () => {
-      if (sub.ws === ws) sub.ws = null;
+      if (sub.ws !== ws) return;
+      sub.ws = null;
+      this.clearSubscriptionAckTimer(sub);
       sub.subscriptionId = null;
+      sub.subscriptionRequestId = null;
       if (this.started) this.scheduleReconnect(sub);
     });
   }
@@ -147,9 +159,27 @@ export class BestStateEventReader {
   }
 
   unsubscribe(sub) {
-    if (!sub.subscriptionId || !sub.ws || sub.ws.readyState !== this.WebSocket.OPEN) return;
+    if (sub.subscriptionId === null || !sub.ws || sub.ws.readyState !== this.WebSocket.OPEN) return;
     this.send(sub, UNSUBSCRIBE_METHOD, [sub.subscriptionId]);
     sub.subscriptionId = null;
+  }
+
+  startSubscriptionAckTimer(sub, ws) {
+    this.clearSubscriptionAckTimer(sub);
+    sub.subscriptionAckTimer = setTimeout(() => {
+      sub.subscriptionAckTimer = null;
+      if (sub.ws !== ws || sub.subscriptionId !== null) return;
+      this.logger?.warn?.('best_state.subscription.timeout', {
+        programType: sub.program.programType,
+        programId: sub.program.programId,
+      });
+      ws.close?.();
+    }, this.subscriptionAckMs);
+  }
+
+  clearSubscriptionAckTimer(sub) {
+    if (sub.subscriptionAckTimer !== null) clearTimeout(sub.subscriptionAckTimer);
+    sub.subscriptionAckTimer = null;
   }
 
   handleMessage(sub, data) {
@@ -172,14 +202,15 @@ export class BestStateEventReader {
         programId: sub.program.programId,
         error: rpcErrorMessage(message.error),
       });
-      if (!sub.subscriptionId && sub.ws === this.subscriptions.get(sub.key)?.ws) {
+      if (sub.ws === this.subscriptions.get(sub.key)?.ws) {
         sub.ws?.close?.();
       }
       return;
     }
 
-    if (message.id && typeof message.result === 'string') {
+    if (message.id === sub.subscriptionRequestId && isSubscriptionId(message.result)) {
       sub.subscriptionId = message.result;
+      this.clearSubscriptionAckTimer(sub);
       this.logger?.info?.('best_state.subscribed', {
         programType: sub.program.programType,
         programId: sub.program.programId,
@@ -253,6 +284,11 @@ export class BestStateEventReader {
       timestamp: new Date().toISOString(),
     };
   }
+}
+
+function isSubscriptionId(value) {
+  return (typeof value === 'string' && value.length > 0)
+    || (typeof value === 'number' && Number.isFinite(value));
 }
 
 function attachWs(ws, event, handler) {

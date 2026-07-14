@@ -49,6 +49,7 @@ export function createWorldSource(opts) {
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 const DEFAULT_RAW_SURFACE = Number.isFinite(CHAIN.contractSurfaceY) ? CHAIN.contractSurfaceY : 1;
 const CHAIN_AGENT_SYNC_MS = 10_000;
+const CHAIN_EVENT_GAP_MS = 12_000;
 const AGENT_STATUS = {
   ACTIVE: 1,
   SURFACED: 2,
@@ -211,6 +212,10 @@ function nowMs() {
   return globalThis.performance?.now?.() || Date.now();
 }
 
+function wallClockMs() {
+  return Date.now();
+}
+
 function playbackGroupKey(event) {
   return event.messageId
     || event.txHash
@@ -354,6 +359,7 @@ function snapshotMiner(row, surface, rawSurface, yOffset, config = [], previous 
     radar: 2,
     maxLadders: Number(config[7] ?? laddersRemaining),
     exited,
+    actionSeq: String(row.state?.[12] ?? previous?.actionSeq ?? '0'),
   };
 }
 
@@ -472,8 +478,9 @@ export class ChainSource {
     this._playbackOpenGroups = new Map();
     this._snapshotReloadReason = null;
     this._snapshotReloadPromise = null;
-    this._agentStateSyncMs = 0;
+    this._nextAgentStateSyncAt = wallClockMs() + CHAIN_AGENT_SYNC_MS;
     this._agentStateSyncPromise = null;
+    this._lastRealtimeEventAt = wallClockMs();
     this._lastGrid = null;
     this._lastAgents = new Map();
     this._countedResourceEvents = new Set();
@@ -561,7 +568,10 @@ export class ChainSource {
       program: this._program,
       programId: this.programId,
       config: CHAIN,
-      onEvent: (event) => this._queuePlaybackEvent(event),
+      onEvent: (event) => {
+        this._lastRealtimeEventAt = wallClockMs();
+        this._queuePlaybackEvent(event);
+      },
       onError: (error) => {
         this._pending.push({ type: 'chain_error', message: error?.message || String(error) });
       },
@@ -631,7 +641,7 @@ export class ChainSource {
   update(dtMs = 0) {
     this.timeMs += dtMs;
     this._startSnapshotReloadIfNeeded();
-    this._startAgentStateSyncIfNeeded(dtMs);
+    this._startAgentStateSyncIfNeeded();
     this._drainPlaybackQueue();
     this._advanceAnimations(dtMs);
 
@@ -1479,10 +1489,10 @@ export class ChainSource {
       });
   }
 
-  _startAgentStateSyncIfNeeded(dtMs = 0) {
-    this._agentStateSyncMs += Number(dtMs) || 0;
-    if (this._agentStateSyncMs < CHAIN_AGENT_SYNC_MS) return;
-    this._agentStateSyncMs = 0;
+  _startAgentStateSyncIfNeeded() {
+    const now = wallClockMs();
+    if (now < this._nextAgentStateSyncAt) return;
+    this._nextAgentStateSyncAt = now + CHAIN_AGENT_SYNC_MS;
     if (this._agentStateSyncPromise || this._polling || this._snapshotReloadPromise) return;
     this._agentStateSyncPromise = this._refreshAgentStates()
       .catch((error) => {
@@ -1526,7 +1536,15 @@ export class ChainSource {
         return null;
       }
     }));
-    this._mergeAgentRows(rows.filter(Boolean));
+    const resolvedRows = rows.filter(Boolean);
+    const actionAdvanced = resolvedRows.some((row) => {
+      const miner = this.s.miners.find((item) => sameActor(item.owner, row.owner));
+      return Boolean(miner && String(miner.actionSeq ?? '0') !== String(row.state?.[12] ?? miner.actionSeq ?? '0'));
+    });
+    this._mergeAgentRows(resolvedRows);
+    if (actionAdvanced && wallClockMs() - this._lastRealtimeEventAt >= CHAIN_EVENT_GAP_MS) {
+      this._requestSnapshotReload('agent action advanced without a realtime event');
+    }
   }
 
   _mergeAgentRows(rows = []) {
@@ -1571,6 +1589,7 @@ export class ChainSource {
     miner.items = { ...(miner.items || {}), ladder: laddersRemaining };
     miner.maxCargo = backpackCapacity;
     miner.backpackCapacity = backpackCapacity;
+    miner.actionSeq = String(state[12] ?? miner.actionSeq ?? '0');
     this._syncMinerEarned(miner);
 
     if (!miner.act) {

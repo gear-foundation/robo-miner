@@ -110,3 +110,26 @@ test('best-state reader reconnects when the subscription RPC returns an error', 
   assert.equal(closes, 1);
   assert.equal(warnings[0].event, 'best_state.rpc.error');
 });
+
+test('best-state reader accepts numeric subscription ids from Vara.eth RPC', () => {
+  const programId = '0x0000000000000000000000000000000000000001';
+  const reader = new BestStateEventReader({
+    config: { rootDir: process.cwd(), varaEthWs: 'ws://example.invalid' },
+    programs: [{ programType: 'world', programId }],
+  });
+  const sub = {
+    key: `world:${programId}`,
+    program: reader.programs[0],
+    subscriptionRequestId: 1,
+    subscriptionId: null,
+    subscriptionAckTimer: null,
+  };
+
+  reader.handleMessage(sub, JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    result: 5980674656729392,
+  }));
+
+  assert.equal(sub.subscriptionId, 5980674656729392);
+});

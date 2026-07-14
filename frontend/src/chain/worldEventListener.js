@@ -4,6 +4,7 @@ import { decodeWorldEvent, worldActions, worldQueries } from './world.js';
 const SUBSCRIBE_METHOD = 'program_subscribeBestState';
 const UNSUBSCRIBE_METHOD = 'program_unsubscribeBestState';
 const RECONNECT_MS = 1500;
+const SUBSCRIPTION_ACK_MS = 8000;
 const READ_SOURCE = '0x0000000000000000000000000000000000000001';
 
 export function isVaraEthConnectionError(error) {
@@ -206,6 +207,7 @@ export class WorldBestStateListener {
     onSubscribed = () => {},
     WebSocketCtor = globalThis.WebSocket,
     reconnectMs = RECONNECT_MS,
+    subscriptionAckMs = SUBSCRIPTION_ACK_MS,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
   } = {}) {
@@ -217,6 +219,7 @@ export class WorldBestStateListener {
     this.onSubscribed = onSubscribed;
     this.WebSocketCtor = WebSocketCtor;
     this.reconnectMs = reconnectMs;
+    this.subscriptionAckMs = subscriptionAckMs;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
     this.ws = null;
@@ -226,6 +229,7 @@ export class WorldBestStateListener {
     this.started = false;
     this.hasSubscribed = false;
     this.reconnectTimer = null;
+    this.subscriptionAckTimer = null;
     this.seen = new Set();
   }
 
@@ -238,8 +242,9 @@ export class WorldBestStateListener {
 
   stop() {
     this.started = false;
-    if (this.reconnectTimer) this.clearTimer(this.reconnectTimer);
+    if (this.reconnectTimer !== null) this.clearTimer(this.reconnectTimer);
     this.reconnectTimer = null;
+    this._clearSubscriptionAckTimer();
     this.unsubscribe();
     this.ws?.close?.();
     this.ws = null;
@@ -260,15 +265,22 @@ export class WorldBestStateListener {
     this.ws = ws;
 
     ws.onopen = () => {
+      if (this.ws !== ws) return;
       this.subscriptionId = null;
       this.subscriptionRequestId = this.send(SUBSCRIBE_METHOD, [this.programId]);
+      this._startSubscriptionAckTimer(ws);
     };
-    ws.onmessage = (message) => this.handleMessage(message.data);
+    ws.onmessage = (message) => {
+      if (this.ws === ws) this.handleMessage(message.data);
+    };
     ws.onerror = () => {
       this.onError(new Error('Vara.eth best-state WebSocket error'));
+      if (this.ws === ws) ws.close?.();
     };
     ws.onclose = () => {
-      if (this.ws === ws) this.ws = null;
+      if (this.ws !== ws) return;
+      this.ws = null;
+      this._clearSubscriptionAckTimer();
       this.subscriptionId = null;
       this.subscriptionRequestId = null;
       if (this.started) this.scheduleReconnect();
@@ -276,7 +288,7 @@ export class WorldBestStateListener {
   }
 
   scheduleReconnect() {
-    if (this.reconnectTimer) return;
+    if (this.reconnectTimer !== null) return;
     this.reconnectTimer = this.setTimer(() => {
       this.reconnectTimer = null;
       this.connectRaw();
@@ -291,9 +303,24 @@ export class WorldBestStateListener {
   }
 
   unsubscribe() {
-    if (!this.subscriptionId || !this.ws || this.ws.readyState !== this.WebSocketCtor.OPEN) return;
+    if (this.subscriptionId === null || !this.ws || this.ws.readyState !== this.WebSocketCtor.OPEN) return;
     this.send(UNSUBSCRIBE_METHOD, [this.subscriptionId]);
     this.subscriptionId = null;
+  }
+
+  _startSubscriptionAckTimer(ws) {
+    this._clearSubscriptionAckTimer();
+    this.subscriptionAckTimer = this.setTimer(() => {
+      this.subscriptionAckTimer = null;
+      if (this.ws !== ws || this.subscriptionId !== null) return;
+      this.onError(new Error('Vara.eth best-state subscription acknowledgement timed out'));
+      ws.close?.();
+    }, this.subscriptionAckMs);
+  }
+
+  _clearSubscriptionAckTimer() {
+    if (this.subscriptionAckTimer !== null) this.clearTimer(this.subscriptionAckTimer);
+    this.subscriptionAckTimer = null;
   }
 
   handleMessage(data) {
@@ -316,13 +343,12 @@ export class WorldBestStateListener {
       return;
     }
 
-    if (message.id && typeof message.result === 'string') {
+    if (message.id === this.subscriptionRequestId && isSubscriptionId(message.result)) {
       this.subscriptionId = message.result;
-      if (message.id === this.subscriptionRequestId) {
-        const reconnected = this.hasSubscribed;
-        this.hasSubscribed = true;
-        this.onSubscribed({ reconnected });
-      }
+      this._clearSubscriptionAckTimer();
+      const reconnected = this.hasSubscribed;
+      this.hasSubscribed = true;
+      this.onSubscribed({ reconnected });
       return;
     }
 
@@ -375,4 +401,9 @@ export class WorldBestStateListener {
       return null;
     }
   }
+}
+
+function isSubscriptionId(value) {
+  return (typeof value === 'string' && value.length > 0)
+    || (typeof value === 'number' && Number.isFinite(value));
 }

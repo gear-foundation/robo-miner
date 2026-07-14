@@ -23,9 +23,11 @@ export function sessionRecord(world, config) {
   const identity = worldIdentity(world);
   const minAgents = numberOr(world.minAgents, config?.factoryLobbyMin ?? 1);
   const maxAgents = numberOr(world.targetAgents ?? world.maxAgents, 10);
-  const agents = numberOr(world.agents, 0);
+  const registeredAgents = numberOr(world.registeredAgents,
+    numberOr(world.agents, Array.isArray(world.owners) ? world.owners.length : 0));
+  const activeAgents = numberOr(world.activeAgents, numberOr(world.agents, 0));
   const status = discoveryStatus(world.status);
-  const canRegister = JOINABLE_STATUSES.has(status) && agents < maxAgents;
+  const canRegister = JOINABLE_STATUSES.has(status) && registeredAgents < maxAgents;
   const sessionId = world.sessionId ?? world.session ?? null;
   return {
     id: world.id,
@@ -37,10 +39,12 @@ export function sessionRecord(world, config) {
     joinable: canRegister,
     canRegister,
     canPlay: status === 'active',
-    agents,
+    agents: activeAgents,
+    activeAgents,
+    registeredAgents,
     minAgents,
     maxAgents,
-    slotsFree: Math.max(0, maxAgents - agents),
+    slotsFree: Math.max(0, maxAgents - registeredAgents),
     owners: Array.isArray(world.owners) ? world.owners : [],
     seed: world.seed,
     mapHash: world.mapHash || null,

@@ -69,6 +69,8 @@ test('world registry manifest becomes agent match discovery feed', () => {
     canRegister: true,
     canPlay: false,
     agents: 2,
+    activeAgents: 2,
+    registeredAgents: 2,
     minAgents: 8,
     maxAgents: 10,
     slotsFree: 8,
@@ -153,6 +155,44 @@ test('world registry seeds configured program ids into discovery when store is e
   assert.equal(discovery.matches[0].joinable, true);
   assert.equal(discovery.matches[0].minAgents, 8);
   assert.equal(discovery.matches[0].maxAgents, 10);
+});
+
+test('registry sync preserves current-chain counts for the same world session', async () => {
+  const programId = '0x1111111111111111111111111111111111111111';
+  const registry = new WorldRegistryService({
+    store: new MemoryStore({
+      worlds: [{
+        id: 'w001',
+        programId,
+        sessionId: '7',
+        status: 'active',
+        agents: 3,
+        activeAgents: 3,
+        registeredAgents: 4,
+        owners: ['0xa', '0xb', '0xc', '0xd'],
+        activeOwners: ['0xa', '0xb', '0xc'],
+        chainUpdatedAt: '2026-06-15T00:00:00.000Z',
+      }],
+    }),
+    config: CONFIG,
+    now: () => new Date('2026-06-15T00:01:00.000Z'),
+  });
+
+  await registry.syncWorldRecords([{
+    id: 'w001',
+    programId,
+    sessionId: 7,
+    status: 'waiting_agents',
+    admission: { registeredAgents: ['0xa'] },
+  }]);
+
+  const manifest = await registry.getManifest();
+  const world = manifest.worlds.find((item) => item.id === 'w001');
+  assert.equal(world.status, 'active');
+  assert.equal(world.agents, 3);
+  assert.equal(world.activeAgents, 3);
+  assert.equal(world.registeredAgents, 4);
+  assert.deepEqual(world.owners, ['0xa', '0xb', '0xc', '0xd']);
 });
 
 test('factory publisher preserves session and archive metadata in registry', async () => {

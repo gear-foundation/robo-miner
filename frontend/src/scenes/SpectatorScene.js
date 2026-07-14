@@ -12,6 +12,12 @@ import { backendEnabled, fetchAgentStats } from '../backend/api.js';
 import { btnCss, wireBtn } from './arenaUI.js';
 import { worldCodeFor, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
+import {
+  canFollowSpectatorAgent,
+  localCargoCount,
+  spectatorAgentKey,
+  spectatorDepth,
+} from './spectatorRoster.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
 // ore, shop, robot models) at 1:1 scale, but drives a CONTINUOUS real-time
@@ -298,6 +304,12 @@ export default class SpectatorScene extends GameScene {
     this.worldMetaPollMs = 0;
     this.agentNameMap = new Map();
     this.agentNamePollMs = 0;
+    this.selectedAgentKey = null;
+    this.selectedAgentDetail = null;
+    this.followAgentKey = null;
+    this.selectionPulse = null;
+    this.rosterOpen = false;
+    this.rosterRows = new Map();
   }
 
   create() {
@@ -756,7 +768,7 @@ export default class SpectatorScene extends GameScene {
       const dist = Math.hypot(p.x - this._pointerDrag.x, p.y - this._pointerDrag.y);
       if (!this._pointerDrag.dragging && dist >= dragThreshold) {
         this._pointerDrag.dragging = true;
-        this.hideAgentBubble();
+        this.stopSpectatorFollow();
       }
       if (!this._pointerDrag.dragging) return;
       cam.scrollX -= p.x - p.prevPosition.x;
@@ -769,7 +781,7 @@ export default class SpectatorScene extends GameScene {
       this.handleAgentPointerClick(p);
     });
     this.input.on('wheel', (_p, _o, dx, dy) => {
-      this.hideAgentBubble();
+      this.stopSpectatorFollow();
       cam.scrollX += dx;
       cam.scrollY += dy;
     });
@@ -777,7 +789,6 @@ export default class SpectatorScene extends GameScene {
 
   update(time, dt) {
     if (!this.sourceReady || !this.rt?.world) return;
-    if (this.cameraViewportChanged()) this.worldDirty = true;
     if (!this.rt.finished) {
       // Advance real time (cap dt so a tab-stall doesn't teleport everyone).
       this.rt.update(Math.min(50, dt));
@@ -798,6 +809,10 @@ export default class SpectatorScene extends GameScene {
       this.flushQueuedSounds();
       if (this.rt.worldDirty) { this.worldDirty = true; this.rt.worldDirty = false; }
     }
+
+    this.updateFollowCamera(dt);
+    this.updateSelectionPulse(dt);
+    if (this.cameraViewportChanged()) this.worldDirty = true;
 
     // Feed the realtime falling stones into the inherited drawTile so they get
     // the same wobble/jitter as single-player; keep redrawing while any wobble.
@@ -1134,10 +1149,10 @@ export default class SpectatorScene extends GameScene {
   handleAgentPointerClick(pointer) {
     const agent = this.findAgentAtPointer(pointer);
     if (!agent) {
-      this.hideAgentBubble();
+      this.clearSpectatorSelection();
       return;
     }
-    this.playAgentChirp();
+    this.selectSpectatorAgent(agent, { follow: true });
     this.sayAgentBubble(agent, 6200);
     this.refreshAgentBubbleDetails(agent);
   }
@@ -1147,12 +1162,107 @@ export default class SpectatorScene extends GameScene {
     const cam = this.cameras.main;
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
     return this.rt.s.miners.find((m) => {
-      if (!m.owner || m.exited) return false;
+      if (m.exited || !canFollowSpectatorAgent(m)) return false;
       const cx = m.drawX * TILE + TILE / 2;
       const cy = m.drawY * TILE + TILE / 2;
       return Math.abs(worldPoint.x - cx) <= TILE * 0.62 &&
         Math.abs(worldPoint.y - cy) <= TILE * 0.74;
     });
+  }
+
+  selectedSpectatorAgent() {
+    if (!this.selectedAgentKey) return null;
+    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.selectedAgentKey) || null;
+  }
+
+  followSpectatorAgent() {
+    if (!this.followAgentKey) return null;
+    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.followAgentKey) || null;
+  }
+
+  selectSpectatorAgent(agent, { follow = true } = {}) {
+    if (!agent) return;
+    this.selectedAgentKey = spectatorAgentKey(agent);
+    this.selectedAgentDetail = null;
+    if (follow && canFollowSpectatorAgent(agent)) {
+      this.followAgentKey = this.selectedAgentKey;
+      this.startSelectionPulse(agent);
+    } else {
+      this.followAgentKey = null;
+    }
+    this.playAgentChirp();
+    if (window.matchMedia?.('(max-width: 760px)').matches) this.toggleSpectatorRoster(true);
+    this.syncSpectatorRoster();
+    this.updateCameraState();
+    this.refreshSelectedAgentDetails(agent);
+  }
+
+  clearSpectatorSelection() {
+    this.selectedAgentKey = null;
+    this.selectedAgentDetail = null;
+    this.followAgentKey = null;
+    this.selectionPulse = null;
+    this.hideAgentBubble();
+    this.syncSpectatorRoster();
+    this.updateCameraState();
+  }
+
+  stopSpectatorFollow() {
+    if (!this.followAgentKey) return;
+    this.followAgentKey = null;
+    this.syncSpectatorRoster();
+    this.updateCameraState();
+  }
+
+  startSelectionPulse(agent) {
+    if (this.reducedMotion()) return;
+    this.selectionPulse = { key: spectatorAgentKey(agent), age: 0, life: 640 };
+  }
+
+  updateSelectionPulse(dt = 0) {
+    if (!this.selectionPulse) return;
+    this.selectionPulse.age += dt;
+    if (this.selectionPulse.age >= this.selectionPulse.life) this.selectionPulse = null;
+  }
+
+  reducedMotion() {
+    return Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  updateFollowCamera(dt = 0) {
+    const agent = this.followSpectatorAgent();
+    if (!agent || !canFollowSpectatorAgent(agent)) {
+      if (this.followAgentKey) this.stopSpectatorFollow();
+      return;
+    }
+    const cam = this.cameras.main;
+    const zoom = cam.zoom || 1;
+    const targetX = (agent.drawX * TILE + TILE / 2) - cam.width / (2 * zoom);
+    const targetY = (agent.drawY * TILE + TILE / 2) - cam.height / (2 * zoom);
+    const amount = this.reducedMotion() ? 1 : 1 - Math.exp(-Math.max(0, dt) / 120);
+    const nextX = Phaser.Math.Linear(cam.scrollX, targetX, amount);
+    const nextY = Phaser.Math.Linear(cam.scrollY, targetY, amount);
+    if (Math.abs(nextX - cam.scrollX) > 0.1 || Math.abs(nextY - cam.scrollY) > 0.1) {
+      cam.scrollX = nextX;
+      cam.scrollY = nextY;
+      this.worldDirty = true;
+    }
+  }
+
+  async refreshSelectedAgentDetails(agent) {
+    if (!agent?.owner || typeof this.rt?.inspectAgent !== 'function') return;
+    const requestId = (this._agentInspectRequestId || 0) + 1;
+    this._agentInspectRequestId = requestId;
+    try {
+      const detail = await this.rt.inspectAgent(agent.owner);
+      if (this._agentInspectRequestId !== requestId || spectatorAgentKey(agent) !== this.selectedAgentKey) return;
+      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
+      this.selectedAgentDetail = { ...detail, agent: synced || this.selectedSpectatorAgent() };
+      this.syncSpectatorRoster();
+      this.updateHUD();
+    } catch {
+      // The snapshot state remains useful if a direct agent query lags.
+    }
   }
 
   playAgentChirp() {
@@ -1431,6 +1541,18 @@ export default class SpectatorScene extends GameScene {
       g.fillStyle(0xff7a1f, 0.25 * a); g.fillCircle(cx, cy, r);
       g.lineStyle(4, 0xffd14a, a); g.strokeCircle(cx, cy, r);
     }
+    if (this.selectionPulse) {
+      const agent = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === this.selectionPulse.key);
+      if (agent) {
+        const progress = this.selectionPulse.age / this.selectionPulse.life;
+        const radius = TILE * (0.6 + progress * 1.45);
+        const alpha = Math.max(0, 1 - progress);
+        const cx = (agent.drawX + 0.5) * TILE;
+        const cy = (agent.drawY + 0.5) * TILE;
+        g.lineStyle(3, 0xffdd55, alpha);
+        g.strokeCircle(cx, cy, radius);
+      }
+    }
   }
 
   // ---- HUD (DOM) ----
@@ -1445,12 +1567,29 @@ export default class SpectatorScene extends GameScene {
     back.onclick = () => this.goLobby();
     bar.appendChild(back);
 
+    const diggersBtn = wireBtn(document.createElement('button'));
+    diggersBtn.id = 'spec-diggers-btn';
+    diggersBtn.type = 'button';
+    diggersBtn.textContent = 'DIGGERS';
+    diggersBtn.setAttribute('aria-controls', 'spec-roster');
+    diggersBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    diggersBtn.onclick = () => this.toggleSpectatorRoster();
+    bar.appendChild(diggersBtn);
+    this.diggersBtn = diggersBtn;
+
     const title = document.createElement('div');
+    title.id = 'spec-world-title';
     title.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px';
     title.textContent = this.mode.label;
     bar.appendChild(title);
     this.worldTitleEl = title;
     this.updateWorldTitle();
+
+    const cameraState = document.createElement('div');
+    cameraState.id = 'spec-camera-state';
+    cameraState.setAttribute('aria-live', 'polite');
+    bar.appendChild(cameraState);
+    this.cameraStateEl = cameraState;
 
     const stats = document.createElement('div');
     stats.id = 'spec-stats';
@@ -1467,7 +1606,8 @@ export default class SpectatorScene extends GameScene {
     // On-chain TX-log toggle (terminal-style side console).
     const logBtn = wireBtn(document.createElement('button'));
     logBtn.id = 'spec-logbtn';
-    logBtn.textContent = '⛓ TX LOG';
+    logBtn.textContent = 'TX';
+    logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     logBtn.title = 'Transaction log';
     logBtn.onclick = () => this.toggleConsole();
     bar.appendChild(logBtn);
@@ -1480,7 +1620,187 @@ export default class SpectatorScene extends GameScene {
     this.buildConsole();
     this.applyHUDLayout();
     this.buildAgentBubble();
+    this.buildSpectatorRoster();
     this.updateHUD();
+  }
+
+  buildSpectatorRoster() {
+    const style = document.createElement('style');
+    style.id = 'spec-roster-style';
+    style.textContent = `
+      #spec-camera-state{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.35px}
+      #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden}
+      #spec-roster button{font-family:inherit;cursor:pointer;touch-action:manipulation}
+      #spec-roster button:focus-visible,#spec-diggers-btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
+      #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
+      #spec-roster-dossier{padding:0;background:#17212b;border-bottom:1px solid #2f6a3f}
+      #spec-roster-list{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0;scrollbar-width:thin;scrollbar-color:#2f6a3f #101820;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+      .spec-agent-row{position:relative;width:100%;min-height:54px;display:block;text-align:left;padding:7px 10px;box-sizing:border-box;background:transparent;color:#f1e6cf;border:0;border-bottom:1px solid #294150;border-radius:0;transition-property:transform,background-color,border-color,box-shadow;transition-duration:.12s;transition-timing-function:ease-out}
+      .spec-agent-row:hover{background:#1a2a34}
+      .spec-agent-row:active{transform:scale(.96)}
+      .spec-agent-row[aria-pressed='true']{background:#20333d;box-shadow:inset 4px 0 0 #ffdd55}
+      .spec-agent-row[data-exited='true']{opacity:.62;cursor:default}
+      .spec-agent-row-name{font-size:13px;font-weight:bold;color:#fff;overflow-wrap:anywhere}
+      .spec-agent-row-address{margin-top:2px;color:#9bb0a4;font-size:10px}
+      .spec-agent-row-metrics{display:flex;gap:7px;margin-top:5px;color:#cdd3da;font-size:11px;font-variant-numeric:tabular-nums}
+      .spec-agent-row-metrics span+span::before{content:'·';color:#58707d;margin-right:7px}
+      .spec-dossier-empty{padding:9px 10px;color:#9bb0a4;font-size:11px;letter-spacing:.2px}
+      .spec-dossier-card{padding:8px 10px;font-size:12px;line-height:1.2}
+      .spec-dossier-name{color:#ffdd55;font-size:14px;font-weight:bold;overflow-wrap:anywhere}
+      .spec-dossier-address{display:block;margin-top:3px;color:#9bd0ff;font-size:10px;line-height:1.2;overflow-wrap:anywhere}
+      .spec-dossier-metrics{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;color:#cdd3da;font-variant-numeric:tabular-nums}
+      .spec-dossier-metric{color:#cdd3da;font-size:11px}
+      .spec-dossier-metric b{margin-left:4px;color:#fff;font-size:12px}
+      .spec-dossier-bank{display:none}
+      .spec-dossier-actions{display:flex;gap:7px;margin-top:7px}
+      .spec-dossier-actions button{min-height:28px;padding:4px 8px;border:1px solid #000;border-radius:5px;background:#7cffb0;color:#13241a;font-size:11px;font-weight:bold;letter-spacing:.35px;box-shadow:2px 2px 0 rgba(0,0,0,.28);transition-property:transform,filter;transition-duration:.1s}
+      .spec-dossier-actions button:active{transform:scale(.96)}
+      #spec-diggers-btn{display:none}
+      @media (max-width:760px){
+        #spec-hud{height:52px!important;grid-template-rows:42px!important;gap:7px!important;padding:0 8px!important}
+        #spec-hud>div:not(#spec-stats){display:none}
+        #spec-stats{display:none!important}
+        #spec-diggers-btn{display:block!important}
+        #spec-soundbtn,#spec-logbtn{width:40px!important;height:36px!important}
+        #spec-soundbtn{margin-left:auto!important}
+        #spec-logbtn{margin-left:0!important}
+        #spec-logbtn{font-size:12px!important;padding:0!important}
+        #spec-console{top:52px!important;width:min(360px,100vw)!important}
+        #spec-roster{left:8px;right:8px;top:auto;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-height:36vh;transform:translateY(calc(100% + 16px));opacity:0;pointer-events:none;transition-property:transform,opacity;transition-duration:.18s;transition-timing-function:cubic-bezier(.16,1,.3,1)}
+        #spec-roster.is-open{transform:translateY(0);opacity:1;pointer-events:auto}
+        #spec-roster-list{max-height:20vh}
+      }
+      @media (prefers-reduced-motion:reduce){#spec-roster,#spec-roster *{transition-duration:0ms!important}}
+    `;
+    document.head.appendChild(style);
+
+    const roster = document.createElement('aside');
+    roster.id = 'spec-roster';
+    roster.setAttribute('aria-label', 'Live diggers');
+    roster.innerHTML = `<div id="spec-roster-header"><span>▮ LIVE DIGGERS</span><span id="spec-roster-count"></span></div><div id="spec-roster-dossier"></div><div id="spec-roster-list"></div>`;
+    document.body.appendChild(roster);
+    this.rosterEl = roster;
+    this.rosterCountEl = roster.querySelector('#spec-roster-count');
+    this.rosterDossierEl = roster.querySelector('#spec-roster-dossier');
+    this.rosterListEl = roster.querySelector('#spec-roster-list');
+    this._spectatorKeyHandler = (event) => {
+      if (event.key !== 'Escape') return;
+      this.toggleSpectatorRoster(false);
+      this.stopSpectatorFollow();
+    };
+    window.addEventListener('keydown', this._spectatorKeyHandler);
+    // On phones the roster is the spectator mode, not a secondary tool hidden
+    // behind a discovery click. The toolbar button remains available to collapse
+    // it when a viewer wants an uninterrupted map.
+    this.toggleSpectatorRoster(Boolean(window.matchMedia?.('(max-width: 760px)').matches));
+    this.syncSpectatorRoster();
+  }
+
+  toggleSpectatorRoster(open = !this.rosterOpen) {
+    this.rosterOpen = Boolean(open);
+    this.rosterEl?.classList.toggle('is-open', this.rosterOpen);
+    this.diggersBtn?.setAttribute('aria-expanded', String(this.rosterOpen));
+  }
+
+  agentRosterStatus(agent) {
+    const fallback = agent?.exited ? 4 : agent?.alive ? 1 : 3;
+    return agentStatusMeta(Number(agent?.status ?? fallback));
+  }
+
+  agentRosterMetrics(agent) {
+    const chain = Boolean(agent.owner);
+    const cargo = chain ? resourceTotal(agent.carriedResources) : localCargoCount(agent);
+    const capacity = Number(agent.backpackCapacity ?? agent.maxCargo ?? 0);
+    const bank = chain ? resourceTotal(earnedResourceTotals(agent)) : Number(agent.money || 0);
+    return { chain, cargo, capacity, bank };
+  }
+
+  agentRosterRowHtml(agent) {
+    const status = this.agentRosterStatus(agent);
+    const metrics = this.agentRosterMetrics(agent);
+    const depth = spectatorDepth(agent, this.world?.surface ?? SURFACE_Y);
+    const identity = agent.owner ? shortAddress(agent.owner) : '';
+    const bank = metrics.chain ? `◇ ${metrics.bank}` : `$${metrics.bank}`;
+    return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><span class="spec-agent-row-name">${escapeHtml(this.agentDisplayName(agent))}</span><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:${status.color};font-size:10px;font-weight:bold"><span style="width:7px;height:7px;border-radius:50%;background:${status.color};box-shadow:0 0 0 1px #091219"></span>${escapeHtml(status.label)}</span></div>${identity ? `<div class="spec-agent-row-address">${escapeHtml(identity)}</div>` : ''}<div class="spec-agent-row-metrics"><span>−${depth}m</span><span>bag ${metrics.cargo}/${metrics.capacity}</span><span>${bank}</span></div>`;
+  }
+
+  agentDossierHtml(agent) {
+    const detail = this.selectedAgentDetail || {};
+    const source = detail.agent || agent;
+    const status = this.agentRosterStatus(source);
+    const chain = Boolean(source.owner);
+    const metrics = this.agentRosterMetrics(source);
+    const follows = this.followAgentKey === spectatorAgentKey(source);
+    const address = source.owner ? displayAddress(source.owner) : '';
+    const bank = chain ? `◇ ${metrics.bank}` : `$${metrics.bank}`;
+    return `<div class="spec-dossier-card"><div style="display:flex;justify-content:space-between;gap:8px"><span class="spec-dossier-name">${escapeHtml(this.agentDisplayName(source))}</span><span style="color:${status.color};font-size:11px;font-weight:bold;white-space:nowrap">● ${escapeHtml(status.label)}</span></div>${address ? `<a class="spec-dossier-address" href="${escapeHtml(addressScanUrl(source.owner))}" target="_blank" rel="noreferrer">${escapeHtml(shortAddress(address))}</a>` : ''}<div class="spec-dossier-metrics"><span class="spec-dossier-metric">depth<b>−${spectatorDepth(source, this.world?.surface ?? SURFACE_Y)}m</b></span><span class="spec-dossier-metric">bag<b>${metrics.cargo}/${metrics.capacity}</b></span><span class="spec-dossier-metric">bank<b>${bank}</b></span></div><div class="spec-dossier-actions">${canFollowSpectatorAgent(source) ? `<button type="button" data-spec-follow="${escapeHtml(spectatorAgentKey(source))}">${follows ? 'FREE CAMERA' : 'FOLLOW DIGGER'}</button>` : '<span style="color:#9bb0a4;font-size:11px">Exited digger, follow unavailable.</span>'}</div></div>`;
+  }
+
+  syncSpectatorRoster() {
+    if (!this.rosterListEl || !this.rt?.s?.miners) return;
+    const miners = this.rt.s.miners;
+    const live = new Set();
+    for (const agent of miners) {
+      const key = spectatorAgentKey(agent);
+      live.add(key);
+      let row = this.rosterRows.get(key);
+      if (!row) {
+        row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'spec-agent-row';
+        row.onclick = () => {
+          const current = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === key);
+          if (current) this.selectSpectatorAgent(current, { follow: canFollowSpectatorAgent(current) });
+        };
+        this.rosterRows.set(key, row);
+      }
+      const selected = key === this.selectedAgentKey;
+      const html = this.agentRosterRowHtml(agent);
+      const pressed = String(selected);
+      const disabled = String(agent.exited);
+      const title = agent.exited ? 'Exited digger, details only' : `Follow ${this.agentDisplayName(agent)}`;
+      if (row._spectatorHtml !== html) {
+        row.innerHTML = html;
+        row._spectatorHtml = html;
+      }
+      if (row.getAttribute('aria-pressed') !== pressed) row.setAttribute('aria-pressed', pressed);
+      if (row.getAttribute('data-exited') !== disabled) row.setAttribute('data-exited', disabled);
+      if (row.title !== title) row.title = title;
+      if (row.parentElement !== this.rosterListEl) this.rosterListEl.appendChild(row);
+    }
+    for (const [key, row] of this.rosterRows) {
+      if (!live.has(key)) { row.remove(); this.rosterRows.delete(key); }
+    }
+    const alive = miners.filter((agent) => agent.alive).length;
+    const rosterCount = `${alive}/${miners.length}`;
+    if (this.rosterCountEl && this.rosterCountEl.textContent !== rosterCount) this.rosterCountEl.textContent = rosterCount;
+    const diggerCount = `DIGGERS ${miners.length}`;
+    if (this.diggersBtn && this.diggersBtn.textContent !== diggerCount) this.diggersBtn.textContent = diggerCount;
+    this.renderSelectedDossier();
+  }
+
+  renderSelectedDossier() {
+    if (!this.rosterDossierEl) return;
+    const agent = this.selectedSpectatorAgent();
+    if (!agent) {
+      const html = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to follow</div>';
+      if (this._rosterDossierHtml !== html) {
+        this.rosterDossierEl.innerHTML = html;
+        this._rosterDossierHtml = html;
+      }
+      return;
+    }
+    const html = this.agentDossierHtml(agent);
+    if (this._rosterDossierHtml === html) return;
+    this.rosterDossierEl.innerHTML = html;
+    this._rosterDossierHtml = html;
+    const follow = this.rosterDossierEl.querySelector('[data-spec-follow]');
+    if (follow) {
+      follow.onclick = () => {
+        if (this.followAgentKey) this.stopSpectatorFollow();
+        else this.selectSpectatorAgent(agent, { follow: true });
+      };
+    }
   }
 
   buildAgentBubble() {
@@ -1540,18 +1860,20 @@ export default class SpectatorScene extends GameScene {
     this.hudLayout = layout;
 
     if (layout === 'desktop') {
-      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto;align-items:center;gap:14px;padding:0 14px';
+      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:14px;padding:0 14px';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.cameraStateEl.style.display = 'block';
       this.backBtn.textContent = '← BACK';
       this.backBtn.style.cssText = btnCss('#cdd3da') + 'font-size:14px;padding:6px 13px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
       this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:34px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
-      this.logBtn.textContent = '⛓ TX LOG';
-      this.logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+      this.logBtn.textContent = 'TX';
+      this.logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     } else if (layout === 'compact') {
       this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+      this.cameraStateEl.style.display = 'none';
       this.backBtn.textContent = '←';
       this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:38px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
       this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:38px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
@@ -1561,6 +1883,7 @@ export default class SpectatorScene extends GameScene {
       this.hudBar.style.cssText += ';height:76px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 48px;grid-template-rows:42px 26px;align-items:center;gap:0 7px;padding:4px 8px;background:#102033;border-bottom:2px solid #000';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
       this.statsEl.style.cssText = 'grid-column:1 / -1;grid-row:2;display:flex;align-items:center;justify-content:flex-start;gap:10px;min-width:0;width:100%;font-size:13px;white-space:nowrap';
+      this.cameraStateEl.style.display = 'none';
       this.backBtn.textContent = '←';
       this.backBtn.style.cssText = btnCss('#cdd3da') + 'width:42px;height:36px;padding:0;font-size:20px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
       this.soundBtn.style.cssText = btnCss('#ffdd55') + 'width:42px;height:36px;padding:0;display:flex;align-items:center;justify-content:center;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
@@ -1570,13 +1893,17 @@ export default class SpectatorScene extends GameScene {
 
     this.backBtn.style.gridColumn = '1';
     this.backBtn.style.gridRow = '1';
+    this.diggersBtn.style.gridColumn = layout === 'mobile' ? '2' : '';
+    this.diggersBtn.style.gridRow = layout === 'mobile' ? '1' : '';
     this.worldTitleEl.style.gridColumn = '2';
     this.worldTitleEl.style.gridRow = '1';
-    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '3';
+    this.cameraStateEl.style.gridColumn = '3';
+    this.cameraStateEl.style.gridRow = '1';
+    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '4';
     this.statsEl.style.gridRow = layout === 'mobile' ? '2' : '1';
-    this.soundBtn.style.gridColumn = '4';
+    this.soundBtn.style.gridColumn = layout === 'desktop' ? '5' : '4';
     this.soundBtn.style.gridRow = '1';
-    this.logBtn.style.gridColumn = '5';
+    this.logBtn.style.gridColumn = layout === 'desktop' ? '6' : '5';
     this.logBtn.style.gridRow = '1';
     this.consoleEl.style.top = layout === 'mobile' ? '76px' : layout === 'compact' ? '52px' : '46px';
     this.updateWorldTitle();
@@ -1691,35 +2018,44 @@ export default class SpectatorScene extends GameScene {
     const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;
-    const stateLabel = hudStateLabel(status, remainingMs);
+    const stateLabel = status === 'unknown' ? 'LIVE' : hudStateLabel(status, remainingMs);
     const banked = ms.reduce((totals, m) => addResourceTotals(totals, earnedResourceTotals(m)), { scrst: 0, bcrst: 0, hcrst: 0 });
-    const fps = Math.round(this.game.loop.actualFps);
-    const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
     const diamond = this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '';
     if (this.hudLayout === 'desktop') {
+      const bankedTotal = resourceTotal(banked);
       this.statsEl.innerHTML =
-        `<span style="color:${fc}">${fps} fps</span>　` +
-        `${stateLabel}　agents <b>${countLabel}</b>　` +
-        `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
+        `<span style="color:#9bb0a4">${stateLabel}</span>　` +
+        `agents <b>${countLabel}</b>　` +
+        `<span title="total earned crystals">◇ <b>${bankedTotal}</b></span>` +
         diamond;
-      return;
-    }
-
-    const fullResources = `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>`;
-    if (this.hudLayout === 'compact') {
+    } else if (this.hudLayout === 'compact') {
+      const fullResources = `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>`;
       this.statsEl.innerHTML =
         `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${statusLabel(status)}</span>　` +
         `agents <b>${countLabel}</b>　${fullResources}${diamond}`;
+    } else {
+      const mobileStatus = status === 'active' ? 'LIVE' : statusLabel(status);
+      this.statsEl.innerHTML =
+        `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${mobileStatus}</span>` +
+        `<span title="active agents"><b>${countLabel}</b> AG</span>` +
+        `<span title="earned SCRST">S <b>${banked.scrst}</b></span>` +
+        `<span title="earned BCRST">B <b>${banked.bcrst}</b></span>` +
+        `<span title="earned HCRST">H <b>${banked.hcrst}</b>${this.rt.match.diamondFound ? ' 💎' : ''}</span>`;
+    }
+    this.updateCameraState();
+    this.syncSpectatorRoster();
+  }
+
+  updateCameraState() {
+    if (!this.cameraStateEl) return;
+    const followed = this.followSpectatorAgent();
+    const selected = this.selectedSpectatorAgent();
+    const agent = followed || selected;
+    if (!agent) {
+      this.cameraStateEl.textContent = 'FREE CAMERA';
       return;
     }
-
-    const mobileStatus = status === 'active' ? 'LIVE' : statusLabel(status);
-    this.statsEl.innerHTML =
-      `<span style="color:${status === 'active' ? '#7CFFB0' : '#ffdd55'}">${mobileStatus}</span>` +
-      `<span title="active agents"><b>${countLabel}</b> AG</span>` +
-      `<span title="earned SCRST">S <b>${banked.scrst}</b></span>` +
-      `<span title="earned BCRST">B <b>${banked.bcrst}</b></span>` +
-      `<span title="earned HCRST">H <b>${banked.hcrst}</b>${this.rt.match.diamondFound ? ' 💎' : ''}</span>`;
+    this.cameraStateEl.textContent = `${followed ? 'FOLLOWING' : 'SELECTED'} · ${this.agentDisplayName(agent)}`;
   }
 
   updateWorldTitle() {
@@ -1774,9 +2110,7 @@ export default class SpectatorScene extends GameScene {
         if (agent.diggerProgramId) names.set(String(agent.diggerProgramId).toLowerCase(), agent.agentName);
       }
       this.agentNameMap = names;
-      if (this.agentBubbleMiner && this.agentBubbleContentEl) {
-        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, null);
-      }
+      this.syncSpectatorRoster();
       if (this.consoleOpen) this.renderConsole();
     } catch {
       // Names are decorative; keep live spectator resilient if backend stats lag.
@@ -1855,9 +2189,12 @@ export default class SpectatorScene extends GameScene {
     this.teardownSpectatorSounds();
     this.loadingText?.destroy();
     clearTimeout(this._agentBubbleTimer);
+    window.removeEventListener('keydown', this._spectatorKeyHandler);
     document.getElementById('spec-hud')?.remove();
     document.getElementById('spec-finish')?.remove();
     document.getElementById('spec-console')?.remove();
     document.getElementById('spec-agent-bubble')?.remove();
+    document.getElementById('spec-roster')?.remove();
+    document.getElementById('spec-roster-style')?.remove();
   }
 }

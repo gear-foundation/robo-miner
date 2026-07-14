@@ -1162,6 +1162,7 @@ export default class SpectatorScene extends GameScene {
     this.playAgentChirp();
     if (window.matchMedia?.('(max-width: 760px)').matches) this.toggleSpectatorRoster(true);
     this.syncSpectatorRoster();
+    this.updateCameraState();
     this.refreshSelectedAgentDetails(agent);
   }
 
@@ -1171,12 +1172,14 @@ export default class SpectatorScene extends GameScene {
     this.followAgentKey = null;
     this.selectionPulse = null;
     this.syncSpectatorRoster();
+    this.updateCameraState();
   }
 
   stopSpectatorFollow() {
     if (!this.followAgentKey) return;
     this.followAgentKey = null;
     this.syncSpectatorRoster();
+    this.updateCameraState();
   }
 
   startSelectionPulse(agent) {
@@ -1470,14 +1473,12 @@ export default class SpectatorScene extends GameScene {
       const agent = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === this.selectionPulse.key);
       if (agent) {
         const progress = this.selectionPulse.age / this.selectionPulse.life;
-        const radius = TILE * (0.6 + progress * 2.3);
+        const radius = TILE * (0.6 + progress * 1.45);
         const alpha = Math.max(0, 1 - progress);
         const cx = (agent.drawX + 0.5) * TILE;
         const cy = (agent.drawY + 0.5) * TILE;
         g.lineStyle(3, 0xffdd55, alpha);
-        g.strokeRect(cx - radius, cy - radius, radius * 2, radius * 2);
-        g.lineStyle(2, 0x7cffb0, alpha * 0.75);
-        g.strokeRect(cx - radius * 0.62, cy - radius * 0.62, radius * 1.24, radius * 1.24);
+        g.strokeCircle(cx, cy, radius);
       }
     }
   }
@@ -1507,11 +1508,18 @@ export default class SpectatorScene extends GameScene {
     this.diggersBtn = diggersBtn;
 
     const title = document.createElement('div');
+    title.id = 'spec-world-title';
     title.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px';
     title.textContent = this.mode.label;
     bar.appendChild(title);
     this.worldTitleEl = title;
     this.updateWorldTitle();
+
+    const cameraState = document.createElement('div');
+    cameraState.id = 'spec-camera-state';
+    cameraState.setAttribute('aria-live', 'polite');
+    bar.appendChild(cameraState);
+    this.cameraStateEl = cameraState;
 
     const stats = document.createElement('div');
     stats.id = 'spec-stats';
@@ -1530,8 +1538,9 @@ export default class SpectatorScene extends GameScene {
     // On-chain TX-log toggle (terminal-style side console).
     const logBtn = wireBtn(document.createElement('button'));
     logBtn.id = 'spec-logbtn';
-    logBtn.textContent = '⛓ TX LOG';
-    logBtn.style.cssText = btnCss('#7CFFB0') + 'font-size:13px;padding:6px 12px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    logBtn.textContent = 'TX';
+    logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
+    logBtn.title = 'Transaction log';
     logBtn.onclick = () => this.toggleConsole();
     bar.appendChild(logBtn);
     this.logBtn = logBtn;
@@ -1547,30 +1556,32 @@ export default class SpectatorScene extends GameScene {
     const style = document.createElement('style');
     style.id = 'spec-roster-style';
     style.textContent = `
+      #spec-camera-state{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.35px}
       #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden}
       #spec-roster button{font-family:inherit;cursor:pointer;touch-action:manipulation}
       #spec-roster button:focus-visible,#spec-diggers-btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
-      #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
-      #spec-roster-dossier{padding:9px 10px 8px;background:#17212b;border-bottom:1px solid #2f6a3f}
-      #spec-roster-list{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:7px;scrollbar-width:thin;scrollbar-color:#2f6a3f #101820}
-      .spec-agent-row{width:100%;min-height:62px;display:block;text-align:left;padding:8px 9px;margin:0 0 6px;box-sizing:border-box;background:#14212a;color:#f1e6cf;border:1px solid #365062;border-radius:8px;transition-property:transform,background-color,border-color,box-shadow;transition-duration:.12s;transition-timing-function:ease-out}
-      .spec-agent-row:hover{background:#1c2d38;border-color:#7cffb0}
+      #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
+      #spec-roster-dossier{padding:0;background:#17212b;border-bottom:1px solid #2f6a3f}
+      #spec-roster-list{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;padding:0;scrollbar-width:thin;scrollbar-color:#2f6a3f #101820}
+      .spec-agent-row{position:relative;width:100%;min-height:54px;display:block;text-align:left;padding:7px 10px;box-sizing:border-box;background:transparent;color:#f1e6cf;border:0;border-bottom:1px solid #294150;border-radius:0;transition-property:transform,background-color,border-color,box-shadow;transition-duration:.12s;transition-timing-function:ease-out}
+      .spec-agent-row:hover{background:#1a2a34}
       .spec-agent-row:active{transform:scale(.96)}
-      .spec-agent-row[aria-pressed='true']{background:#20333d;border-color:#ffdd55;box-shadow:inset 3px 0 0 #ffdd55}
+      .spec-agent-row[aria-pressed='true']{background:#20333d;box-shadow:inset 4px 0 0 #ffdd55}
       .spec-agent-row[aria-disabled='true']{opacity:.62;cursor:default}
       .spec-agent-row-name{font-size:13px;font-weight:bold;color:#fff;overflow-wrap:anywhere}
-      .spec-agent-row-address{margin-top:2px;color:#9bb0a4;font-size:11px}
-      .spec-agent-row-metrics{display:flex;justify-content:space-between;gap:6px;margin-top:6px;color:#cdd3da;font-size:11px;font-variant-numeric:tabular-nums}
-      .spec-dossier-empty{color:#9bb0a4;font-size:12px;line-height:1.4}
-      .spec-dossier-card{font-size:12px;line-height:1.28}
+      .spec-agent-row-address{margin-top:2px;color:#9bb0a4;font-size:10px}
+      .spec-agent-row-metrics{display:flex;gap:7px;margin-top:5px;color:#cdd3da;font-size:11px;font-variant-numeric:tabular-nums}
+      .spec-agent-row-metrics span+span::before{content:'·';color:#58707d;margin-right:7px}
+      .spec-dossier-empty{padding:9px 10px;color:#9bb0a4;font-size:11px;letter-spacing:.2px}
+      .spec-dossier-card{padding:8px 10px;font-size:12px;line-height:1.2}
       .spec-dossier-name{color:#ffdd55;font-size:14px;font-weight:bold;overflow-wrap:anywhere}
-      .spec-dossier-address{display:block;margin-top:3px;color:#9bd0ff;font-size:11px;line-height:1.25;overflow-wrap:anywhere}
-      .spec-dossier-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:8px;font-variant-numeric:tabular-nums}
-      .spec-dossier-metric{padding:5px;background:#0c151c;border:1px solid #294150;border-radius:5px;color:#cdd3da}
-      .spec-dossier-metric b{display:block;margin-top:2px;color:#fff;font-size:13px}
-      .spec-dossier-bank{margin-top:7px;padding:6px 7px;background:#f1e6cf;color:#222;border-radius:6px;font-variant-numeric:tabular-nums}
-      .spec-dossier-actions{display:flex;gap:7px;margin-top:8px}
-      .spec-dossier-actions button{min-height:36px;padding:5px 9px;border:2px solid #000;border-radius:7px;background:#7cffb0;color:#13241a;font-weight:bold;letter-spacing:.35px;box-shadow:2px 2px 0 rgba(0,0,0,.28);transition-property:transform,filter;transition-duration:.1s}
+      .spec-dossier-address{display:block;margin-top:3px;color:#9bd0ff;font-size:10px;line-height:1.2;overflow-wrap:anywhere}
+      .spec-dossier-metrics{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px;color:#cdd3da;font-variant-numeric:tabular-nums}
+      .spec-dossier-metric{color:#cdd3da;font-size:11px}
+      .spec-dossier-metric b{margin-left:4px;color:#fff;font-size:12px}
+      .spec-dossier-bank{display:none}
+      .spec-dossier-actions{display:flex;gap:7px;margin-top:7px}
+      .spec-dossier-actions button{min-height:28px;padding:4px 8px;border:1px solid #000;border-radius:5px;background:#7cffb0;color:#13241a;font-size:11px;font-weight:bold;letter-spacing:.35px;box-shadow:2px 2px 0 rgba(0,0,0,.28);transition-property:transform,filter;transition-duration:.1s}
       .spec-dossier-actions button:active{transform:scale(.96)}
       #spec-diggers-btn{display:none}
       @media (max-width:760px){
@@ -1581,8 +1592,7 @@ export default class SpectatorScene extends GameScene {
         #spec-soundbtn,#spec-logbtn{width:40px!important;height:36px!important}
         #spec-soundbtn{margin-left:auto!important}
         #spec-logbtn{margin-left:0!important}
-        #spec-logbtn{font-size:0!important;padding:0!important}
-        #spec-logbtn::after{content:'TX';font-size:12px}
+        #spec-logbtn{font-size:12px!important;padding:0!important}
         #spec-console{top:52px!important;width:min(360px,100vw)!important}
         #spec-roster{left:8px;right:8px;top:auto;bottom:max(8px,env(safe-area-inset-bottom));width:auto;max-height:68vh;transform:translateY(calc(100% + 16px));opacity:0;pointer-events:none;transition-property:transform,opacity;transition-duration:.18s;transition-timing-function:cubic-bezier(.16,1,.3,1)}
         #spec-roster.is-open{transform:translateY(0);opacity:1;pointer-events:auto}
@@ -1637,37 +1647,21 @@ export default class SpectatorScene extends GameScene {
     const status = this.agentRosterStatus(agent);
     const metrics = this.agentRosterMetrics(agent);
     const depth = spectatorDepth(agent, this.world?.surface ?? SURFACE_Y);
-    const identity = agent.owner ? shortAddress(agent.owner) : 'LOCAL BOT';
+    const identity = agent.owner ? shortAddress(agent.owner) : '';
     const bank = metrics.chain ? `◇ ${metrics.bank}` : `$${metrics.bank}`;
-    return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><span class="spec-agent-row-name">${escapeHtml(this.agentDisplayName(agent))}</span><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:${status.color};font-size:10px;font-weight:bold"><span style="width:7px;height:7px;border-radius:50%;background:${status.color};box-shadow:0 0 0 1px #091219"></span>${escapeHtml(status.label)}</span></div><div class="spec-agent-row-address">${escapeHtml(identity)}</div><div class="spec-agent-row-metrics"><span>−${depth}m</span><span>bag ${metrics.cargo}/${metrics.capacity}</span><span>${bank}</span></div>`;
+    return `<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px"><span class="spec-agent-row-name">${escapeHtml(this.agentDisplayName(agent))}</span><span style="display:inline-flex;align-items:center;gap:4px;white-space:nowrap;color:${status.color};font-size:10px;font-weight:bold"><span style="width:7px;height:7px;border-radius:50%;background:${status.color};box-shadow:0 0 0 1px #091219"></span>${escapeHtml(status.label)}</span></div>${identity ? `<div class="spec-agent-row-address">${escapeHtml(identity)}</div>` : ''}<div class="spec-agent-row-metrics"><span>−${depth}m</span><span>bag ${metrics.cargo}/${metrics.capacity}</span><span>${bank}</span></div>`;
   }
 
   agentDossierHtml(agent) {
     const detail = this.selectedAgentDetail || {};
     const source = detail.agent || agent;
-    const state = Array.isArray(detail.state) ? detail.state : [];
-    const inv = Array.isArray(detail.inventory) ? detail.inventory : source.inventory || [];
     const status = this.agentRosterStatus(source);
     const chain = Boolean(source.owner);
-    const x = Number(state[1] ?? source.tx ?? 0);
-    const y = Number(state[2] ?? source.ty ?? 0);
-    const ladders = Number(state[4] ?? source.items?.ladder ?? 0);
     const metrics = this.agentRosterMetrics(source);
-    const carried = chain ? {
-      scrst: Number(inv[0] ?? state[5] ?? source.carriedResources?.scrst ?? 0),
-      bcrst: Number(inv[1] ?? state[6] ?? source.carriedResources?.bcrst ?? 0),
-      hcrst: Number(inv[2] ?? state[7] ?? source.carriedResources?.hcrst ?? 0),
-    } : null;
-    const banked = chain ? earnedResourceTotals(source, {
-      scrst: Number(inv[3] ?? state[8] ?? source.bankedResources?.scrst ?? 0),
-      bcrst: Number(inv[4] ?? state[9] ?? source.bankedResources?.bcrst ?? 0),
-      hcrst: Number(inv[5] ?? state[10] ?? source.bankedResources?.hcrst ?? 0),
-    }) : null;
     const follows = this.followAgentKey === spectatorAgentKey(source);
     const address = source.owner ? displayAddress(source.owner) : '';
-    const wallet = detail.walletOwner && !sameDisplayAddress(detail.walletOwner, source.owner)
-      ? displayAddress(detail.walletOwner) : '';
-    return `<div class="spec-dossier-card"><div style="display:flex;justify-content:space-between;gap:8px"><span class="spec-dossier-name">${escapeHtml(this.agentDisplayName(source))}</span><span style="color:${status.color};font-size:11px;font-weight:bold;white-space:nowrap">● ${escapeHtml(status.label)}</span></div>${address ? `<a class="spec-dossier-address" href="${escapeHtml(addressScanUrl(source.owner))}" target="_blank" rel="noreferrer">${escapeHtml(address)}</a>` : '<div class="spec-dossier-address" style="color:#9bb0a4">local arena bot</div>'}${wallet ? `<div class="spec-dossier-address" style="color:#cdd3da">owner ${escapeHtml(wallet)}</div>` : ''}<div class="spec-dossier-metrics"><span class="spec-dossier-metric">depth<b>−${spectatorDepth(source, this.world?.surface ?? SURFACE_Y)}m</b></span><span class="spec-dossier-metric">position<b>${x},${y}</b></span><span class="spec-dossier-metric">ladders<b>${ladders}</b></span></div><div class="spec-dossier-bank">${chain ? `<div style="display:flex;justify-content:space-between;gap:7px"><span>bag</span><span>${crystalCounts(carried)}</span></div><div style="display:flex;justify-content:space-between;gap:7px;margin-top:5px;padding-top:5px;border-top:1px solid #d7c9ae"><span>earned</span><span>${crystalCounts(banked)}</span></div>` : `<div style="display:flex;justify-content:space-between;gap:7px"><span>ore cargo</span><b>${metrics.cargo}/${metrics.capacity}</b></div><div style="display:flex;justify-content:space-between;gap:7px;margin-top:5px;padding-top:5px;border-top:1px solid #d7c9ae"><span>bank</span><b>$${metrics.bank}</b></div>`}</div><div class="spec-dossier-actions">${canFollowSpectatorAgent(source) ? `<button type="button" data-spec-follow="${escapeHtml(spectatorAgentKey(source))}">${follows ? 'FREE CAMERA' : 'FOLLOW DIGGER'}</button>` : '<span style="color:#9bb0a4;font-size:11px">Exited digger, follow unavailable.</span>'}</div></div>`;
+    const bank = chain ? `◇ ${metrics.bank}` : `$${metrics.bank}`;
+    return `<div class="spec-dossier-card"><div style="display:flex;justify-content:space-between;gap:8px"><span class="spec-dossier-name">${escapeHtml(this.agentDisplayName(source))}</span><span style="color:${status.color};font-size:11px;font-weight:bold;white-space:nowrap">● ${escapeHtml(status.label)}</span></div>${address ? `<a class="spec-dossier-address" href="${escapeHtml(addressScanUrl(source.owner))}" target="_blank" rel="noreferrer">${escapeHtml(shortAddress(address))}</a>` : ''}<div class="spec-dossier-metrics"><span class="spec-dossier-metric">depth<b>−${spectatorDepth(source, this.world?.surface ?? SURFACE_Y)}m</b></span><span class="spec-dossier-metric">bag<b>${metrics.cargo}/${metrics.capacity}</b></span><span class="spec-dossier-metric">bank<b>${bank}</b></span></div><div class="spec-dossier-actions">${canFollowSpectatorAgent(source) ? `<button type="button" data-spec-follow="${escapeHtml(spectatorAgentKey(source))}">${follows ? 'FREE CAMERA' : 'FOLLOW DIGGER'}</button>` : '<span style="color:#9bb0a4;font-size:11px">Exited digger, follow unavailable.</span>'}</div></div>`;
   }
 
   syncSpectatorRoster() {
@@ -1708,7 +1702,7 @@ export default class SpectatorScene extends GameScene {
     if (!this.rosterDossierEl) return;
     const agent = this.selectedSpectatorAgent();
     if (!agent) {
-      this.rosterDossierEl.innerHTML = '<div class="spec-dossier-empty">Select a digger to follow its run. Drag or scroll the map to return to free camera.</div>';
+      this.rosterDossierEl.innerHTML = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to follow</div>';
       return;
     }
     this.rosterDossierEl.innerHTML = this.agentDossierHtml(agent);
@@ -1876,16 +1870,28 @@ export default class SpectatorScene extends GameScene {
     const remainingMs = Number(this.worldMeta?.endsAt || 0) > 0
       ? Number(this.worldMeta.endsAt) - Date.now()
       : NaN;
-    const stateLabel = hudStateLabel(status, remainingMs);
+    const stateLabel = status === 'unknown' ? 'LIVE' : hudStateLabel(status, remainingMs);
     const banked = ms.reduce((totals, m) => addResourceTotals(totals, earnedResourceTotals(m)), { scrst: 0, bcrst: 0, hcrst: 0 });
-    const fps = Math.round(this.game.loop.actualFps);
-    const fc = fps >= 55 ? '#7CFFB0' : fps >= 30 ? '#ffd14a' : '#ff6a6a';
+    const bankedTotal = resourceTotal(banked);
     this.statsEl.innerHTML =
-      `<span style="color:${fc}">${fps} fps</span>　` +
-      `${stateLabel}　agents <b>${countLabel}</b>　` +
-      `<span title="earned crystals">SCRST <b>${banked.scrst}</b> · BCRST <b>${banked.bcrst}</b> · HCRST <b>${banked.hcrst}</b></span>` +
+      `<span style="color:#9bb0a4">${stateLabel}</span>　` +
+      `agents <b>${countLabel}</b>　` +
+      `<span title="total earned crystals">◇ <b>${bankedTotal}</b></span>` +
       (this.rt.match.diamondFound ? '　<b style="color:#5ff6ff">💎</b>' : '');
+    this.updateCameraState();
     this.syncSpectatorRoster();
+  }
+
+  updateCameraState() {
+    if (!this.cameraStateEl) return;
+    const followed = this.followSpectatorAgent();
+    const selected = this.selectedSpectatorAgent();
+    const agent = followed || selected;
+    if (!agent) {
+      this.cameraStateEl.textContent = 'FREE CAMERA';
+      return;
+    }
+    this.cameraStateEl.textContent = `${followed ? 'FOLLOWING' : 'SELECTED'} · ${this.agentDisplayName(agent)}`;
   }
 
   updateWorldTitle() {

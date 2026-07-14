@@ -22,6 +22,9 @@ const FUSE_MS = 4000; // must match realtime.js DYNAMITE_FUSE_MS (for the fuse a
 const CHUNK_TILES = 8;
 const RENDER_MODES = new Set(['chunks', 'viewport', 'full']);
 const CHEST_OUTCOME = { DYNAMITE: 1, LADDERS: 2 };
+const AGENT_BUBBLE_MARGIN = 10;
+const AGENT_BUBBLE_HUD_CLEARANCE = 54;
+const AGENT_BUBBLE_BELOW_GAP = 12;
 
 function sfxSources(name) {
   return [`/assets/sfx/${name}.mp3`, `/assets/sfx/${name}.ogg`, `/assets/sfx/${name}.wav`];
@@ -1140,6 +1143,7 @@ export default class SpectatorScene extends GameScene {
     if (this.agentBubbleContentEl) {
       this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(agent, null);
     }
+    this.agentBubbleSize = null;
     this.agentBubbleEl.removeAttribute('title');
     this.agentBubbleEl.style.display = 'block';
     this.agentBubbleMiner = agent;
@@ -1161,6 +1165,7 @@ export default class SpectatorScene extends GameScene {
       if (this.agentBubbleContentEl) {
         this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
       }
+      this.agentBubbleSize = null;
       this.updateHUD();
       this.positionAgentBubble();
     } catch {
@@ -1230,6 +1235,7 @@ export default class SpectatorScene extends GameScene {
   hideAgentBubble() {
     if (this.agentBubbleEl) this.agentBubbleEl.style.display = 'none';
     this.agentBubbleMiner = null;
+    this.agentBubbleSize = null;
     clearTimeout(this._agentBubbleTimer);
   }
 
@@ -1240,10 +1246,45 @@ export default class SpectatorScene extends GameScene {
     const m = this.agentBubbleMiner;
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
     const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
+    const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
     const side = m.facing === 'left' ? -1 : 1;
-    this.agentBubbleEl.style.left = `${sx + side * 36}px`;
-    this.agentBubbleEl.style.top = `${sy}px`;
-    this.agentBubbleEl.style.setProperty('--tail-x', side > 0 ? '38%' : '62%');
+    const size = this.agentBubbleSize || {
+      width: this.agentBubbleEl.offsetWidth,
+      height: this.agentBubbleEl.offsetHeight,
+    };
+    this.agentBubbleSize = size;
+
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const halfWidth = size.width / 2;
+    const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
+    const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);
+    const left = Phaser.Math.Clamp(sx + side * 36, minLeft, maxLeft);
+    const below = sy - size.height - AGENT_BUBBLE_MARGIN < AGENT_BUBBLE_HUD_CLEARANCE;
+    const belowTop = Phaser.Math.Clamp(
+      robotBottom + AGENT_BUBBLE_BELOW_GAP,
+      AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN,
+      Math.max(AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN, viewportHeight - size.height - AGENT_BUBBLE_MARGIN),
+    );
+    const tailX = Phaser.Math.Clamp(sx - left + halfWidth, 18, Math.max(18, size.width - 18));
+
+    this.agentBubbleEl.style.left = `${left}px`;
+    this.agentBubbleEl.style.top = `${below ? belowTop : sy}px`;
+    this.agentBubbleEl.style.transform = below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
+    this.agentBubbleEl.style.setProperty('--tail-x', `${tailX}px`);
+    this.setAgentBubbleTailPlacement(below);
+  }
+
+  setAgentBubbleTailPlacement(below) {
+    const outer = this.agentBubbleOuterTail;
+    const inner = this.agentBubbleInnerTail;
+    if (!outer || !inner) return;
+    for (const [tail, size, offset, color] of [[outer, 8, 8, '#222'], [inner, 6, 5, '#fff']]) {
+      tail.style.top = below ? `-${offset}px` : '';
+      tail.style.bottom = below ? '' : `-${offset}px`;
+      tail.style.borderTop = below ? '0' : `${size}px solid ${color}`;
+      tail.style.borderBottom = below ? `${size}px solid ${color}` : '0';
+    }
   }
 
   cameraViewportChanged() {
@@ -1425,18 +1466,21 @@ export default class SpectatorScene extends GameScene {
       font-size: 14px; padding: 9px 12px; border-radius: 9px;
       border: 2px solid #222; box-shadow: 3px 3px 0 rgba(0,0,0,0.28);
       white-space: normal; pointer-events: auto; z-index: 18;
-      display: none; min-width: 238px; max-width: 304px;
+      display: none; min-width: min(238px, calc(100vw - 20px)); max-width: calc(100vw - 20px);
+      box-sizing: border-box;
     `;
     bubble.innerHTML = `<div id="spec-agent-bubble-content"></div>
-      <div style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
+      <div data-agent-bubble-tail="outer" style="position:absolute;bottom:-8px;left:var(--tail-x, 42%);transform:translateX(-50%);
         width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;
         border-top:8px solid #222;pointer-events:none"></div>
-      <div style="position:absolute;bottom:-5px;left:var(--tail-x, 42%);transform:translateX(-50%);
+      <div data-agent-bubble-tail="inner" style="position:absolute;bottom:-5px;left:var(--tail-x, 42%);transform:translateX(-50%);
         width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;
         border-top:6px solid #fff;pointer-events:none"></div>`;
     document.body.appendChild(bubble);
     this.agentBubbleEl = bubble;
     this.agentBubbleContentEl = bubble.querySelector('#spec-agent-bubble-content');
+    this.agentBubbleOuterTail = bubble.querySelector('[data-agent-bubble-tail="outer"]');
+    this.agentBubbleInnerTail = bubble.querySelector('[data-agent-bubble-tail="inner"]');
   }
 
   // Slide-out terminal that streams agent actions as if they were on-chain txs.

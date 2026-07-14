@@ -1639,7 +1639,7 @@ export default class SpectatorScene extends GameScene {
       .spec-agent-row:hover{background:#1a2a34}
       .spec-agent-row:active{transform:scale(.96)}
       .spec-agent-row[aria-pressed='true']{background:#20333d;box-shadow:inset 4px 0 0 #ffdd55}
-      .spec-agent-row[aria-disabled='true']{opacity:.62;cursor:default}
+      .spec-agent-row[data-exited='true']{opacity:.62;cursor:default}
       .spec-agent-row-name{font-size:13px;font-weight:bold;color:#fff;overflow-wrap:anywhere}
       .spec-agent-row-address{margin-top:2px;color:#9bb0a4;font-size:10px}
       .spec-agent-row-metrics{display:flex;gap:7px;margin-top:5px;color:#cdd3da;font-size:11px;font-variant-numeric:tabular-nums}
@@ -1764,7 +1764,7 @@ export default class SpectatorScene extends GameScene {
         row._spectatorHtml = html;
       }
       if (row.getAttribute('aria-pressed') !== pressed) row.setAttribute('aria-pressed', pressed);
-      if (row.getAttribute('aria-disabled') !== disabled) row.setAttribute('aria-disabled', disabled);
+      if (row.getAttribute('data-exited') !== disabled) row.setAttribute('data-exited', disabled);
       if (row.title !== title) row.title = title;
       if (row.parentElement !== this.rosterListEl) this.rosterListEl.appendChild(row);
     }

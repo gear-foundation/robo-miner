@@ -802,6 +802,7 @@ export default class SpectatorScene extends GameScene {
     this._syncBombs();
     this.drawBombs();                                // inherited — real dynamite sticks + fuses
     this.drawSpecRobots(time);
+    this.positionAgentBubble();
     this.drawFx(time);
     this.updateBankPops(dt);
     if (this.consoleOpen) {
@@ -1124,6 +1125,8 @@ export default class SpectatorScene extends GameScene {
       return;
     }
     this.selectSpectatorAgent(agent, { follow: true });
+    this.sayAgentBubble(agent, 6200);
+    this.refreshAgentBubbleDetails(agent);
   }
 
   findAgentAtPointer(pointer) {
@@ -1171,6 +1174,7 @@ export default class SpectatorScene extends GameScene {
     this.selectedAgentDetail = null;
     this.followAgentKey = null;
     this.selectionPulse = null;
+    this.hideAgentBubble();
     this.syncSpectatorRoster();
     this.updateCameraState();
   }
@@ -1548,6 +1552,7 @@ export default class SpectatorScene extends GameScene {
     document.body.appendChild(bar);
     this.statsEl = stats;
     this.buildConsole();
+    this.buildAgentBubble();
     this.buildSpectatorRoster();
     this.updateHUD();
   }

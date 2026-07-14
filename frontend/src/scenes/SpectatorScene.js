@@ -1399,20 +1399,28 @@ export default class SpectatorScene extends GameScene {
       TILE,
       { hat: m.hat, shake: this.spectatorRobotShake(m) },
     );
-    const sx = (visual.x - cam.scrollX) * zoom;
-    const robotTop = (visual.top - cam.scrollY) * zoom;
+    const canvasRect = this.game?.canvas?.getBoundingClientRect?.();
+    const canvasScaleX = canvasRect ? canvasRect.width / cam.width : 1;
+    const canvasScaleY = canvasRect ? canvasRect.height / cam.height : 1;
+    const canvasLeft = canvasRect?.left || 0;
+    const canvasTop = canvasRect?.top || 0;
+    // Phaser renders into canvas coordinates, while the bubble is a fixed DOM
+    // node in CSS viewport coordinates. Account for the canvas rect and any
+    // mobile CSS/device scaling before positioning the DOM node.
+    const sx = canvasLeft + (cam.x + (visual.x - cam.scrollX) * zoom) * canvasScaleX;
+    const robotTop = canvasTop + (cam.y + (visual.top - cam.scrollY) * zoom) * canvasScaleY;
     // The tail is 8 CSS px tall. Leave a visible gap above the robot instead
     // of letting the card appear to sit on its head.
     const sy = robotTop - AGENT_BUBBLE_TAIL_SIZE - AGENT_BUBBLE_ABOVE_GAP;
-    const robotBottom = (visual.bottom - cam.scrollY) * zoom;
+    const robotBottom = canvasTop + (cam.y + (visual.bottom - cam.scrollY) * zoom) * canvasScaleY;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,
       height: this.agentBubbleEl.offsetHeight,
     };
     this.agentBubbleSize = size;
 
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.visualViewport?.width || window.innerWidth;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
     const halfWidth = size.width / 2;
     const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
     const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);

@@ -76,7 +76,7 @@ export class DiggerRentalService {
     const target = BigInt(initialTopUp ?? this.config.diggerDailyExecTarget);
     const resolvedSeasonId = seasonId || this.config.diggerRentalSeason;
     const resolvedCodeId = codeId || this.config.diggerProxyCodeId;
-    if (!dryRun && !this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
+    if (!dryRun && (!this.chain?.deployDigger || !this.chain?.verifyDiggerReady)) throw new Error('Chain client does not support verified digger deploy');
 
     const id = requestId || `rent:${resolvedSeasonId}:${normalizedOwner}:${normalizedWorldId}:${now.toISOString()}`;
     const conflict = await this.findRentalConflict(normalizedOwner, normalizedWorldId, resolvedSeasonId);
@@ -147,6 +147,11 @@ export class DiggerRentalService {
           codeId: resolvedCodeId,
           initialTopUp: target,
         });
+        await this.chain.verifyDiggerReady({
+          programId: deploy.programId,
+          owner: normalizedOwner,
+          worldId: normalizedWorldId,
+        });
       }
       request.status = dryRun ? 'dry-run' : 'confirmed';
       request.programId = normalizeAddress(deploy.programId);
@@ -193,7 +198,8 @@ export class DiggerRentalService {
         source: 'rental-request',
         codeId: resolvedCodeId || null,
         targetExecBalance: target.toString(),
-        executableBalance: dryRun ? '0' : target.toString(),
+        executableBalance: '0',
+        executableBalanceObservedAt: null,
         lastRefuelAt: request.updatedAt,
         createdAt: request.createdAt,
         updatedAt: request.updatedAt,
@@ -349,7 +355,7 @@ export class DiggerRentalService {
   }
 
   async processQueuedDiggerRequest(requestId) {
-    if (!this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
+    if (!this.chain?.deployDigger || !this.chain?.verifyDiggerReady) throw new Error('Chain client does not support verified digger deploy');
 
     const request = await this.markRequestRunning(requestId);
     if (!request) {
@@ -376,6 +382,11 @@ export class DiggerRentalService {
         codeId: request.codeId,
         initialTopUp: BigInt(request.targetExecBalance),
       });
+      await this.chain.verifyDiggerReady({
+        programId: deploy.programId,
+        owner: request.owner,
+        worldId: request.worldId,
+      });
       const completedAt = this.now().toISOString();
       const programId = normalizeAddress(deploy.programId);
       await this.store.update((db) => {
@@ -401,7 +412,8 @@ export class DiggerRentalService {
           source: 'rental-request',
           codeId: request.codeId || null,
           targetExecBalance: request.targetExecBalance,
-          executableBalance: request.targetExecBalance,
+          executableBalance: '0',
+          executableBalanceObservedAt: null,
           lastRefuelAt: completedAt,
           createdAt: request.createdAt,
           updatedAt: completedAt,
@@ -470,7 +482,7 @@ export class DiggerRentalService {
   }
 
   async processQueuedDiggerRequests({ limit = 10 } = {}) {
-    if (!this.chain?.deployDigger) throw new Error('Chain client does not support digger deploy');
+    if (!this.chain?.deployDigger || !this.chain?.verifyDiggerReady) throw new Error('Chain client does not support verified digger deploy');
 
     const db = await this.store.read();
     const queued = db.rentalRequests
@@ -568,6 +580,7 @@ export class DiggerRentalService {
       const current = assumeBalance === null
         ? await this.readCurrentBalance(digger, dryRun)
         : BigInt(assumeBalance);
+      if (!dryRun || assumeBalance !== null) await this.updateDiggerBalance(programId, current);
       const amount = current < target ? target - current : 0n;
 
       const existing = db.fuelGrants.find((grant) => (
@@ -589,7 +602,6 @@ export class DiggerRentalService {
           target: target.toString(),
         });
         results.push({ programId, status: 'skipped', reason: 'already_at_or_above_target', current: current.toString(), target: target.toString() });
-        await this.updateDiggerBalance(programId, current);
         continue;
       }
 
@@ -632,7 +644,6 @@ export class DiggerRentalService {
       await this.store.update((nextDb) => {
         const nextDigger = nextDb.diggers.find((item) => normalizeAddress(item.programId) === programId);
         if (nextDigger) {
-          nextDigger.executableBalance = dryRun ? current.toString() : target.toString();
           nextDigger.lastRefuelAt = grant.updatedAt;
           nextDigger.updatedAt = grant.updatedAt;
         }
@@ -667,6 +678,7 @@ export class DiggerRentalService {
       const digger = db.diggers.find((item) => normalizeAddress(item.programId) === programId);
       if (!digger) return;
       digger.executableBalance = balance.toString();
+      digger.executableBalanceObservedAt = this.now().toISOString();
       digger.updatedAt = this.now().toISOString();
     });
   }

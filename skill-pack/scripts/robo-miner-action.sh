@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Source this file into a Bash session. It intentionally delegates every
+# Source this file into a Bash or Zsh session. It intentionally delegates every
 # signed action to vara-wallet; it never reads or stores wallet key material.
 
 robo_miner_now_ms() {
@@ -28,9 +28,17 @@ robo_miner_require_action_runtime() {
     robo_miner_action_error NODE_REQUIRED 'Node.js is required by robo-miner-action.sh'
     return 1
   }
-  local required
+  local required value
   for required in VARA_ETH_NETWORK VARA_WALLET_ACCOUNT ROBO_MINER_DIGGER_PROGRAM_ID ROBO_MINER_WORLD_ID ROBO_MINER_DIGGER_PROXY_IDL ROBO_MINER_WORLD_IDL; do
-    [[ -n "${!required:-}" ]] || {
+    case "$required" in
+      VARA_ETH_NETWORK) value="${VARA_ETH_NETWORK:-}" ;;
+      VARA_WALLET_ACCOUNT) value="${VARA_WALLET_ACCOUNT:-}" ;;
+      ROBO_MINER_DIGGER_PROGRAM_ID) value="${ROBO_MINER_DIGGER_PROGRAM_ID:-}" ;;
+      ROBO_MINER_WORLD_ID) value="${ROBO_MINER_WORLD_ID:-}" ;;
+      ROBO_MINER_DIGGER_PROXY_IDL) value="${ROBO_MINER_DIGGER_PROXY_IDL:-}" ;;
+      ROBO_MINER_WORLD_IDL) value="${ROBO_MINER_WORLD_IDL:-}" ;;
+    esac
+    [[ -n "$value" ]] || {
       robo_miner_action_error CONFIG_REQUIRED "${required} is required"
       return 1
     }
@@ -80,14 +88,28 @@ robo_miner_session_start() {
   fi
 
   local wallet_bin="${VARA_WALLET_BIN:-vara-wallet}" ready
-  coproc ROBO_MINER_VARA_SESSION {
-    "$wallet_bin" --chain vara-eth --network "$VARA_ETH_NETWORK" \
-      --account "$VARA_WALLET_ACCOUNT" --json vara-eth:session
-  }
-  ROBO_MINER_SESSION_READ_FD="${ROBO_MINER_VARA_SESSION[0]}"
-  ROBO_MINER_SESSION_WRITE_FD="${ROBO_MINER_VARA_SESSION[1]}"
-  ROBO_MINER_SESSION_PID="$ROBO_MINER_VARA_SESSION_PID"
-  if ! IFS= read -r -u "$ROBO_MINER_SESSION_READ_FD" ready; then
+  if [[ -n "${ZSH_VERSION:-}" ]]; then
+    eval 'coproc { "$wallet_bin" --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --json vara-eth:session; }'
+    ROBO_MINER_SESSION_TRANSPORT=zsh
+    ROBO_MINER_SESSION_PID="$!"
+    if ! IFS= read -r -p ready; then
+      robo_miner_session_stop
+      robo_miner_action_error SESSION_START_FAILED 'vara-eth:session exited before reporting ready'
+      return 1
+    fi
+  else
+    eval 'coproc ROBO_MINER_VARA_SESSION { "$wallet_bin" --chain vara-eth --network "$VARA_ETH_NETWORK" --account "$VARA_WALLET_ACCOUNT" --json vara-eth:session; }'
+    ROBO_MINER_SESSION_TRANSPORT=bash
+    ROBO_MINER_SESSION_READ_FD="${ROBO_MINER_VARA_SESSION[0]:-}"
+    ROBO_MINER_SESSION_WRITE_FD="${ROBO_MINER_VARA_SESSION[1]:-}"
+    ROBO_MINER_SESSION_PID="${ROBO_MINER_VARA_SESSION_PID:-}"
+    if ! IFS= read -r -u "$ROBO_MINER_SESSION_READ_FD" ready; then
+      robo_miner_session_stop
+      robo_miner_action_error SESSION_START_FAILED 'vara-eth:session exited before reporting ready'
+      return 1
+    fi
+  fi
+  if [[ -z "${ROBO_MINER_SESSION_PID:-}" ]]; then
     robo_miner_session_stop
     robo_miner_action_error SESSION_START_FAILED 'vara-eth:session exited before reporting ready'
     return 1
@@ -102,7 +124,7 @@ robo_miner_session_start() {
 
 robo_miner_session_stop() {
   [[ -n "${ROBO_MINER_SESSION_PID:-}" ]] && kill "$ROBO_MINER_SESSION_PID" 2>/dev/null || true
-  unset ROBO_MINER_SESSION_STARTED ROBO_MINER_SESSION_PID ROBO_MINER_SESSION_READ_FD ROBO_MINER_SESSION_WRITE_FD
+  unset ROBO_MINER_SESSION_STARTED ROBO_MINER_SESSION_PID ROBO_MINER_SESSION_READ_FD ROBO_MINER_SESSION_WRITE_FD ROBO_MINER_SESSION_TRANSPORT
 }
 
 robo_miner_session_call() {
@@ -119,11 +141,21 @@ robo_miner_session_call() {
   }
   request="$(jq -cn --argjson id "$id" --arg program "$program" --arg method "$method" --arg idl "$idl" --argjson args "$args_json" \
     '{id:$id,program:$program,method:$method,args:$args,idl:$idl}')" || return 1
-  if ! printf '%s\n' "$request" >&"$ROBO_MINER_SESSION_WRITE_FD"; then
+  if [[ "${ROBO_MINER_SESSION_TRANSPORT:-}" == 'zsh' ]]; then
+    if ! print -p -- "$request"; then
+      robo_miner_action_error SESSION_WRITE_FAILED 'could not write to vara-eth:session'
+      return 1
+    fi
+  elif ! printf '%s\n' "$request" >&"$ROBO_MINER_SESSION_WRITE_FD"; then
     robo_miner_action_error SESSION_WRITE_FAILED 'could not write to vara-eth:session'
     return 1
   fi
-  if ! IFS= read -r -u "$ROBO_MINER_SESSION_READ_FD" response; then
+  if [[ "${ROBO_MINER_SESSION_TRANSPORT:-}" == 'zsh' ]]; then
+    if ! IFS= read -r -p response; then
+      robo_miner_action_error SESSION_READ_FAILED 'vara-eth:session closed before responding'
+      return 1
+    fi
+  elif ! IFS= read -r -u "$ROBO_MINER_SESSION_READ_FD" response; then
     robo_miner_action_error SESSION_READ_FAILED 'vara-eth:session closed before responding'
     return 1
   fi
@@ -182,6 +214,22 @@ robo_miner_world_session() {
 
 robo_miner_query_succeeded() {
   jq -e 'if has("reply") then ((.reply.code.tag? // "") | startswith("Success")) else true end' >/dev/null
+}
+
+robo_miner_read_with_retry() {
+  local attempt output
+  for attempt in 1 2 3 4; do
+    if output="$("$@")"; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    case "$attempt" in
+      1) sleep 0.1 ;;
+      2) sleep 0.2 ;;
+      3) sleep 0.4 ;;
+    esac
+  done
+  return 1
 }
 
 robo_miner_agents_include() {
@@ -277,7 +325,7 @@ robo_miner_action() {
     esac
   fi
   if [[ "$method" == 'Digger/SetWorld' ]]; then
-    pre_json="$(robo_miner_proxy_world)" || {
+    pre_json="$(robo_miner_read_with_retry robo_miner_proxy_world)" || {
       robo_miner_action_error PRECONDITION_FAILED 'could not read Digger.World before submission'
       return 1
     }
@@ -295,7 +343,7 @@ robo_miner_action() {
       return 1
     }
   elif [[ "$method" == 'Digger/Register' ]]; then
-    pre_json="$(robo_miner_world_agents)" || {
+    pre_json="$(robo_miner_read_with_retry robo_miner_world_agents)" || {
       robo_miner_action_error PRECONDITION_FAILED 'could not read World.Agents before registration'
       return 1
     }
@@ -308,7 +356,7 @@ robo_miner_action() {
       return 1
     fi
   else
-    session_json="$(robo_miner_world_session)" || {
+    session_json="$(robo_miner_read_with_retry robo_miner_world_session)" || {
       robo_miner_action_error PRECONDITION_FAILED 'could not read World.Session before submission'
       return 1
     }
@@ -320,7 +368,7 @@ robo_miner_action() {
       robo_miner_action_error SESSION_NOT_ACTIVE 'World.Session is not active; do not spend proxy execution balance on an action'
       return 1
     }
-    pre_json="$(robo_miner_world_agent "$agent_actor_id")" || {
+    pre_json="$(robo_miner_read_with_retry robo_miner_world_agent "$agent_actor_id")" || {
       robo_miner_action_error PRECONDITION_FAILED 'could not read World.AgentOf before submission'
       return 1
     }

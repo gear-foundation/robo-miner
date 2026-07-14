@@ -171,6 +171,21 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         initStatus: initResult.receipt.status,
       };
     },
+    async verifyDiggerReady({ programId, owner, worldId }) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_proxy' });
+      return verifyDiggerReady({
+        api,
+        accountAddress: account.address,
+        programId,
+        owner,
+        worldId,
+        sails,
+        ReplyCode,
+        bytesToHex,
+        timeoutMs: Number(config.indexerTimeoutMs || 180000),
+        logger,
+      });
+    },
     async depositRedeemReserve(programId, amount) {
       const value = BigInt(amount);
       if (value <= 0n) throw new Error(`Deposit amount must be positive, got ${amount}`);
@@ -207,6 +222,60 @@ function mirrorClient(getMirrorClient, programId, publicClient, signer) {
   } catch {
     return getMirrorClient(programId, { publicClient, signer });
   }
+}
+
+export async function verifyDiggerReady({
+  api,
+  accountAddress,
+  programId,
+  owner,
+  worldId,
+  sails,
+  ReplyCode,
+  bytesToHex,
+  timeoutMs = 180000,
+  logger = null,
+  now = Date.now,
+  delayFn = delay,
+}) {
+  const expectedOwner = actorIdFromAddress(normalizeAddress(owner, 'owner')).toLowerCase();
+  const expectedWorld = actorIdFromAddress(normalizeAddress(worldId, 'worldId')).toLowerCase();
+  const deadline = now() + timeoutMs;
+  let lastError = null;
+  while (now() < deadline) {
+    try {
+      const queryTimeoutMs = Math.max(1, Math.min(10_000, deadline - now()));
+      const [ownerReply, worldReply] = await Promise.all([
+        withTimeout(api.call.program.calculateReplyForHandle(accountAddress, programId, sails.services.Digger.queries.Owner.encodePayload(), 0n), queryTimeoutMs, 'Digger.Owner readiness query'),
+        withTimeout(api.call.program.calculateReplyForHandle(accountAddress, programId, sails.services.Digger.queries.World.encodePayload(), 0n), queryTimeoutMs, 'Digger.World readiness query'),
+      ]);
+      if (!ownerReply || !worldReply) throw new Error('DiggerProxy readiness query timed out');
+      assertSuccessReply(ownerReply.replyCode || ownerReply.code, { ReplyCode, bytesToHex, sails, payload: ownerReply.payload });
+      assertSuccessReply(worldReply.replyCode || worldReply.code, { ReplyCode, bytesToHex, sails, payload: worldReply.payload });
+      const actualOwner = actorIdValueToHex(sails.services.Digger.queries.Owner.decodeResult(ownerReply.payload), bytesToHex);
+      const actualWorld = actorIdValueToHex(sails.services.Digger.queries.World.decodeResult(worldReply.payload), bytesToHex);
+      if (actualOwner === expectedOwner && actualWorld === expectedWorld) {
+        logger?.info?.('deploy.ready', { programId, owner: actualOwner, worldId: actualWorld });
+        return { programId, owner: actualOwner, worldId: actualWorld };
+      }
+      lastError = new Error(`DiggerProxy state mismatch: owner=${actualOwner}, world=${actualWorld}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await delayFn(1000);
+  }
+  throw new Error(`DiggerProxy ${programId} did not become owner/world-ready within ${timeoutMs}ms${lastError ? `: ${lastError.message}` : ''}`);
+}
+
+export function actorIdValueToHex(value, bytesToHex) {
+  if (value instanceof Uint8Array) return bytesToHex(value).toLowerCase();
+  if (Array.isArray(value)) return bytesToHex(Uint8Array.from(value.map(Number))).toLowerCase();
+  if (typeof value === 'string' && /^0x[0-9a-f]{64}$/i.test(value)) return value.toLowerCase();
+  throw new Error('DiggerProxy query did not return a 32-byte ActorId');
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function sendAndWait(tx, label) {

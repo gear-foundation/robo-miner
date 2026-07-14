@@ -28,6 +28,16 @@ if [[ " $* " == *" vara-eth:session "* ]]; then
         jq -cn --argjson id "$id" --argjson result "$result" '{type:"result",id:$id,kind:"query",result:$result}'
         ;;
       World/Session)
+        if [[ "${FAKE_SESSION_TRANSIENT_FAILURES:-0}" -gt 0 ]]; then
+          count_file="${FAKE_SESSION_FAILURE_COUNT:?FAKE_SESSION_FAILURE_COUNT is required}"
+          count=0
+          [[ -f "$count_file" ]] && count="$(<"$count_file")"
+          if (( count < FAKE_SESSION_TRANSIENT_FAILURES )); then
+            printf '%s' "$((count + 1))" > "$count_file"
+            jq -cn --argjson id "$id" '{type:"error",id:$id,error:{code:"TEMPORARY",message:"transient fixture failure"}}'
+            continue
+          fi
+        fi
         jq -cn --argjson id "$id" --argjson status "${FAKE_SESSION_STATUS:-1}" '{type:"result",id:$id,kind:"query",result:[1,1,$status,8]}'
         ;;
       World/MapSnapshot)

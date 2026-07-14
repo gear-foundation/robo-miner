@@ -42,6 +42,7 @@ export class DiggerRegistryService {
         source,
         targetExecBalance: existing?.targetExecBalance || targetExecBalance,
         executableBalance: existing?.executableBalance || '0',
+        executableBalanceObservedAt: existing?.executableBalanceObservedAt || null,
         lastRefuelAt: existing?.lastRefuelAt || null,
         createdAt: existing?.createdAt || now,
         updatedAt: now,
@@ -72,8 +73,18 @@ export class DiggerRegistryService {
       .filter((digger) => !normalizedOwner || normalizeStoredAddress(digger.owner) === normalizedOwner)
       .filter((digger) => !status || digger.status === status)
       .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
-      .map(withAgentName);
+      .map((digger) => publicDigger(digger));
   }
+}
+
+function publicDigger(digger) {
+  const named = withAgentName(digger);
+  const { executableBalance, executableBalanceObservedAt, ...publicFields } = named;
+  return {
+    ...publicFields,
+    lastObservedExecutableBalance: executableBalanceObservedAt ? executableBalance : null,
+    lastObservedExecutableBalanceAt: executableBalanceObservedAt || null,
+  };
 }
 
 export function normalizeAddress(address) {

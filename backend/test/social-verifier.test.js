@@ -109,7 +109,7 @@ test('social verifier live mode tops up executable balance through chain client'
   assert.deepEqual(calls, [{ programId: DIGGER, amount: 120n * VARA }]);
 
   const db = await store.read();
-  assert.equal(db.diggers[0].executableBalance, (120n * VARA + 1000n).toString());
+  assert.equal(db.diggers[0].executableBalance, '1000');
   assert.equal(db.fuelGrants[0].txHash, '0xtx');
 });
 

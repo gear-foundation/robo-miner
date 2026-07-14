@@ -244,7 +244,6 @@ export class SocialVerifierService {
       }
       const nextDigger = db.diggers.find((item) => normalizeAddress(item.programId) === programId);
       if (nextDigger && grant.status !== 'failed') {
-        nextDigger.executableBalance = dryRun ? before.toString() : after.toString();
         nextDigger.lastRefuelAt = grant.updatedAt;
         nextDigger.updatedAt = grant.updatedAt;
       }

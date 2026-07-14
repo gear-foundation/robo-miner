@@ -49,6 +49,53 @@ test('injected AgentSurfaced updates the MVP banked leaderboard', async () => {
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].banked, { scrst: 20, bcrst: 1, hcrst: 0 });
   assert.equal(rows[0].score, 20 * 6 + 30);
+
+  const earned = await new LeaderboardService({ store, config: CONFIG }).list({ metric: 'earned' });
+  assert.deepEqual(earned[0].earned, { scrst: 20, bcrst: 1, hcrst: 0 });
+  assert.equal(earned[0].score, 20 * 6 + 30);
+});
+
+test('earned leaderboard preserves surfaced total after ladder trades and minting', async () => {
+  const resourceEvent = (id, event, scrst, timestamp) => ({
+    id,
+    programType: 'world',
+    programId: WORLD_ID,
+    service: 'World',
+    event,
+    args: ['1', OWNER, scrst, 0, 0],
+    timestamp,
+  });
+  const store = new MemoryStore({
+    worlds: [{ id: 'w001', programId: WORLD_ID, seasonId: 'season-1' }],
+    agentStats: [{
+      id: `w001:1:${OWNER}`,
+      worldId: 'w001',
+      sessionId: '1',
+      seasonId: 'season-1',
+      ownerActor: OWNER,
+      status: 'active',
+      banked: { scrst: 0, bcrst: 0, hcrst: 0 },
+      minted: { scrst: 21, bcrst: 0, hcrst: 0 },
+      extracted: { scrst: 31, bcrst: 0, hcrst: 0 },
+      updatedAt: '2026-07-14T11:31:46.557Z',
+    }],
+    chainEvents: [
+      resourceEvent('surface-10', 'AgentSurfaced', 10, '2026-07-14T09:53:42.630Z'),
+      resourceEvent('surface-18', 'AgentSurfaced', 18, '2026-07-14T10:08:05.381Z'),
+      resourceEvent('surface-27', 'AgentSurfaced', 27, '2026-07-14T10:48:38.323Z'),
+      resourceEvent('trade-10', 'ResourcesTradedForLadders', 10, '2026-07-14T10:52:51.787Z'),
+      resourceEvent('surface-21', 'AgentSurfaced', 21, '2026-07-14T11:26:04.429Z'),
+      resourceEvent('mint-21', 'ResourcesMinted', 21, '2026-07-14T11:30:46.335Z'),
+    ],
+  });
+
+  const [row] = await new LeaderboardService({ store, config: CONFIG }).list({ metric: 'earned' });
+
+  assert.deepEqual(row.banked, { scrst: 0, bcrst: 0, hcrst: 0 });
+  assert.deepEqual(row.minted, { scrst: 21, bcrst: 0, hcrst: 0 });
+  assert.deepEqual(row.spentBanked, { scrst: 10, bcrst: 0, hcrst: 0 });
+  assert.deepEqual(row.earned, { scrst: 31, bcrst: 0, hcrst: 0 });
+  assert.equal(row.score, 31 * 6);
 });
 
 test('world snapshot reconciles banked totals when injected event is missing', async () => {
@@ -245,6 +292,25 @@ test('injected StoneMoved and AgentDied are stored and projected for diagnostics
   assert.equal(stats.x, 3);
   assert.equal(stats.y, 3);
   assert.deepEqual(stats.death, { x: 3, y: 3, cause: 2, at: '2026-06-11T00:01:00.000Z' });
+});
+
+test('resource extraction uses the contract resource kind ids 1, 2, and 3', async () => {
+  const store = new MemoryStore({
+    worlds: [{ id: WORLD_ID, programId: WORLD_ID, seasonId: 'season-1' }],
+  });
+  const projector = new IndexerProjector({ store, config: CONFIG });
+
+  await projector.applyEvents([1, 2, 3].map((kind) => ({
+    id: `resource-${kind}`,
+    programType: 'world',
+    programId: WORLD_ID,
+    service: 'World',
+    event: 'ResourceExtracted',
+    args: ['1', OWNER, 3, 4, kind, kind],
+  })));
+
+  const stats = (await store.read()).agentStats[0];
+  assert.deepEqual(stats.extracted, { scrst: 1, bcrst: 1, hcrst: 1 });
 });
 
 class MemoryStore {

@@ -15,7 +15,7 @@ export function createLeaderboardPanel({
 } = {}) {
   const state = {
     rows: [],
-    metric: 'banked',
+    metric: 'earned',
     page: 0,
     loading: false,
     error: '',
@@ -92,7 +92,7 @@ export function createLeaderboardPanel({
     }
 
     for (const row of visibleRows()) {
-      const resources = row.banked || {};
+      const resources = row.earned || {};
       const agentName = row.agentName || generateAgentName(row.diggerProgramId || row.ownerActor);
       const isMine = rowMatchesWallet(row, state.wallet?.account);
       const cells = [
@@ -162,7 +162,7 @@ export function createLeaderboardPanel({
     state.error = '';
     render();
     try {
-      state.rows = await fetchLeaderboard({ metric: 'banked', limit });
+      state.rows = await fetchLeaderboard({ metric: 'earned', limit });
       state.page = Math.min(state.page, pageCount() - 1);
     } catch (error) {
       state.rows = [];
@@ -221,7 +221,7 @@ export function createLeaderboardPanel({
 
     if (account) {
       card.innerHTML = `<div><span style="color:#ffdd55;font-weight:bold">YOUR RANK</span> ` +
-        `<span style="color:#cdd3da">No banked RES on this leaderboard yet.</span> ` +
+        `<span style="color:#cdd3da">No surfaced RES on this leaderboard yet.</span> ` +
         `<span style="color:#9bb0a4">${escapeHtml(shortId(displayEvmAddress(ownerActorFromAddress(account))))}</span></div>`;
       card.firstElementChild?.appendChild(copyAddressButton(account));
       return card;

@@ -431,7 +431,7 @@ function leaderboardFilters(url) {
     worldId: url.searchParams.get('world') || null,
     sessionId: url.searchParams.get('session') || null,
     owner: url.searchParams.get('owner') || null,
-    metric: url.searchParams.get('metric') || 'banked',
+    metric: url.searchParams.get('metric') || 'earned',
     limit: Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 50))),
   };
 }

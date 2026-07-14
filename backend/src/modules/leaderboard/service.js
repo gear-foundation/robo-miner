@@ -1,8 +1,15 @@
 import { generateAgentName } from '../agentNames.js';
 import { DEFAULT_REDEEM_RATES } from '../../config/networks.js';
+import {
+  applyMintAccounting,
+  applySurfaceAccounting,
+  applyTradeAccounting,
+  maxResources,
+  syncEarnedResources,
+} from '../indexer/resourceAccounting.js';
 
 const DEFAULT_RATES = DEFAULT_REDEEM_RATES;
-const METRICS = new Set(['live', 'banked', 'minted']);
+const METRICS = new Set(['live', 'banked', 'minted', 'earned']);
 
 export class LeaderboardService {
   constructor({ store, config, rates = DEFAULT_RATES }) {
@@ -11,10 +18,11 @@ export class LeaderboardService {
     this.rates = rates;
   }
 
-  async list({ seasonId = null, worldId = null, sessionId = null, owner = null, metric = 'banked', limit = 50 } = {}) {
+  async list({ seasonId = null, worldId = null, sessionId = null, owner = null, metric = 'earned', limit = 50 } = {}) {
     const db = await this.store.read();
-    const selectedMetric = METRICS.has(metric) ? metric : 'banked';
+    const selectedMetric = METRICS.has(metric) ? metric : 'earned';
     const rowsByOwner = new Map();
+    const resourceHistory = buildResourceHistory(db);
 
     for (const stats of db.agentStats) {
       if (seasonId && stats.seasonId !== seasonId) continue;
@@ -24,7 +32,8 @@ export class LeaderboardService {
       if (owner && normalizeKey(resolved.ownerActor) !== normalizeActorKey(owner)) continue;
 
       const key = normalizeKey(resolved.ownerActor);
-      const resolvedStats = { ...stats, ...resolved };
+      const history = resourceHistory.get(agentStatsKey(stats.worldId, stats.sessionId, stats.ownerActor));
+      const resolvedStats = withResourceHistory({ ...stats, ...resolved }, history);
       const row = rowsByOwner.get(key) || emptyRow(resolvedStats);
       mergeRow(row, resolvedStats, selectedMetric, this.rates);
       rowsByOwner.set(key, row);
@@ -43,10 +52,11 @@ export class LeaderboardService {
   }
 
   async summary(filters = {}) {
-    const [live, banked, minted] = await Promise.all([
+    const [live, banked, minted, earned] = await Promise.all([
       this.list({ ...filters, metric: 'live', limit: 1_000_000 }),
       this.list({ ...filters, metric: 'banked', limit: 1_000_000 }),
       this.list({ ...filters, metric: 'minted', limit: 1_000_000 }),
+      this.list({ ...filters, metric: 'earned', limit: 1_000_000 }),
     ]);
     return {
       players: live.length,
@@ -54,6 +64,7 @@ export class LeaderboardService {
         live: sumMetric(live, 'live', this.rates),
         banked: sumMetric(banked, 'banked', this.rates),
         minted: sumMetric(minted, 'minted', this.rates),
+        earned: sumMetric(earned, 'earned', this.rates),
       },
     };
   }
@@ -73,6 +84,8 @@ function emptyRow(stats) {
     live: emptyResources(),
     banked: emptyResources(),
     minted: emptyResources(),
+    spentBanked: emptyResources(),
+    earned: emptyResources(),
     moves: 0,
     drills: 0,
     laddersPlaced: 0,
@@ -87,6 +100,8 @@ function mergeRow(row, stats) {
   addResources(row.live, stats.extracted);
   addResources(row.banked, stats.banked);
   addResources(row.minted, stats.minted);
+  addResources(row.spentBanked, stats.spentBanked);
+  addResources(row.earned, stats.earned);
   row.moves += stats.moves || 0;
   row.drills += stats.drills || 0;
   row.laddersPlaced += stats.laddersPlaced || 0;
@@ -135,6 +150,49 @@ function emptyResources() {
 
 function normalizeKey(value) {
   return String(value || '').toLowerCase();
+}
+
+function buildResourceHistory(db) {
+  const history = new Map();
+  const events = [...(db.chainEvents || [])]
+    .filter((event) => ['AgentSurfaced', 'ResourcesMinted', 'ResourcesTradedForLadders'].includes(event.event))
+    .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+
+  for (const event of events) {
+    const sessionId = event.args?.[0];
+    const ownerActor = event.args?.[1];
+    if (sessionId === undefined || !ownerActor) continue;
+    const world = db.worlds.find((item) => normalizeEvmAddress(item.programId) === normalizeEvmAddress(event.programId));
+    const worldId = world?.id || event.programId;
+    const key = agentStatsKey(worldId, sessionId, ownerActor);
+    const stats = history.get(key) || {};
+    const resources = {
+      scrst: Number(event.args?.[2] || 0),
+      bcrst: Number(event.args?.[3] || 0),
+      hcrst: Number(event.args?.[4] || 0),
+    };
+    if (event.event === 'AgentSurfaced') applySurfaceAccounting(stats, resources);
+    if (event.event === 'ResourcesMinted') applyMintAccounting(stats, resources);
+    if (event.event === 'ResourcesTradedForLadders') applyTradeAccounting(stats, resources);
+    history.set(key, stats);
+  }
+  return history;
+}
+
+function withResourceHistory(stats, history = null) {
+  const result = {
+    ...stats,
+    minted: maxResources(stats.minted, history?.minted),
+    spentBanked: maxResources(stats.spentBanked, history?.spentBanked),
+    surfacedResources: maxResources(stats.surfacedResources, history?.surfacedResources),
+  };
+  syncEarnedResources(result);
+  result.earned = maxResources(maxResources(result.earned, stats.earned), history?.earned);
+  return result;
+}
+
+function agentStatsKey(worldId, sessionId, ownerActor) {
+  return `${normalizeKey(worldId)}:${String(sessionId)}:${normalizeKey(ownerActor)}`;
 }
 
 function resolveLeaderboardIdentity(db, stats) {

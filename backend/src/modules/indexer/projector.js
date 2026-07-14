@@ -1,4 +1,10 @@
 import { applyWorldSessionTiming } from '../gameMaster/sessionTiming.js';
+import {
+  applyMintAccounting,
+  applySurfaceAccounting,
+  applyTradeAccounting,
+  syncEarnedResources,
+} from './resourceAccounting.js';
 
 const WORLD_LIVE_STATUSES = new Set(['map_ready', 'deployed', 'waiting_agents', 'active']);
 
@@ -159,6 +165,7 @@ function applyWorldSnapshot(db, snapshot, config) {
       bcrst: inventory[1] ?? state[6] ?? 0,
       hcrst: inventory[2] ?? state[7] ?? 0,
     };
+    syncEarnedResources(stats);
     stats.snapshotAt = snapshot.capturedAt;
   }
 }
@@ -274,7 +281,7 @@ function applyWorldEvent(db, event, config) {
       break;
     case 'AgentSurfaced':
       stats.surfaced += 1;
-      stats.banked = { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) };
+      applySurfaceAccounting(stats, { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) });
       break;
     case 'AgentDied':
       digger.status = 'dead';
@@ -289,7 +296,10 @@ function applyWorldEvent(db, event, config) {
       stats.exitedAt = event.timestamp;
       break;
     case 'ResourcesMinted':
-      stats.minted = { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) };
+      applyMintAccounting(stats, { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) });
+      break;
+    case 'ResourcesTradedForLadders':
+      applyTradeAccounting(stats, { scrst: toNumber(a), bcrst: toNumber(b), hcrst: toNumber(c) });
       break;
     default:
       break;
@@ -489,6 +499,9 @@ function upsertAgentStats(db, worldId, sessionId, ownerActor, seasonId, now) {
       extracted: { scrst: 0, bcrst: 0, hcrst: 0 },
       banked: { scrst: 0, bcrst: 0, hcrst: 0 },
       minted: { scrst: 0, bcrst: 0, hcrst: 0 },
+      spentBanked: { scrst: 0, bcrst: 0, hcrst: 0 },
+      surfacedResources: { scrst: 0, bcrst: 0, hcrst: 0 },
+      earned: { scrst: 0, bcrst: 0, hcrst: 0 },
       createdAt: now,
       updatedAt: now,
     };
@@ -558,9 +571,9 @@ function isWorldAdminEvent(event) {
 }
 
 function incrementResource(target, kind, amount) {
-  if (kind === 0) target.scrst += amount;
-  else if (kind === 1) target.bcrst += amount;
-  else if (kind === 2) target.hcrst += amount;
+  if (kind === 1) target.scrst += amount;
+  else if (kind === 2) target.bcrst += amount;
+  else if (kind === 3) target.hcrst += amount;
 }
 
 function actorKey(value) {

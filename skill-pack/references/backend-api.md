@@ -19,6 +19,12 @@ Read the live signing domain, rates, unit, and program ids:
 GET /api/redeem/config?network=mainnet
 ```
 
+The response is the public source of truth for `enabled`, `network`, `chainId`,
+`redeemProgramId`, `resVmtProgramId`, `treasuryAddress`, `rates`, `varaUnit`,
+`requestTtlMs`, `workerIntervalMs`, `burnTimeoutMs`, `leaseMs`, `maxAttempts`,
+and the EIP-712 `domain`, `types`, and `primaryType`. It never includes a
+private key.
+
 Create a random `bytes32 nonce` and a deadline no later than the returned
 `requestTtlMs`. Sign the returned `domain`, `types`, and `primaryType` as
 EIP-712 with this exact message:

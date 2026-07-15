@@ -20,6 +20,7 @@ const NETWORKS = {
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
     resVmtProgramId: '0xa359f125d51684bab99b62e143abdd2ff925120b',
     redeemProgramId: '0xc280544e0fec27c904b90368bc95abbcdb508e64',
+    redeemTreasuryAddress: '0x249579d43b0f3418f6e94b269c93714f106ee631',
     explorer: 'https://etherscan.io',
   },
   // Hoodi testnet (Vara.eth), chainId 560048 — see vara-wiki network-endpoints.
@@ -30,6 +31,7 @@ const NETWORKS = {
     routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
     resVmtProgramId: '',
     redeemProgramId: '',
+    redeemTreasuryAddress: '',
     explorer: 'https://hoodi.etherscan.io',
   },
 };
@@ -87,6 +89,7 @@ export const CHAIN = {
   backendUrl: env.VITE_BACKEND_URL || '',
   resVmtProgramId: defaults.resVmtProgramId || env.VITE_RES_VMT_PROGRAM_ID || '',
   redeemProgramId: defaults.redeemProgramId || env.VITE_REDEEM_PROGRAM_ID || '',
+  redeemTreasuryAddress: defaults.redeemTreasuryAddress || env.VITE_REDEEM_TREASURY_ADDRESS || '',
 
   // Operator discovery feed (factory /sessions + /matches). If empty, the
   // frontend uses backendUrl for the same endpoints.

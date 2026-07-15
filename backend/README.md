@@ -39,17 +39,22 @@ GET  /api/redeem/requests?owner=0x...
 GET  /api/redeem/requests/<requestId>
 ```
 
+`GET /api/redeem/config` publishes every safe runtime value needed by clients:
+network and chain identity, both program ids, treasury address, rates, unit,
+worker/retry timing, and the complete EIP-712 signing schema. Private keys are
+never included.
+
 Required production settings:
 
 ```text
-REDEEM_BACKEND_ENABLED=true
 MAINNET_ADMIN_KEY=0x...
-DIGGER_RES_VMT_PROGRAM_ID=0x...
-DIGGER_REDEEM_PROGRAM_ID=0x...
 ```
 
 `REDEEM_TREASURY_KEY` is optional. When it is not set, the backend uses the
-active network admin key as the treasury signer.
+active network admin key as the treasury signer. Redeem is always active;
+program ids, rates, units, and worker settings come from the public network
+profile in `src/config/networks.js`. Environment variables may override those
+values for an exceptional deployment, but are not required.
 
 The treasury EOA needs enough ERC-20 WVARA for payouts and ETH for Ethereum
 transaction fees. It must also be enabled through

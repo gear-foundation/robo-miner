@@ -36,9 +36,14 @@ export class RedeemPayoutService {
       chainId: this.config.chainId,
       redeemProgramId,
       resVmtProgramId: this.config.resVmtProgramIds?.[0] || '',
+      treasuryAddress: this.config.redeemTreasuryAddress || '',
       rates: stringifyAmounts(this.config.redeemRates),
       varaUnit: this.config.redeemUnit.toString(),
       requestTtlMs: this.config.redeemRequestTtlMs,
+      workerIntervalMs: this.config.redeemWorkerIntervalMs,
+      burnTimeoutMs: this.config.redeemBurnTimeoutMs,
+      leaseMs: this.config.redeemLeaseMs,
+      maxAttempts: this.config.redeemMaxAttempts,
       domain: redeemProgramId ? redeemDomain(this.config) : null,
       primaryType: REDEEM_PRIMARY_TYPE,
       types: REDEEM_TYPES,
@@ -114,7 +119,7 @@ export class RedeemPayoutService {
   }
 
   async processPending({ limit = 10 } = {}) {
-    if (!this.isConfigured()) return { skipped: true, reason: 'disabled' };
+    if (!this.isConfigured()) return { skipped: true, reason: 'not_configured' };
     const db = await this.store.read();
     const ids = db.redeemPayouts
       .filter((item) => !TERMINAL_STATUSES.has(item.status))
@@ -242,8 +247,7 @@ export class RedeemPayoutService {
 
   isConfigured() {
     return Boolean(
-      this.config.redeemBackendEnabled
-      && this.config.redeemTreasuryKey
+      this.config.redeemTreasuryKey
       && this.config.redeemProgramIds?.[0]
       && this.config.resVmtProgramIds?.[0],
     );

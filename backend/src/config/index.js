@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { privateKeyToAccount } from 'viem/accounts';
 import { profileFor, adminKeyFor, DEFAULT_NETWORK } from './networks.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,6 +20,20 @@ export function loadConfig(env = process.env) {
   const network = String(env.CHAIN_NETWORK || DEFAULT_NETWORK).toLowerCase();
   const profile = profileFor(network);
   const adminKey = adminKeyFor(network, env);
+  const redeemTreasuryKey = env.REDEEM_TREASURY_KEY || adminKey;
+  const derivedRedeemTreasuryAddress = addressForPrivateKey(redeemTreasuryKey);
+  const expectedRedeemTreasuryAddress = normalizeOptionalAddress(
+    env.REDEEM_TREASURY_ADDRESS || profile.REDEEM_TREASURY_ADDRESS || '',
+  );
+  if (
+    derivedRedeemTreasuryAddress
+    && expectedRedeemTreasuryAddress
+    && derivedRedeemTreasuryAddress !== expectedRedeemTreasuryAddress
+  ) {
+    throw new Error(
+      `Redeem treasury key resolves to ${derivedRedeemTreasuryAddress}, expected ${expectedRedeemTreasuryAddress}`,
+    );
+  }
   const resVmtProgramId = env.DIGGER_RES_VMT_PROGRAM_ID || env.RES_VMT_PROGRAM_ID || profile.RES_VMT_PROGRAM_ID || '';
   const redeemProgramId = env.DIGGER_REDEEM_PROGRAM_ID || env.REDEEM_PROGRAM_ID || profile.REDEEM_PROGRAM_ID || '';
   return {
@@ -59,19 +74,19 @@ export function loadConfig(env = process.env) {
     diggerProgramIds: splitList(env.INDEXER_PROXY_PROGRAM_IDS || env.DIGGER_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_ID || ''),
     redeemProgramIds: redeemProgramId ? [redeemProgramId] : [],
     resVmtProgramIds: resVmtProgramId ? [resVmtProgramId] : [],
-    redeemBackendEnabled: env.REDEEM_BACKEND_ENABLED === 'true',
-    redeemTreasuryKey: env.REDEEM_TREASURY_KEY || adminKey,
-    redeemUnit: parseBigIntEnv(env.REDEEM_UNIT || '', WVARA),
+    redeemTreasuryKey,
+    redeemTreasuryAddress: derivedRedeemTreasuryAddress || expectedRedeemTreasuryAddress,
+    redeemUnit: parseBigIntEnv(env.REDEEM_UNIT || '', BigInt(profile.REDEEM_UNIT)),
     redeemRates: {
       scrst: parseBigIntEnv(env.REDEEM_SCRST_RATE || '', BigInt(profile.REDEEM_RATES.scrst)),
       bcrst: parseBigIntEnv(env.REDEEM_BCRST_RATE || '', BigInt(profile.REDEEM_RATES.bcrst)),
       hcrst: parseBigIntEnv(env.REDEEM_HCRST_RATE || '', BigInt(profile.REDEEM_RATES.hcrst)),
     },
-    redeemRequestTtlMs: Number(env.REDEEM_REQUEST_TTL_MS || 10 * 60_000),
-    redeemWorkerIntervalMs: Number(env.REDEEM_WORKER_INTERVAL_MS || 5_000),
-    redeemBurnTimeoutMs: Number(env.REDEEM_BURN_TIMEOUT_MS || 180_000),
-    redeemLeaseMs: Number(env.REDEEM_LEASE_MS || 240_000),
-    redeemMaxAttempts: Number(env.REDEEM_MAX_ATTEMPTS || 5),
+    redeemRequestTtlMs: Number(env.REDEEM_REQUEST_TTL_MS || profile.REDEEM_REQUEST_TTL_MS),
+    redeemWorkerIntervalMs: Number(env.REDEEM_WORKER_INTERVAL_MS || profile.REDEEM_WORKER_INTERVAL_MS),
+    redeemBurnTimeoutMs: Number(env.REDEEM_BURN_TIMEOUT_MS || profile.REDEEM_BURN_TIMEOUT_MS),
+    redeemLeaseMs: Number(env.REDEEM_LEASE_MS || profile.REDEEM_LEASE_MS),
+    redeemMaxAttempts: Number(env.REDEEM_MAX_ATTEMPTS || profile.REDEEM_MAX_ATTEMPTS),
     diggerDailyExecTarget: parseBigIntEnv(
       env.DIGGER_DAILY_EXEC_TARGET || env.DIGGER_RENTAL_DAILY_EXEC_TARGET || '',
       DEFAULT_DIGGER_DAILY_EXEC_TARGET,
@@ -99,6 +114,25 @@ export function loadConfig(env = process.env) {
       quote: parseBigIntEnv(env.SOCIAL_QUOTE_FUEL_GRANT || '', DEFAULT_SOCIAL_QUOTE_FUEL_GRANT),
     },
   };
+}
+
+function addressForPrivateKey(value) {
+  if (!value) return '';
+  try {
+    const key = String(value).startsWith('0x') ? String(value) : `0x${value}`;
+    return privateKeyToAccount(key).address.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function normalizeOptionalAddress(value) {
+  if (!value) return '';
+  const normalized = String(value).toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
+    throw new Error(`Invalid REDEEM_TREASURY_ADDRESS: ${value}`);
+  }
+  return normalized;
 }
 
 export function parseBigIntEnv(value, fallback) {

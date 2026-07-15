@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { privateKeyToAccount } from 'viem/accounts';
-import { RedeemPayoutService, typedData } from '../src/modules/redeemPayout/service.js';
+import {
+  REDEEM_DOMAIN_NAME,
+  REDEEM_DOMAIN_VERSION,
+  REDEEM_PRIMARY_TYPE,
+  REDEEM_TYPES,
+  RedeemPayoutService,
+  typedData,
+} from '../src/modules/redeemPayout/service.js';
 
 const OWNER_KEY = '0x59c6995e998f97a5a0044976f0945389dc9e86dae88c7a8412f4603b6b78690d';
 const REDEEM = '0x1111111111111111111111111111111111111111';
@@ -394,11 +401,11 @@ test('a transfer returning a reverted receipt is never marked confirmed', async 
 
 test('configuration and u128 guards reject unsafe submissions', async () => {
   const account = privateKeyToAccount(OWNER_KEY);
-  const disabledConfig = { ...testConfig(), redeemBackendEnabled: false };
-  const disabled = new RedeemPayoutService({ store: memoryStore(), config: disabledConfig, chainFactory: async () => null });
-  const disabledIntent = makeIntent(account.address, { nonce: hex32('4b') });
-  const disabledSignature = await account.signTypedData(typedData(disabledConfig, disabledIntent));
-  await assert.rejects(disabled.submit({ ...disabledIntent, signature: disabledSignature }), (error) => error.statusCode === 503);
+  const incompleteConfig = { ...testConfig(), redeemTreasuryKey: '' };
+  const incomplete = new RedeemPayoutService({ store: memoryStore(), config: incompleteConfig, chainFactory: async () => null });
+  const incompleteIntent = makeIntent(account.address, { nonce: hex32('4b') });
+  const incompleteSignature = await account.signTypedData(typedData(incompleteConfig, incompleteIntent));
+  await assert.rejects(incomplete.submit({ ...incompleteIntent, signature: incompleteSignature }), (error) => error.statusCode === 503);
 
   const config = testConfig();
   const service = new RedeemPayoutService({ store: memoryStore(), config, chainFactory: async () => null, now: () => 1_000_000 });
@@ -407,19 +414,51 @@ test('configuration and u128 guards reject unsafe submissions', async () => {
   await assert.rejects(service.submit({ ...overflowIntent, signature: overflowSignature }), /payout exceeds contract u128 range/);
 });
 
+test('public redeem config exposes every safe network and worker setting', () => {
+  const config = testConfig();
+  const service = new RedeemPayoutService({ store: memoryStore(), config, chainFactory: async () => null });
+
+  assert.deepEqual(service.publicConfig(), {
+    enabled: true,
+    network: 'mainnet',
+    chainId: 1,
+    redeemProgramId: REDEEM,
+    resVmtProgramId: VMT,
+    treasuryAddress: '0x3333333333333333333333333333333333333333',
+    rates: { scrst: '10', bcrst: '30', hcrst: '150' },
+    varaUnit: '1',
+    requestTtlMs: 600_000,
+    workerIntervalMs: 5_000,
+    burnTimeoutMs: 10_000,
+    leaseMs: 10_000,
+    maxAttempts: 5,
+    domain: {
+      name: REDEEM_DOMAIN_NAME,
+      version: REDEEM_DOMAIN_VERSION,
+      chainId: 1,
+      verifyingContract: REDEEM,
+    },
+    primaryType: REDEEM_PRIMARY_TYPE,
+    types: REDEEM_TYPES,
+  });
+  assert.equal(Object.hasOwn(service.publicConfig(), 'redeemTreasuryKey'), false);
+});
+
 function testConfig() {
   return {
     network: 'mainnet',
     chainId: 1,
-    redeemBackendEnabled: true,
     redeemTreasuryKey: '0xtreasury',
+    redeemTreasuryAddress: '0x3333333333333333333333333333333333333333',
     redeemProgramIds: [REDEEM],
     resVmtProgramIds: [VMT],
     redeemRates: { scrst: 10n, bcrst: 30n, hcrst: 150n },
     redeemUnit: 1n,
     redeemRequestTtlMs: 600_000,
+    redeemWorkerIntervalMs: 5_000,
     redeemBurnTimeoutMs: 10_000,
     redeemLeaseMs: 10_000,
+    redeemMaxAttempts: 5,
   };
 }
 

@@ -117,7 +117,6 @@ export class SocialVerifierService {
 
     const grant = await this.grantFuel({
       submission,
-      digger,
       amount,
       dryRun: resolvedDryRun,
     });
@@ -201,10 +200,29 @@ export class SocialVerifierService {
     return digger;
   }
 
-  async grantFuel({ submission, digger, amount, dryRun }) {
+  async grantFuel({ submission, amount, dryRun }) {
     const programId = normalizeAddress(submission.programId);
-    const before = BigInt(digger.executableBalance || 0);
-    const after = before + amount;
+    let before = null;
+    let txHash = null;
+    let status = dryRun ? 'dry-run' : 'pending';
+    let updatedAt = this.now().toISOString();
+
+    if (!dryRun) {
+      const chain = await this.chainFactory?.();
+      try {
+        if (!chain?.readExecutableBalance || !chain?.topUpExecutableBalance) {
+          throw new Error('Chain client does not support executable balance read/top-up');
+        }
+        before = BigInt(await chain.readExecutableBalance(programId));
+        const receipt = await chain.topUpExecutableBalance(programId, amount);
+        txHash = receipt.transactionHash || receipt.hash || null;
+        status = receipt.status === 'reverted' || receipt.status === false ? 'failed' : 'confirmed';
+        updatedAt = this.now().toISOString();
+      } finally {
+        await chain?.disconnect?.();
+      }
+    }
+
     const now = this.now();
     const grant = {
       id: submission.fuelGrantId,
@@ -217,26 +235,13 @@ export class SocialVerifierService {
       taskType: submission.taskType,
       xUsername: submission.xUsername,
       tweetId: submission.tweetId,
-      balanceBefore: before.toString(),
+      balanceBefore: before === null ? null : before.toString(),
       amount: amount.toString(),
-      txHash: null,
-      status: dryRun ? 'dry-run' : 'pending',
+      txHash,
+      status,
       createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
+      updatedAt,
     };
-
-    if (!dryRun) {
-      const chain = await this.chainFactory?.();
-      if (!chain?.topUpExecutableBalance) throw new Error('Chain client does not support executable balance top-up');
-      try {
-        const receipt = await chain.topUpExecutableBalance(programId, amount);
-        grant.txHash = receipt.transactionHash || receipt.hash || null;
-        grant.status = receipt.status === 'reverted' || receipt.status === false ? 'failed' : 'confirmed';
-        grant.updatedAt = this.now().toISOString();
-      } finally {
-        await chain?.disconnect?.();
-      }
-    }
 
     await this.store.update((db) => {
       if (!db.fuelGrants.some((item) => item.idempotencyKey === submission.grantId)) {
@@ -244,6 +249,8 @@ export class SocialVerifierService {
       }
       const nextDigger = db.diggers.find((item) => normalizeAddress(item.programId) === programId);
       if (nextDigger && grant.status !== 'failed') {
+        delete nextDigger.executableBalance;
+        delete nextDigger.executableBalanceObservedAt;
         nextDigger.lastRefuelAt = grant.updatedAt;
         nextDigger.updatedAt = grant.updatedAt;
       }

@@ -27,6 +27,7 @@ export class IndexerProjector {
   }
 
   async applyEvents(events) {
+    if (!Array.isArray(events) || events.length === 0) return [];
     const normalizedEvents = events.map((event) => normalizeEvent(event, this.now()));
     return this.store.update((db) => normalizedEvents.map((normalized) => {
       if (hasEvent(db, normalized.id)) return { applied: false, reason: 'duplicate', event: normalized };
@@ -184,12 +185,12 @@ function applyProxySnapshot(db, snapshot, config) {
       id: programId,
       programId,
       owner: null,
-      executableBalance: '0',
       lastRefuelAt: null,
       createdAt: snapshot.capturedAt,
     };
     db.diggers.push(digger);
   }
+  delete digger.executableBalance;
   Object.assign(digger, {
     ownerActor: snapshot.owner,
     worldActor: snapshot.world,
@@ -497,6 +498,7 @@ function upsertDiggerFromActor(db, ownerActor, patch) {
   const existing = programId ? findDiggerByProgram(db, programId) : null;
   const now = patch.updatedAt;
   if (existing) {
+    delete existing.executableBalance;
     Object.assign(existing, patch);
     return existing;
   }
@@ -505,7 +507,6 @@ function upsertDiggerFromActor(db, ownerActor, patch) {
     programId,
     actorId: ownerActor,
     owner: null,
-    executableBalance: '0',
     lastRefuelAt: null,
     createdAt: now,
     ...patch,

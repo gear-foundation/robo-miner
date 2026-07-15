@@ -55,7 +55,14 @@ export function loadConfig(env = process.env) {
     network,
     chainId: Number(profile.CHAIN_ID),
     ethRpc: profile.ETH_RPC,
-    varaEthWs: profile.VARA_WS,
+    varaEthWs: env.VARA_ETH_WS || profile.VARA_WS,
+    varaEthWsEndpoints: uniqueStrings([
+      ...splitList(env.VARA_ETH_WS_ENDPOINTS || env.VARA_ETH_WS || ''),
+      profile.VARA_WS,
+      ...(profile.VARA_WS_FALLBACKS || []),
+    ]),
+    varaEthRequestTimeoutMs: Number(env.VARA_ETH_REQUEST_TIMEOUT_MS || 15_000),
+    diggerDeployReceiptTimeoutMs: Number(env.DIGGER_DEPLOY_RECEIPT_TIMEOUT_MS || 120_000),
     indexerPollMs: Number(env.INDEXER_POLL_MS || 3000),
     indexerTimeoutMs: Number(env.INDEXER_TIMEOUT_MS || env.DIGGER_QUERY_TIMEOUT_MS || 180000),
     schedulerRegistryMs: Number(env.SCHEDULER_REGISTRY_MS || 60_000),
@@ -150,6 +157,10 @@ export function splitList(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => String(value || '').trim()).filter(Boolean))];
 }
 
 function loadDotEnv(file) {

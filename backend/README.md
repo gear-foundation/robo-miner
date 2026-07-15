@@ -160,7 +160,7 @@ GET /api/diggers?season=season-1&world=world-id&owner=0x...
 POST /api/diggers/request
 GET /api/stats/agents?season=season-1&world=world-id
 GET /api/stats/economy
-GET /api/leaderboard?metric=banked&season=season-1&world=world-id&limit=50
+GET /api/leaderboard?metric=earned&season=season-1&world=world-id&limit=50
 POST /api/social/x/submit
 GET /api/social/x/:owner
 GET /api/manifest
@@ -251,7 +251,20 @@ GET /api/diggers?owner=0xagent&world=0xworld&season=season-1&status=active
 ```
 
 The response includes both the full `diggers[]` list and `digger`, the first
-matching record for "my digger" flows.
+matching record for "my digger" flows. It includes `targetExecBalance` as the
+refill-policy target, but intentionally does not expose `executableBalance`:
+the backend registry is not a live balance oracle.
+
+Read the current executable balance from Vara.eth state instead:
+
+```bash
+vara-wallet --chain vara-eth --network mainnet --json \
+  vara-eth:state read 0xDIGGER_PROGRAM_ID
+```
+
+The authoritative field is `programState.executableBalance` in base units
+(`1 VARA = 10^12`). ETH balance, ERC-20 WVARA balance,
+`programState.balance`, and `targetExecBalance` are different values.
 
 The frontend helper mirrors the same flow:
 
@@ -282,8 +295,10 @@ daily transfer. For every active digger:
 topUp = max(0, DIGGER_DAILY_EXEC_TARGET - currentExecutableBalance)
 ```
 
-Dry-run writes the same audit records as live mode, but it does not block a later
-live run for the same day.
+Dry-run cannot infer a current balance from the registry. Pass
+`--assume-balance <base-units>` to calculate a hypothetical top-up; without it,
+the result is `current_balance_unknown`. Dry-run does not block a later live run
+for the same day.
 
 ```bash
 cd backend
@@ -305,7 +320,8 @@ npm run rental:top-up -- --live
 ```
 
 The job stores diggers, fuel grants, and job-run audit data in
-the backend DB.
+the backend DB. Fuel-grant audit rows may store the chain-observed
+`balanceBefore`; digger registry rows do not store or publish a current balance.
 
 ## Social Verifier Free Fuel
 
@@ -529,7 +545,7 @@ Example payload:
       "programId": "0x936b5395876648772d37e22da57ba37c4e586df2",
       "service": "World",
       "event": "ResourceExtracted",
-      "args": ["1", "0x0000000000000000000000000000000000000000000000000000000000000002", 10, 12, 0, 3]
+      "args": ["1", "0x0000000000000000000000000000000000000000000000000000000000000002", 10, 12, 1, 3]
     }
   ]
 }
@@ -547,10 +563,11 @@ cd contracts
 DIGGER_BACKEND_URL=http://localhost:8787 pnpm run agent-step-events -- --until-resource
 ```
 
-For MVP rewards the leaderboard uses only `banked`: resources brought back to
-the surface. Snapshot reconciliation is the source of truth; legacy agent ingest
-can still project `World.AgentSurfaced` into `agentStats[].banked`.
-`/api/leaderboard` defaults to `metric=banked`.
+The public leaderboard uses `earned`: the cumulative resources brought back to
+the surface. It does not fall when an agent spends banked resources on ladders
+or mints them into RES. Event history supplies cumulative mint/trade accounting,
+while snapshot reconciliation keeps the current `banked` balance accurate.
+`/api/leaderboard` defaults to `metric=earned`.
 
 Run the reconciliation worker next to the API:
 
@@ -574,15 +591,19 @@ Leaderboard rows are aggregated by agent/owner across the selected scope.
 GET /api/leaderboard?metric=live
 GET /api/leaderboard?metric=banked
 GET /api/leaderboard?metric=minted
-GET /api/leaderboard?metric=banked&season=season-1&world=world-id&session=1&summary=true
+GET /api/leaderboard?metric=earned
+GET /api/leaderboard?metric=earned&season=season-1&world=world-id&session=1&summary=true
 ```
 
 Metrics:
 
 - `live`: resources extracted during the session. Fast and exciting, but includes
   inventory that may not be banked yet.
-- `banked`: resources surfaced/banked. Default leaderboard for MVP rewards.
-- `minted`: resources minted into RES. Best for confirmed economy accounting.
+- `banked`: current unspent resources in the world; decreases after ladder trades
+  and RES minting.
+- `minted`: cumulative resources minted into RES.
+- `earned`: cumulative surfaced resources (`banked + minted + ladder spending`).
+  This is the default public leaderboard metric.
 
 Leaderboard score uses display VARA rates:
 `SCRST * 6 + BCRST * 30 + HCRST * 150`.

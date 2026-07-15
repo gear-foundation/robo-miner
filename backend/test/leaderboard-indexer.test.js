@@ -321,6 +321,14 @@ test('resource extraction uses the contract resource kind ids 1, 2, and 3', asyn
   assert.equal(store.updateCalls, 1);
 });
 
+test('empty indexer batches do not start a database update', async () => {
+  const store = new MemoryStore();
+  const projector = new IndexerProjector({ store, config: CONFIG });
+
+  assert.deepEqual(await projector.applyEvents([]), []);
+  assert.equal(store.updateCalls, 0);
+});
+
 class MemoryStore {
   constructor(initial = {}) {
     this.db = normalizeDb(initial);

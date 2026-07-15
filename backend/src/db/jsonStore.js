@@ -58,7 +58,7 @@ export function normalizeDb(db) {
     ...db,
     seasons: Array.isArray(db?.seasons) ? db.seasons : [],
     worlds: Array.isArray(db?.worlds) ? db.worlds : [],
-    diggers: Array.isArray(db?.diggers) ? db.diggers : [],
+    diggers: Array.isArray(db?.diggers) ? db.diggers.map(withoutLegacyDiggerBalance) : [],
     rentalRequests: Array.isArray(db?.rentalRequests) ? db.rentalRequests : [],
     fuelGrants: Array.isArray(db?.fuelGrants) ? db.fuelGrants : [],
     socialRewardSubmissions: Array.isArray(db?.socialRewardSubmissions) ? db.socialRewardSubmissions : [],
@@ -69,4 +69,10 @@ export function normalizeDb(db) {
     archives: Array.isArray(db?.archives) ? db.archives : [],
     jobRuns: Array.isArray(db?.jobRuns) ? db.jobRuns : [],
   };
+}
+
+function withoutLegacyDiggerBalance(digger) {
+  if (!digger || typeof digger !== 'object') return digger;
+  const { executableBalance: _legacyExecutableBalance, ...result } = digger;
+  return result;
 }

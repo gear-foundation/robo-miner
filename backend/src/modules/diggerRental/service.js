@@ -38,6 +38,8 @@ export class DiggerRentalService {
           existing.status ||= 'active';
           existing.seasonId ||= this.config.diggerRentalSeason;
           existing.targetExecBalance ||= this.config.diggerDailyExecTarget.toString();
+          delete existing.executableBalance;
+          delete existing.executableBalanceObservedAt;
           existing.updatedAt = this.now().toISOString();
           touched.push(existing);
           continue;
@@ -45,12 +47,11 @@ export class DiggerRentalService {
         const digger = {
           id: programId,
           programId,
-          agentName: existing.agentName || generateAgentName(programId),
+          agentName: generateAgentName(programId),
           owner: null,
           seasonId: this.config.diggerRentalSeason,
           status: 'active',
           targetExecBalance: this.config.diggerDailyExecTarget.toString(),
-          executableBalance: '0',
           createdAt: this.now().toISOString(),
           updatedAt: this.now().toISOString(),
         };
@@ -198,8 +199,6 @@ export class DiggerRentalService {
         source: 'rental-request',
         codeId: resolvedCodeId || null,
         targetExecBalance: target.toString(),
-        executableBalance: '0',
-        executableBalanceObservedAt: null,
         lastRefuelAt: request.updatedAt,
         createdAt: request.createdAt,
         updatedAt: request.updatedAt,
@@ -381,6 +380,7 @@ export class DiggerRentalService {
         worldId: request.worldId,
         codeId: request.codeId,
         initialTopUp: BigInt(request.targetExecBalance),
+        onProgress: (progress) => this.recordRequestProgress(requestId, progress),
       });
       await this.chain.verifyDiggerReady({
         programId: deploy.programId,
@@ -412,8 +412,6 @@ export class DiggerRentalService {
           source: 'rental-request',
           codeId: request.codeId || null,
           targetExecBalance: request.targetExecBalance,
-          executableBalance: '0',
-          executableBalanceObservedAt: null,
           lastRefuelAt: completedAt,
           createdAt: request.createdAt,
           updatedAt: completedAt,
@@ -459,7 +457,7 @@ export class DiggerRentalService {
       await this.store.update((db) => {
         const liveRequest = db.rentalRequests.find((item) => item.id === requestId);
         if (liveRequest) {
-          liveRequest.status = 'failed';
+          liveRequest.status = liveRequest.createTxHash ? 'confirmation_pending' : 'failed';
           liveRequest.error = error.message;
           liveRequest.updatedAt = failedAt;
         }
@@ -543,7 +541,7 @@ export class DiggerRentalService {
       request.owner
       && request.worldId
       && request.seasonId === seasonId
-      && ['pending', 'running'].includes(request.status)
+      && ['pending', 'running', 'confirmation_pending'].includes(request.status)
       && normalizeStoredAddress(request.owner) === owner
       && normalizeStoredAddress(request.worldId) === worldId
     )) || null;
@@ -558,6 +556,19 @@ export class DiggerRentalService {
       request.updatedAt = this.now().toISOString();
       const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
       if (jobRun) jobRun.status = 'running';
+      return structuredClone(request);
+    });
+  }
+
+  async recordRequestProgress(requestId, progress) {
+    return this.store.update((db) => {
+      const request = db.rentalRequests.find((item) => item.id === requestId);
+      if (!request) return null;
+      if (progress.createTxHash) request.createTxHash = progress.createTxHash;
+      if (progress.initTxHash) request.initTxHash = progress.initTxHash;
+      if (progress.programId) request.programId = normalizeAddress(progress.programId);
+      request.stage = progress.stage || request.stage || null;
+      request.updatedAt = this.now().toISOString();
       return structuredClone(request);
     });
   }
@@ -580,7 +591,22 @@ export class DiggerRentalService {
       const current = assumeBalance === null
         ? await this.readCurrentBalance(digger, dryRun)
         : BigInt(assumeBalance);
-      if (!dryRun || assumeBalance !== null) await this.updateDiggerBalance(programId, current);
+      if (current === null) {
+        this.logger?.info?.('top_up.skip', {
+          programId,
+          reason: 'current_balance_unknown',
+          target: target.toString(),
+        });
+        results.push({
+          programId,
+          status: 'skipped',
+          reason: 'current_balance_unknown',
+          current: null,
+          target: target.toString(),
+        });
+        await this.removeLegacyExecutableBalance(programId);
+        continue;
+      }
       const amount = current < target ? target - current : 0n;
 
       const existing = db.fuelGrants.find((grant) => (
@@ -602,6 +628,7 @@ export class DiggerRentalService {
           target: target.toString(),
         });
         results.push({ programId, status: 'skipped', reason: 'already_at_or_above_target', current: current.toString(), target: target.toString() });
+        await this.removeLegacyExecutableBalance(programId);
         continue;
       }
 
@@ -644,6 +671,8 @@ export class DiggerRentalService {
       await this.store.update((nextDb) => {
         const nextDigger = nextDb.diggers.find((item) => normalizeAddress(item.programId) === programId);
         if (nextDigger) {
+          delete nextDigger.executableBalance;
+          delete nextDigger.executableBalanceObservedAt;
           nextDigger.lastRefuelAt = grant.updatedAt;
           nextDigger.updatedAt = grant.updatedAt;
         }
@@ -669,17 +698,16 @@ export class DiggerRentalService {
   }
 
   async readCurrentBalance(digger, dryRun) {
-    if (dryRun || !this.chain) return BigInt(digger.executableBalance || 0);
+    if (dryRun || !this.chain) return null;
     return this.chain.readExecutableBalance(normalizeAddress(digger.programId));
   }
 
-  async updateDiggerBalance(programId, balance) {
+  async removeLegacyExecutableBalance(programId) {
     await this.store.update((db) => {
       const digger = db.diggers.find((item) => normalizeAddress(item.programId) === programId);
       if (!digger) return;
-      digger.executableBalance = balance.toString();
-      digger.executableBalanceObservedAt = this.now().toISOString();
-      digger.updatedAt = this.now().toISOString();
+      delete digger.executableBalance;
+      delete digger.executableBalanceObservedAt;
     });
   }
 }

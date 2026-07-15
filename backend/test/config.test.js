@@ -13,6 +13,17 @@ test('loadConfig defaults chain visibility timeout to 180 seconds', () => {
   assert.equal(config.indexerTimeoutMs, 180000);
 });
 
+test('loadConfig configures bounded Vara.eth RPC and mainnet failover', () => {
+  const config = loadConfig({ BACKEND_STORE: 'json', CHAIN_NETWORK: 'mainnet' });
+
+  assert.deepEqual(config.varaEthWsEndpoints, [
+    'wss://validator-1-eth.vara.network',
+    'wss://validator-2-eth.vara.network',
+  ]);
+  assert.equal(config.varaEthRequestTimeoutMs, 15000);
+  assert.equal(config.diggerDeployReceiptTimeoutMs, 120000);
+});
+
 test('loadConfig defaults Postgres writes to bounded retries', () => {
   const config = loadConfig({
     BACKEND_STORE: 'json',

@@ -38,6 +38,7 @@ export const MAINNET = {
   CHAIN_ID: 1,
   ETH_RPC: 'https://mainnet-reth-rpc.gear-tech.io',
   VARA_WS: 'wss://validator-1-eth.vara.network',
+  VARA_WS_FALLBACKS: ['wss://validator-2-eth.vara.network'],
   ROUTER: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
   DOCUMENT_ID: 'mainnet',
   DISCOVERY_PORT: 8781,

@@ -9,6 +9,7 @@ const EMPTY_DB = {
   rentalRequests: [],
   fuelGrants: [],
   socialRewardSubmissions: [],
+  redeemPayouts: [],
   chainEvents: [],
   agentStats: [],
   economyStats: [],
@@ -19,6 +20,7 @@ const EMPTY_DB = {
 export class JsonStore {
   constructor(file) {
     this.file = file;
+    this.updateQueue = Promise.resolve();
   }
 
   async read() {
@@ -39,10 +41,14 @@ export class JsonStore {
   }
 
   async update(mutator) {
-    const db = await this.read();
-    const result = await mutator(db);
-    await this.write(db);
-    return result;
+    const operation = this.updateQueue.then(async () => {
+      const db = await this.read();
+      const result = await mutator(db);
+      await this.write(db);
+      return result;
+    });
+    this.updateQueue = operation.catch(() => undefined);
+    return operation;
   }
 }
 
@@ -56,6 +62,7 @@ export function normalizeDb(db) {
     rentalRequests: Array.isArray(db?.rentalRequests) ? db.rentalRequests : [],
     fuelGrants: Array.isArray(db?.fuelGrants) ? db.fuelGrants : [],
     socialRewardSubmissions: Array.isArray(db?.socialRewardSubmissions) ? db.socialRewardSubmissions : [],
+    redeemPayouts: Array.isArray(db?.redeemPayouts) ? db.redeemPayouts : [],
     chainEvents: Array.isArray(db?.chainEvents) ? db.chainEvents : [],
     agentStats: Array.isArray(db?.agentStats) ? db.agentStats : [],
     economyStats: Array.isArray(db?.economyStats) ? db.economyStats : [],

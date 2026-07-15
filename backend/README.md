@@ -25,6 +25,58 @@ backend/
 
 LP Bonus is intentionally deferred and is not part of the current MVP runtime.
 
+## Backend-mediated RES to WVARA redeem
+
+The player signs an EIP-712 intent; the API verifies the owner, persists an
+idempotent request, asks the Redeem coordinator to burn RES, then transfers
+ERC-20 WVARA from the backend treasury. The scheduler resumes queued requests
+and retries `payout_failed` after burn without burning a second time.
+
+```text
+GET  /api/redeem/config
+POST /api/redeem/request
+GET  /api/redeem/requests?owner=0x...
+GET  /api/redeem/requests/<requestId>
+```
+
+Required production settings:
+
+```text
+REDEEM_BACKEND_ENABLED=true
+MAINNET_ADMIN_KEY=0x...
+DIGGER_RES_VMT_PROGRAM_ID=0x...
+DIGGER_REDEEM_PROGRAM_ID=0x...
+```
+
+`REDEEM_TREASURY_KEY` is optional. When it is not set, the backend uses the
+active network admin key as the treasury signer.
+
+The treasury EOA needs enough ERC-20 WVARA for payouts and ETH for Ethereum
+transaction fees. It must also be enabled through
+`Redeem.Admin.SetBackendRedeemer`; deployment initializes the deploy signer as
+enabled. When `deploy-economy.ts --backend-redeemer` points to another EOA, the
+script authorizes that treasury and removes the deploy signer from the backend
+redeemer role. The backend also verifies the contract unit and all three rates
+before starting a burn, so its `REDEEM_*` rate settings must match the deployed
+contract.
+
+For a cutover that preserves all existing RES balances, deploy only a new
+Redeem coordinator and repoint the existing VMT:
+
+```bash
+pnpm deploy-economy -- \
+  --res-program 0xEXISTING_RES_VMT \
+  --skip-res-init \
+  --scrst-rate 6 --bcrst-rate 30 --hcrst-rate 150 \
+  --backend-redeemer 0xBACKEND_TREASURY
+```
+
+The script creates and initializes Redeem, then calls
+`Vmt.Admin.SetRedeemContract(newRedeem)`. Do not pass `--reserve-top-up` or
+`--smoke`; native reserve is not used in this flow. Update
+`DIGGER_REDEEM_PROGRAM_ID`, deploy backend and frontend, then fund the treasury
+with WVARA.
+
 ## Current module
 
 `modules/gameMaster` contains the current off-chain admin and world factory

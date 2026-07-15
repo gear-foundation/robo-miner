@@ -60,6 +60,8 @@ type CliArgs = {
   redeemProgram?: string;
   initialMinter?: string;
   addMinter?: string[];
+  addAdmin?: string[];
+  backendRedeemer?: string;
   topUp?: string;
   reserveTopUp?: string;
   varaUnit?: string;
@@ -123,6 +125,8 @@ Inputs:
   --skip-link            Do not call res-vmt.Admin.SetRedeemContract.
   --initial-minter       Initial RES minter. Defaults to signer address.
   --add-minter           Extra minter to add after deploy. Can be passed multiple times.
+  --add-admin            Extra admin for both RES VMT and Redeem. Can be passed multiple times.
+  --backend-redeemer     Backend treasury EOA allowed to call RedeemFor. Defaults to deploy signer.
   --top-up               Initial executable balance for each created program.
   --reserve-top-up       Native value sent to redeem.deposit_reserve.
   --vara-unit            Minimal units per 1 display VARA. Defaults to ${DEFAULTS.VARA_UNIT}.
@@ -176,6 +180,12 @@ function parseArgs(argv: string[]): CliArgs {
         break;
       case "--add-minter":
         args.addMinter = [...(args.addMinter ?? []), next()];
+        break;
+      case "--add-admin":
+        args.addAdmin = [...(args.addAdmin ?? []), next()];
+        break;
+      case "--backend-redeemer":
+        args.backendRedeemer = next();
         break;
       case "--top-up":
         args.topUp = next();
@@ -611,8 +621,11 @@ async function main() {
     console.log("[connect] account", connection.accountAddress);
     const initialMinter = normalizeAddress(args.initialMinter || connection.accountAddress, "--initial-minter");
     const extraMinters = (args.addMinter ?? []).map((value) => normalizeAddress(value, "--add-minter"));
+    const extraAdmins = (args.addAdmin ?? []).map((value) => normalizeAddress(value, "--add-admin"));
     const initialMinterActor = actorIdFromAddress(initialMinter);
     const extraMinterActors = extraMinters.map(actorIdFromAddress);
+    const extraAdminActors = extraAdmins.map(actorIdFromAddress);
+    const backendRedeemer = normalizeAddress(args.backendRedeemer || envValue("REDEEM_BACKEND_ADDRESS") || connection.accountAddress, "--backend-redeemer");
 
     const resCodeId = args.resProgram
       ? normalizeHex32(await connection.api.eth.router.programCodeId(normalizeAddress(args.resProgram, "--res-program")), "res program code id")
@@ -655,10 +668,33 @@ async function main() {
       await sendMirrorMessage(connection.api, resProgram, "res.set_redeem_contract", setRedeem, 0n, promiseTimeoutMs);
     }
 
+    if (!resOnly && redeemProgram && backendRedeemer.toLowerCase() !== connection.accountAddress.toLowerCase()) {
+      const setBackendRedeemer = redeemSails!.services.Admin.functions.SetBackendRedeemer.encodePayload(
+        actorIdFromAddress(backendRedeemer),
+        true,
+      ) as Hex;
+      await sendMirrorMessage(connection.api, redeemProgram, "redeem.set_backend_redeemer", setBackendRedeemer, 0n, promiseTimeoutMs);
+      const removeDeploySigner = redeemSails!.services.Admin.functions.SetBackendRedeemer.encodePayload(
+        actorIdFromAddress(connection.accountAddress),
+        false,
+      ) as Hex;
+      await sendMirrorMessage(connection.api, redeemProgram, "redeem.remove_deploy_signer_redeemer", removeDeploySigner, 0n, promiseTimeoutMs);
+    }
+
     for (let i = 0; i < extraMinters.length; i += 1) {
       const minter = extraMinters[i];
       const addMinter = resSails.services.Admin.functions.AddMinter.encodePayload(extraMinterActors[i]) as Hex;
       await sendMirrorMessage(connection.api, resProgram, `res.add_minter.${minter}`, addMinter, 0n, promiseTimeoutMs);
+    }
+
+    for (let i = 0; i < extraAdmins.length; i += 1) {
+      const admin = extraAdmins[i];
+      const addResAdmin = resSails.services.Admin.functions.AddAdmin.encodePayload(extraAdminActors[i]) as Hex;
+      await sendMirrorMessage(connection.api, resProgram, `res.add_admin.${admin}`, addResAdmin, 0n, promiseTimeoutMs);
+      if (!resOnly && redeemProgram && redeemSails) {
+        const addRedeemAdmin = redeemSails.services.Admin.functions.AddAdmin.encodePayload(extraAdminActors[i]) as Hex;
+        await sendMirrorMessage(connection.api, redeemProgram, `redeem.add_admin.${admin}`, addRedeemAdmin, 0n, promiseTimeoutMs);
+      }
     }
 
     if (reserveTopUp > 0n) {
@@ -695,6 +731,8 @@ async function main() {
         initialMinterActor,
         extraMinters,
         extraMinterActors,
+        extraAdmins,
+        extraAdminActors,
         redeemContract: redeemProgram,
         redeemContractActor: redeemProgram ? actorIdFromAddress(redeemProgram) : null,
       },
@@ -708,6 +746,7 @@ async function main() {
             varaUnit: varaUnit?.toString() ?? null,
             rates: rates ?? null,
             reserveTopUp: reserveTopUp.toString(),
+            backendRedeemer,
           }
         : null,
       smoke,

@@ -14,15 +14,17 @@ const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
 
 const NETWORKS = {
   mainnet: {
+    chainId: 1,
     ethRpc: 'https://mainnet-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://validator-1-eth.vara.network',
     routerAddress: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
-    resVmtProgramId: '0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448',
-    redeemProgramId: '0xdb8dae5f6fc193006d428e12ee0c717715c6b887',
+    resVmtProgramId: '0xa359f125d51684bab99b62e143abdd2ff925120b',
+    redeemProgramId: '0xc280544e0fec27c904b90368bc95abbcdb508e64',
     explorer: 'https://etherscan.io',
   },
   // Hoodi testnet (Vara.eth), chainId 560048 — see vara-wiki network-endpoints.
   testnet: {
+    chainId: 560048,
     ethRpc: 'https://hoodi-reth-rpc.gear-tech.io',
     varaEthWs: 'wss://vara-eth-validator-1.gear-tech.io',
     routerAddress: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',
@@ -63,6 +65,7 @@ export const CHAIN = {
   // contract is live and the ids below are filled.
   enabled: env.VITE_CHAIN_ENABLED === 'true',
   network,
+  chainId: defaults.chainId,
 
   // @vara-eth/api connection inputs — driven entirely by the selected network's
   // preset, so the toggle switches chain (router/RPC/WS), not just a label.
@@ -148,5 +151,5 @@ export function addressExplorerUrl(address) {
 }
 
 export function redeemReady() {
-  return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && CHAIN.resVmtProgramId && CHAIN.redeemProgramId);
+  return Boolean(CHAIN.enabled && CHAIN.ethRpc && CHAIN.varaEthWs && CHAIN.routerAddress && CHAIN.resVmtProgramId);
 }

@@ -1,8 +1,11 @@
 
 !@sails: 1.0.0-beta.5
 
-service Redeem@0x74c0432f9f172e15 {
+service Redeem@0x06dfd74221157279 {
     events {
+        BackendRedeemCanceled([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
+        BackendRedeemConfirmed([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
+        BackendRedeemRequested([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
         RedeemCanceled(u128, [u8; 32], u128, u128, u128, u128),
         Redeemed([u8; 32], u128, u128, u128, u128),
         RedeemRequested(u128, [u8; 32], u128, u128, u128, u128),
@@ -12,6 +15,8 @@ service Redeem@0x74c0432f9f172e15 {
     functions {
         @query
         AvailableReserve() -> u128 throws String;
+        @query
+        BackendRequestStatus(request_id: [u8; 32]) -> u128 throws String;
         @query
         BcrstRate() -> u128 throws String;
         CancelRedeem(redeem_id: u128) throws String;
@@ -25,6 +30,7 @@ service Redeem@0x74c0432f9f172e15 {
         @query
         PendingRedeemCount() -> u128 throws String;
         Redeem(scrst: u128, bcrst: u128, hcrst: u128) -> u128 throws String;
+        RedeemFor(request_id: [u8; 32], beneficiary: ActorId, scrst: u128, bcrst: u128, hcrst: u128) -> u128 throws String;
         @query
         ReserveBalance() -> u128 throws String;
         @query
@@ -42,10 +48,11 @@ service Redeem@0x74c0432f9f172e15 {
     }
 }
 
-service Admin@0x93ef6a6a3d7e1391 {
+service Admin@0x789e9b47c310c481 {
     events {
         AdminAdded([u8; 32]),
         AdminRemoved([u8; 32]),
+        BackendRedeemerUpdated([u8; 32], u128),
         FundsWithdrawn([u8; 32], u128, u128),
         Paused([u8; 32]),
         PendingRedeemForceCanceled(u128, [u8; 32], u128, u128, u128, u128),
@@ -59,17 +66,22 @@ service Admin@0x93ef6a6a3d7e1391 {
         AddAdmin(admin: ActorId) -> bool throws String;
         @query
         Admins() -> [ActorId] throws String;
+        @query
+        BackendRedeemers() -> [ActorId] throws String;
         ForceCancelRedeem(redeem_id: u128) throws String;
         @returns_value
         ForcePayRedeem(redeem_id: u128) throws String;
         @query
         IsAdmin(account: ActorId) -> bool throws String;
         @query
+        IsBackendRedeemer(account: ActorId) -> bool throws String;
+        @query
         IsPaused() -> bool throws String;
         Pause() throws String;
         RemoveAdmin(admin: ActorId) -> bool throws String;
         @query
         ResContract() -> ActorId throws String;
+        SetBackendRedeemer(account: ActorId, enabled: bool) -> bool throws String;
         SetRateConfig(vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetRates(scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128) throws String;
         SetResContract(res_contract: ActorId) throws String;
@@ -84,7 +96,7 @@ program DiggerRedeemClient {
         Create(res_contract: ActorId, vara_unit: u128, scrst_rate: u128, bcrst_rate: u128, hcrst_rate: u128);
     }
     services {
-        Redeem@0x74c0432f9f172e15,
-        Admin@0x93ef6a6a3d7e1391,
+        Redeem@0x06dfd74221157279,
+        Admin@0x789e9b47c310c481,
     }
 }

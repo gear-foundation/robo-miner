@@ -260,15 +260,10 @@ failure and wait for backend refill or operator action. Do not call world
 `Admin/*`, do not use admin top-up methods, and do not transfer operator funds.
 
 If the owner wallet is short on WVARA but the agent has banked resources, use
-the player settlement flow from `workflow.md` to `Surface`, `MintResources`, and
-`Redeem`. Before estimating payout or choosing redeem amounts, query the live
-redeem contract for `Redeem/ScrstRate`, `Redeem/BcrstRate`,
-`Redeem/HcrstRate`, `Redeem/VaraUnit`, and `Redeem/AvailableReserve`; never use
-hard-coded resource-to-WVARA rates. After the injected redeem reply, wait for
-the Redeem Mirror L1 `Message` event, claim its `claimedId` with
-`vara-eth:mailbox claim` using the same owner wallet, and verify the owner WVARA
-balance increased. Never report payment from a backend value, reserve decrease,
-or the digger program address.
+the settlement flow from `workflow.md` to `Surface`, `MintResources`, and submit
+an owner-signed backend redeem intent. Read rates and signing data from
+`GET /api/redeem/config`. Verify backend `confirmed`, the payout transaction,
+and the owner WVARA increase; `burned` alone is not payment.
 
 ## Minimum Wallet Checklist
 
@@ -281,5 +276,5 @@ or the digger program address.
 - `ownerActorId` is derived from `ownerAddress`.
 - Signed DiggerProxy writes use `robo_miner_action`, which delegates to the
   named-wallet `vara-eth:session` injected-submission path.
-- Redeem settlement uses the owner wallet for `vara-eth:mailbox claim`, then
-  verifies the owner WVARA balance before reporting success.
+- Redeem settlement uses an EIP-712-capable owner signer and verifies backend
+  `confirmed` plus the owner WVARA balance before reporting success.

@@ -11,6 +11,64 @@ leaderboard/stats, and fuel bookkeeping. Agents use it to discover where to play
 and to get their DiggerProxy program. The contract remains the source of truth
 for game state once registered.
 
+## Backend-Mediated Redeem
+
+Read the live signing domain, rates, unit, and program ids:
+
+```text
+GET /api/redeem/config?network=mainnet
+```
+
+Create a random `bytes32 nonce` and a deadline no later than the returned
+`requestTtlMs`. Sign the returned `domain`, `types`, and `primaryType` as
+EIP-712 with this exact message:
+
+```text
+owner: address
+scrst: uint256
+bcrst: uint256
+hcrst: uint256
+minPayout: uint256 raw WVARA units
+nonce: bytes32
+deadline: uint256 Unix seconds
+```
+
+Submit the signed intent:
+
+```http
+POST /api/redeem/request?network=mainnet
+content-type: application/json
+
+{
+  "owner": "0xowner",
+  "scrst": "1",
+  "bcrst": "0",
+  "hcrst": "0",
+  "minPayout": "6000000000000",
+  "nonce": "0x<64 hex>",
+  "deadline": "<unix seconds>",
+  "signature": "0x..."
+}
+```
+
+The response `requestId` is deterministic for the signed intent. Reposting the
+same intent is idempotent. Poll:
+
+```text
+GET /api/redeem/requests/<requestId>?network=mainnet
+GET /api/redeem/requests?owner=<ownerAddress>&network=mainnet
+```
+
+Statuses are `queued`, `burning`, `burned`, `paying`, `payout_failed`,
+`confirmed`, and `failed`. `burned` proves only the RES burn. The scheduler
+retries `payout_failed` without burning again. Report payment only after
+`confirmed`, a non-empty `payoutTxHash`, and a fresh owner WVARA balance increase.
+
+Do not call legacy `Redeem/Redeem`, approve the Redeem program, or perform a
+Mirror mailbox claim. If the available wallet tool cannot sign EIP-712, use the
+official frontend or stop and request an EIP-712-capable signer; never export a
+private key merely to work around missing signing support.
+
 ## Source-Of-Truth Precedence
 
 Use this order when backend responses disagree with the skill:

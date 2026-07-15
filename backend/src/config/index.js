@@ -18,6 +18,9 @@ export function loadConfig(env = process.env) {
   const storeBackend = (env.BACKEND_STORE || (env.DATABASE_URL ? 'postgres' : 'json')).toLowerCase();
   const network = String(env.CHAIN_NETWORK || DEFAULT_NETWORK).toLowerCase();
   const profile = profileFor(network);
+  const adminKey = adminKeyFor(network, env);
+  const resVmtProgramId = env.DIGGER_RES_VMT_PROGRAM_ID || env.RES_VMT_PROGRAM_ID || profile.RES_VMT_PROGRAM_ID || '';
+  const redeemProgramId = env.DIGGER_REDEEM_PROGRAM_ID || env.REDEEM_PROGRAM_ID || profile.REDEEM_PROGRAM_ID || '';
   return {
     rootDir: BACKEND_ROOT,
     stateDir: path.resolve(BACKEND_ROOT, env.BACKEND_STATE_DIR || env.GAMEMASTER_STATE_DIR || 'state'),
@@ -35,6 +38,7 @@ export function loadConfig(env = process.env) {
     databaseUpdateRetryBaseMs: Number(env.DATABASE_UPDATE_RETRY_BASE_MS || 100),
     backendPublicUrl: env.DIGGER_BACKEND_URL || env.BACKEND_URL || '',
     network,
+    chainId: Number(profile.CHAIN_ID),
     ethRpc: profile.ETH_RPC,
     varaEthWs: profile.VARA_WS,
     indexerPollMs: Number(env.INDEXER_POLL_MS || 3000),
@@ -47,14 +51,27 @@ export function loadConfig(env = process.env) {
     worldBalanceMin: BigInt(profile.BALANCE_MIN_WVARA) * WVARA,
     worldBalanceTopUp: BigInt(profile.BALANCE_TOPUP_WVARA) * WVARA,
     routerAddress: profile.ROUTER,
-    adminKey: adminKeyFor(network, env),
+    adminKey,
     adminApiToken: env.ADMIN_API_TOKEN || '',
     worldProgramIds: splitList(env.INDEXER_WORLD_PROGRAM_IDS || env.WORLD_PROGRAM_IDS || env.WORLD_PROGRAM_ID || ''),
     diggerProxyCodeId: profile.PROXY_CODE_ID,
     diggerProxyWasmPath: env.DIGGER_PROXY_WASM_PATH || '',
     diggerProgramIds: splitList(env.INDEXER_PROXY_PROGRAM_IDS || env.DIGGER_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_IDS || env.DIGGER_PROXY_PROGRAM_ID || ''),
-    redeemProgramIds: profile.REDEEM_PROGRAM_ID ? [profile.REDEEM_PROGRAM_ID] : [],
-    resVmtProgramIds: profile.RES_VMT_PROGRAM_ID ? [profile.RES_VMT_PROGRAM_ID] : [],
+    redeemProgramIds: redeemProgramId ? [redeemProgramId] : [],
+    resVmtProgramIds: resVmtProgramId ? [resVmtProgramId] : [],
+    redeemBackendEnabled: env.REDEEM_BACKEND_ENABLED === 'true',
+    redeemTreasuryKey: env.REDEEM_TREASURY_KEY || adminKey,
+    redeemUnit: parseBigIntEnv(env.REDEEM_UNIT || '', WVARA),
+    redeemRates: {
+      scrst: parseBigIntEnv(env.REDEEM_SCRST_RATE || '', BigInt(profile.REDEEM_RATES.scrst)),
+      bcrst: parseBigIntEnv(env.REDEEM_BCRST_RATE || '', BigInt(profile.REDEEM_RATES.bcrst)),
+      hcrst: parseBigIntEnv(env.REDEEM_HCRST_RATE || '', BigInt(profile.REDEEM_RATES.hcrst)),
+    },
+    redeemRequestTtlMs: Number(env.REDEEM_REQUEST_TTL_MS || 10 * 60_000),
+    redeemWorkerIntervalMs: Number(env.REDEEM_WORKER_INTERVAL_MS || 5_000),
+    redeemBurnTimeoutMs: Number(env.REDEEM_BURN_TIMEOUT_MS || 180_000),
+    redeemLeaseMs: Number(env.REDEEM_LEASE_MS || 240_000),
+    redeemMaxAttempts: Number(env.REDEEM_MAX_ATTEMPTS || 5),
     diggerDailyExecTarget: parseBigIntEnv(
       env.DIGGER_DAILY_EXEC_TARGET || env.DIGGER_RENTAL_DAILY_EXEC_TARGET || '',
       DEFAULT_DIGGER_DAILY_EXEC_TARGET,

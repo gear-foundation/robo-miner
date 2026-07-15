@@ -1,4 +1,4 @@
-import { CHAIN, redeemReady } from './config.js';
+import { CHAIN, discoveryUrl, redeemReady } from './config.js';
 import { getWalletState } from './wallet.js';
 
 const RESOURCES = [
@@ -17,8 +17,8 @@ export class RedeemClient {
     this.walletClient = null;
     this.signer = null;
     this.account = null;
-    this.redeemProgram = null;
     this.resProgram = null;
+    this.backendConfig = null;
   }
 
   ready() {
@@ -50,61 +50,63 @@ export class RedeemClient {
     await this.ensurePrograms();
     const ownerActor = actorIdFromAddress(account);
     const vmt = this.resProgram.services.Vmt.queries;
-    const redeem = this.redeemProgram.services.Redeem.queries;
-    const admin = this.redeemProgram.services.Admin.queries;
-    const scrst = toBigIntResult(await this.query('VMT.BalanceOf SCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '0'));
-    const bcrst = toBigIntResult(await this.query('VMT.BalanceOf BCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '1'));
-    const hcrst = toBigIntResult(await this.query('VMT.BalanceOf HCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '2'));
-    const scrstRate = toBigIntResult(await this.query('Redeem.ScrstRate', this.config.redeemProgramId, redeem.ScrstRate));
-    const bcrstRate = toBigIntResult(await this.query('Redeem.BcrstRate', this.config.redeemProgramId, redeem.BcrstRate));
-    const hcrstRate = toBigIntResult(await this.query('Redeem.HcrstRate', this.config.redeemProgramId, redeem.HcrstRate));
-    const varaUnit = toBigIntResult(await this.query('Redeem.VaraUnit', this.config.redeemProgramId, redeem.VaraUnit).catch(() => VARA_FALLBACK_UNIT));
-    const reserve = toBigIntResult(await this.query('Redeem.AvailableReserve', this.config.redeemProgramId, redeem.AvailableReserve));
-    const paused = await this.query('Redeem.Admin.IsPaused', this.config.redeemProgramId, admin.IsPaused);
-    const pending = toBigIntResult(await this.query('Redeem.PendingRedeemCount', this.config.redeemProgramId, redeem.PendingRedeemCount).catch(() => 0n));
+    const [scrst, bcrst, hcrst, backend] = await Promise.all([
+      this.query('VMT.BalanceOf SCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '0').then(toBigIntResult),
+      this.query('VMT.BalanceOf BCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '1').then(toBigIntResult),
+      this.query('VMT.BalanceOf HCRST', this.config.resVmtProgramId, vmt.BalanceOf, ownerActor, '2').then(toBigIntResult),
+      this.fetchBackendConfig(),
+    ]);
 
     return {
       account: normalizeAddress(account),
       ownerActor,
       balances: { scrst, bcrst, hcrst },
-      rates: { scrst: scrstRate, bcrst: bcrstRate, hcrst: hcrstRate },
-      varaUnit,
-      reserve,
-      paused: Boolean(paused),
-      pending,
+      rates: Object.fromEntries(Object.entries(backend.rates).map(([key, value]) => [key, BigInt(value)])),
+      varaUnit: BigInt(backend.varaUnit || VARA_FALLBACK_UNIT),
+      paused: !backend.enabled,
     };
   }
 
   async redeem(amounts) {
-    if (!this.account || !this.signer) throw new Error('Connect wallet first.');
+    if (!this.account || !this.walletClient) throw new Error('Connect wallet first.');
     assertRedeemConfig(this.config);
-    await this.ensureApi();
-    await this.ensurePrograms();
     const scrst = toBigIntAmount(amounts.scrst);
     const bcrst = toBigIntAmount(amounts.bcrst);
     const hcrst = toBigIntAmount(amounts.hcrst);
     if (scrst + bcrst + hcrst === 0n) throw new Error('Enter at least one RES amount.');
 
-    const payload = this.redeemProgram.services.Redeem.functions.Redeem.encodePayload(
-      scrst.toString(),
-      bcrst.toString(),
-      hcrst.toString(),
-    );
-    const tx = await this.api.createInjectedTransaction({
-      destination: this.config.redeemProgramId,
-      payload,
-      value: 0n,
+    const backend = await this.fetchBackendConfig(true);
+    if (!backend.enabled) throw new Error('Redeem is temporarily unavailable.');
+    const minPayout = payoutFor(
+      { scrst, bcrst, hcrst },
+      backend.rates,
+      BigInt(backend.varaUnit || VARA_FALLBACK_UNIT),
+    ).raw;
+    const nonce = randomBytes32();
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + Math.min(300, Math.floor(backend.requestTtlMs / 1000)));
+    const message = { owner: this.account, scrst, bcrst, hcrst, minPayout, nonce, deadline };
+    const signature = await this.walletClient.signTypedData({
+      account: this.account,
+      domain: backend.domain,
+      types: backend.types,
+      primaryType: backend.primaryType,
+      message,
     });
-    await tx.setDefaultValidator?.();
-    const reply = unwrapInjectedPromise(await tx.sendAndWaitForPromise(), 'redeem');
-    await reply?.validateSignature?.();
-    if (!reply) throw new Error('Redeem returned no promise reply.');
-    if (reply.code?.isError) throw new Error(`Redeem failed: ${reply.code.reason || 'contract error'}`);
-    return {
-      txHash: reply.txHash || tx.txHash || null,
-      messageId: tx.messageId || null,
-      reply,
-    };
+    const queued = await backendFetch('/api/redeem/request', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        owner: this.account,
+        scrst: scrst.toString(),
+        bcrst: bcrst.toString(),
+        hcrst: hcrst.toString(),
+        minPayout: minPayout.toString(),
+        nonce,
+        deadline: deadline.toString(),
+        signature,
+      }),
+    });
+    return this.waitForRequest(queued.requestId);
   }
 
   async ensureBase() {
@@ -129,19 +131,31 @@ export class RedeemClient {
   }
 
   async ensurePrograms() {
-    if (this.redeemProgram && this.resProgram) return;
+    if (this.resProgram) return;
     const { SailsProgram } = await import('sails-js');
     const { SailsIdlParser } = await import('sails-js/parser');
     const parser = new SailsIdlParser();
     await parser.init();
-    const [redeemIdl, resIdl] = await Promise.all([
-      fetch(new URL('./digger_redeem.idl', import.meta.url)).then((r) => r.text()),
-      fetch(new URL('./digger_res_vmt.idl', import.meta.url)).then((r) => r.text()),
-    ]);
-    this.redeemProgram = new SailsProgram(parser.parse(redeemIdl));
+    const resIdl = await fetch(new URL('./digger_res_vmt.idl', import.meta.url)).then((r) => r.text());
     this.resProgram = new SailsProgram(parser.parse(resIdl));
-    this.redeemProgram.setProgramId(this.config.redeemProgramId);
     this.resProgram.setProgramId(this.config.resVmtProgramId);
+  }
+
+  async fetchBackendConfig(force = false) {
+    if (this.backendConfig && !force) return this.backendConfig;
+    this.backendConfig = await backendFetch('/api/redeem/config');
+    return this.backendConfig;
+  }
+
+  async waitForRequest(requestId, timeoutMs = 300_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const record = await backendFetch(`/api/redeem/requests/${encodeURIComponent(requestId)}`);
+      if (record.status === 'confirmed') return record;
+      if (['failed', 'canceled'].includes(record.status)) throw new Error(record.error || `Redeem ${record.status}.`);
+      await sleep(2_000);
+    }
+    throw new Error(`Redeem is still processing. Request: ${requestId}`);
   }
 
   async query(label, programId, query, ...args) {
@@ -186,9 +200,9 @@ export function formatVara(value, unit = VARA_FALLBACK_UNIT) {
   const decimals = decimalPlaces(unit);
   const whole = raw / unit;
   const frac = raw % unit;
-  if (frac === 0n) return `${whole.toString()} VARA`;
+  if (frac === 0n) return `${whole.toString()} WVARA`;
   const fracText = frac.toString().padStart(decimals, '0').replace(/0+$/, '').slice(0, 6);
-  return `${whole.toString()}.${fracText || '0'} VARA`;
+  return `${whole.toString()}.${fracText || '0'} WVARA`;
 }
 
 export function actorIdFromAddress(address) {
@@ -231,26 +245,27 @@ function isAddress(value) {
 function assertRedeemConfig(config) {
   if (!config.enabled) throw new Error('Chain mode is disabled. Set VITE_CHAIN_ENABLED=true.');
   if (!isAddress(config.resVmtProgramId)) throw new Error('VITE_RES_VMT_PROGRAM_ID is missing or invalid.');
-  if (!isAddress(config.redeemProgramId)) throw new Error('VITE_REDEEM_PROGRAM_ID is missing or invalid.');
   if (!isAddress(config.routerAddress)) throw new Error('VITE_ROUTER_ADDRESS is missing or invalid.');
   if (!config.ethRpc || !config.varaEthWs) throw new Error('Vara.eth RPC config is missing.');
 }
 
-function transportFor(url, viem) {
-  return String(url || '').startsWith('ws') ? viem.webSocket(url) : viem.http(url);
+async function backendFetch(path, options = {}) {
+  const response = await fetch(discoveryUrl(path), options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.message || payload.error || `Backend request failed (${response.status}).`);
+  return payload;
 }
 
-function unwrapInjectedPromise(result, label) {
-  if (!result || typeof result !== 'object') throw new Error(`${label} returned no injected result.`);
-  if (result.error) throw new Error(`${label} transaction rejected: ${String(result.error)}`);
-  if (result.payload && result.code) return result;
-  if (result.promise) {
-    return {
-      txHash: result.txHash,
-      signature: result.signature,
-      replyHash: result.replyHash,
-      ...result.promise,
-    };
-  }
-  throw new Error(`${label} returned no promise reply.`);
+function randomBytes32() {
+  const bytes = new Uint8Array(32);
+  globalThis.crypto.getRandomValues(bytes);
+  return `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function transportFor(url, viem) {
+  return String(url || '').startsWith('ws') ? viem.webSocket(url) : viem.http(url);
 }

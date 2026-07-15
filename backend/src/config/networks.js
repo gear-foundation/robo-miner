@@ -26,6 +26,7 @@ export function parseWorldConfig(value) {
 }
 
 export const MAINNET = {
+  CHAIN_ID: 1,
   ETH_RPC: 'https://mainnet-reth-rpc.gear-tech.io',
   VARA_WS: 'wss://validator-1-eth.vara.network',
   ROUTER: '0x9C13FE9242dfe2ba2Cd446480A9308279aA74cb6',
@@ -35,8 +36,8 @@ export const MAINNET = {
   WORLD_CONFIG: DEFAULT_WORLD_CONFIG,
   REDEEM_RATES: DEFAULT_REDEEM_RATES,
   PROXY_CODE_ID: '0x2390d97aea22bbc45af6efe8bca29d06c80cebbddd55d9c0796eb724b77a5e93',
-  RES_VMT_PROGRAM_ID: '0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448',
-  REDEEM_PROGRAM_ID: '0xdb8dae5f6fc193006d428e12ee0c717715c6b887',
+  RES_VMT_PROGRAM_ID: '0xa359f125d51684bab99b62e143abdd2ff925120b',
+  REDEEM_PROGRAM_ID: '0xc280544e0fec27c904b90368bc95abbcdb508e64',
   TOP_UP_WEI: '1200000000000000',
   BASE_WORLDS: 6,
   POOL_MAX: 6,
@@ -63,6 +64,7 @@ export const MAINNET = {
 };
 
 export const TESTNET = {
+  CHAIN_ID: 560048,
   ETH_RPC: 'https://hoodi-reth-rpc.gear-tech.io',
   VARA_WS: 'wss://vara-eth-validator-1.gear-tech.io',
   ROUTER: '0xE549b0AfEdA978271FF7E712232B9F7f39A0b060',

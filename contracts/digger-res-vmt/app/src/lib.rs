@@ -414,8 +414,25 @@ impl VmtService<'_> {
         let (ids, amounts) = resource_ids_and_amounts(scrst, bcrst, hcrst);
         let mut state = self.state.borrow_mut();
 
-        ensure_not_paused(&state)?;
         ensure_redeem_contract(&state, caller)?;
+        if state.paused {
+            drop(state);
+            let redeem_program = DiggerRedeemClientProgram::client(caller);
+            let mut redeem = redeem_program.redeem();
+            redeem
+                .cancel_redeem(redeem_id)
+                .send_one_way()
+                .map_err(|_| "failed to send redeem cancel".to_string())?;
+            self.emit_event(VmtEvents::RedeemBurnRejected(
+                redeem_id,
+                owner.into_bytes(),
+                scrst,
+                bcrst,
+                hcrst,
+            ))
+            .expect("failed to emit burn reject event");
+            return Ok(());
+        }
         if state.ledger.burn_batch(owner, &ids, &amounts).is_err() {
             drop(state);
             let redeem_program = DiggerRedeemClientProgram::client(caller);

@@ -20,6 +20,145 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
 
   return {
     account: account.address,
+    async readWvaraBalance(address) {
+      return BigInt(await api.eth.wvara.balanceOf(normalizeAddress(address, 'WVARA account')));
+    },
+    async transferWvara(address, amount, { onBroadcast = null } = {}) {
+      const recipient = normalizeAddress(address, 'WVARA recipient');
+      const value = BigInt(amount);
+      if (value <= 0n) throw new Error(`WVARA transfer amount must be positive, got ${amount}`);
+      const balance = BigInt(await api.eth.wvara.balanceOf(account.address));
+      if (balance < value) throw new Error(`Not enough treasury WVARA: need ${value}, balance ${balance}`);
+      const tx = await api.eth.wvara.transfer(recipient, value);
+      let receipt;
+      let txHash = null;
+      if (typeof tx.send === 'function' && typeof tx.getReceipt === 'function') {
+        txHash = await tx.send();
+        await onBroadcast?.(txHash);
+        receipt = await tx.getReceipt();
+      } else {
+        receipt = await sendAndWait(tx, 'WVARA transfer');
+        txHash = receipt?.transactionHash || receipt?.hash || null;
+        await onBroadcast?.(txHash);
+      }
+      return {
+        receipt,
+        txHash: receipt?.transactionHash || receipt?.hash || txHash,
+      };
+    },
+    async readTransactionReceipt(txHash) {
+      try {
+        return await publicClient.getTransactionReceipt({ hash: normalizeHex32(txHash, 'transaction hash') });
+      } catch (error) {
+        if (/not found|could not be found|unknown transaction/i.test(error?.message || '')) return null;
+        throw error;
+      }
+    },
+    async readResBalances(programId, owner) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_res_vmt' });
+      const query = sails.services.Vmt.queries.BalanceOf;
+      const actor = actorIdFromAddress(normalizeAddress(owner, 'RES owner'));
+      const [scrst, bcrst, hcrst] = await Promise.all(['0', '1', '2'].map((tokenId) => querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query,
+        args: [actor, tokenId],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      })));
+      return { scrst: BigInt(scrst), bcrst: BigInt(bcrst), hcrst: BigInt(hcrst) };
+    },
+    async readRedeemConfig(programId) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const queries = sails.services.Redeem.queries;
+      const read = (query) => querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query,
+        args: [],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      const [varaUnit, scrst, bcrst, hcrst] = await Promise.all([
+        read(queries.VaraUnit),
+        read(queries.ScrstRate),
+        read(queries.BcrstRate),
+        read(queries.HcrstRate),
+      ]);
+      return {
+        varaUnit: BigInt(varaUnit),
+        rates: { scrst: BigInt(scrst), bcrst: BigInt(bcrst), hcrst: BigInt(hcrst) },
+      };
+    },
+    async readBackendRedeemStatus(programId, requestId) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const result = await querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query: sails.services.Redeem.queries.BackendRequestStatus,
+        args: [normalizeHex32(requestId, 'redeem request id')],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      return BigInt(result);
+    },
+    async requestBackendRedeem({ programId, requestId, owner, scrst, bcrst, hcrst, timeoutMs = 180000 }) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const normalizedRequestId = normalizeHex32(requestId, 'redeem request id');
+      const existing = await querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query: sails.services.Redeem.queries.BackendRequestStatus,
+        args: [normalizedRequestId],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      let txHash = null;
+      if (BigInt(existing) === 0n) {
+        const payload = sails.services.Redeem.functions.RedeemFor.encodePayload(
+          normalizedRequestId,
+          actorIdFromAddress(normalizeAddress(owner, 'redeem beneficiary')),
+          BigInt(scrst).toString(),
+          BigInt(bcrst).toString(),
+          BigInt(hcrst).toString(),
+        );
+        const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
+        const result = await sendMirrorMessageAndWaitForReceipt({
+          mirror,
+          payload,
+          value: 0n,
+          label: 'Redeem.RedeemFor',
+          logger,
+          programId,
+        });
+        txHash = result.receipt?.transactionHash || result.receipt?.hash || result.txHash || null;
+      }
+      const deadline = Date.now() + Number(timeoutMs);
+      while (Date.now() < deadline) {
+        const status = BigInt(await querySails({
+          api,
+          accountAddress: account.address,
+          programId,
+          query: sails.services.Redeem.queries.BackendRequestStatus,
+          args: [normalizedRequestId],
+          ReplyCode,
+          bytesToHex,
+          sails,
+        }));
+        if (status === 2n) return { status, txHash };
+        if (status === 3n) throw new Error(`Redeem burn was canceled for request ${normalizedRequestId}`);
+        await delay(1_000);
+      }
+      throw new Error(`Timed out waiting for RES burn confirmation for request ${normalizedRequestId}`);
+    },
     async readExecutableBalance(programId) {
       const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
       const state = await readProgramState(api, mirror);
@@ -201,6 +340,21 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
       closeViemWebSocket(walletClient);
     },
   };
+}
+
+async function querySails({ api, accountAddress, programId, query, args, ReplyCode, bytesToHex, sails }) {
+  const payload = query.encodePayload(...args);
+  const response = await api.provider.send('program_calculateReplyForHandle', [
+    null,
+    accountAddress,
+    normalizeAddress(programId, 'program id'),
+    payload,
+    0n,
+  ]);
+  const reply = response.reply || response;
+  assertSuccessReply(reply.replyCode || reply.code, { ReplyCode, bytesToHex, sails, payload: reply.payload });
+  if (!reply.payload) throw new Error('program state query returned no payload');
+  return query.decodeResult(reply.payload);
 }
 
 async function disconnectProvider(provider) {

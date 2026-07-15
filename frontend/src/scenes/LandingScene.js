@@ -3,7 +3,6 @@ import { navigateTo } from '../router.js';
 
 const HERO_BG = '/assets/landing/hero-mine.png';
 const RATES = { scrst: 6, bcrst: 30, hcrst: 150 };
-const RESERVE_VARA = 11934;
 const SKILL_INSTALL_COMMAND = 'npx skills add https://github.com/gear-foundation/robo-miner/tree/main/skill-pack -g --all -y';
 
 export default class LandingScene extends Phaser.Scene {
@@ -50,7 +49,7 @@ export default class LandingScene extends Phaser.Scene {
           <div class="hero-content">
             <p class="eyebrow">Vara.eth agent mining campaign</p>
             <h1 id="landing-title">Digger</h1>
-            <p class="tagline">AI agents mine live maps, collect RES crystals, bank what they extract, and convert verified resources into reserved VARA.</p>
+            <p class="tagline">AI agents mine live maps, collect RES crystals, bank what they extract, and convert verified resources into WVARA.</p>
             <div class="hero-actions">
               <button class="pixel-btn primary" data-action="game" type="button">Start Game</button>
             </div>
@@ -67,7 +66,7 @@ export default class LandingScene extends Phaser.Scene {
             ${flowStep('01', 'Start', 'Open the miner menu and enter the agent arena.')}
             ${flowStep('02', 'Mine', 'Agents move through a live shaft and pick up RES crystals.')}
             ${flowStep('03', 'Bank', 'A surfaced digger locks in extracted RES for the player.')}
-            ${flowStep('04', 'Redeem', 'RES burns through VMT and pays VARA from reserve.')}
+            ${flowStep('04', 'Redeem', 'Backend verifies a signed intent, burns RES, and transfers WVARA.')}
           </div>
         </section>
 
@@ -130,7 +129,7 @@ export default class LandingScene extends Phaser.Scene {
             ${resourceCard('HCRST', RATES.hcrst, 'Rare deep crystal', 'violet')}
           </div>
           <div class="economy-note">
-            <b>Simple payout rule:</b> banked RES can be redeemed through the linked contracts. Current funded reserve is ${formatNumber(RESERVE_VARA)} VARA.
+            <b>Simple payout rule:</b> banked RES can be redeemed through an owner-signed backend request and paid in WVARA.
           </div>
         </section>
 
@@ -166,7 +165,7 @@ export default class LandingScene extends Phaser.Scene {
             ${architectureNode('World', 'Map, rules, hazards, resources', 'world')}
             ${architectureNode('Digger', 'Agent identity, actions, fuel', 'digger')}
             ${architectureNode('RES Economy', 'Banked SCRST, BCRST, HCRST', 'economy')}
-            ${architectureNode('Redeem', 'Burn RES, release VARA payout', 'redeem')}
+            ${architectureNode('Redeem', 'Authorize and confirm the RES burn', 'redeem')}
           </div>
         </section>
 
@@ -178,13 +177,13 @@ export default class LandingScene extends Phaser.Scene {
           <div class="faq-grid">
             ${faqItem('How do I start?', 'Press Open Main Menu, then choose the game or agent arena entry point. The menu is also available directly at /menu.')}
             ${faqItem('What is my goal?', 'Mine valuable crystals, return to the surface, bank RES, and compete for the strongest daily extraction score.')}
-            ${faqItem('How do I earn?', 'A digger earns by extracting RES. Banked RES has fixed campaign redeem rates and can be converted into VARA from the reserve.')}
+            ${faqItem('How do I earn?', 'A digger earns by extracting RES. Minted RES can be exchanged for WVARA through a signed backend request.')}
             ${faqItem('What is free wVARA fuel?', 'It is a campaign fuel grant for your active digger executable balance. It helps the agent keep acting on-chain; it is not a direct wallet payout.')}
             ${faqItem('What posts count for free fuel?', 'A valid repost must target the official campaign post. A valid quote must quote the campaign post and mention the campaign context, for example Digger, Vara, mining, agent, or RES.')}
             ${faqItem('Can I claim social fuel many times?', 'No. Each wallet and each X account can claim each social task once per UTC week, and the same X post cannot be reused.')}
             ${faqItem('Why do agents need fuel?', 'Agent programs need executable balance to keep sending actions. The campaign flow includes top-up logic so diggers can keep running.')}
             ${faqItem('Why shared sessions?', 'Shared maps make the run competitive: several agents race through the same resource field instead of farming empty solo maps.')}
-            ${faqItem('What happens during redeem?', 'The RES token contract burns the submitted amount, calls the redeem contract, and the redeem contract releases the matching VARA payout.')}
+            ${faqItem('What happens during redeem?', 'Your wallet signs an intent. The backend asks the redeem coordinator to burn RES, then transfers the matching WVARA from its treasury.')}
           </div>
         </section>
       </main>
@@ -323,10 +322,6 @@ function architectureNode(title, text, tone) {
       </div>
     </article>
   `;
-}
-
-function formatNumber(value) {
-  return new Intl.NumberFormat('en-US').format(value);
 }
 
 function injectLandingStyles() {

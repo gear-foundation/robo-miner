@@ -10,6 +10,7 @@ import { BestStateEventReader } from '../modules/indexer/bestStateReader.js';
 import { programsFromConfig } from '../modules/indexer/liveReader.js';
 import { IndexerProjector } from '../modules/indexer/projector.js';
 import { SnapshotReader } from '../modules/indexer/snapshotReader.js';
+import { RedeemPayoutService } from '../modules/redeemPayout/service.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 import { BestStateWatcherSupervisor } from './bestStateWatcherSupervisor.js';
@@ -29,6 +30,7 @@ Jobs:
   - world executable balance top-up
   - queued digger rental deploys
   - digger rental top-up
+  - backend RES burn and WVARA payout
 
 LP Bonus is intentionally not included.
 `);
@@ -62,6 +64,7 @@ async function main() {
     lifecycle: () => runLifecycle({ store, config }),
     worldBalance: () => runWorldBalance({ store, config }),
     rental: () => runRental({ store, config }),
+    redeemPayout: () => runRedeemPayout({ store, config }),
   };
 
   if (args.once) {
@@ -70,6 +73,7 @@ async function main() {
     await runNamed('lifecycle', jobs.lifecycle);
     await runNamed('world-balance', jobs.worldBalance);
     await runNamed('rental', jobs.rental);
+    await runNamed('redeem-payout', jobs.redeemPayout);
     return;
   }
 
@@ -83,6 +87,7 @@ async function main() {
       lifecycleMs: config.schedulerSnapshotMs,
       worldBalanceMs: config.balanceCheckMs,
       rentalMs: config.schedulerRentalMs,
+      redeemPayoutMs: config.redeemWorkerIntervalMs,
     },
   });
 
@@ -94,6 +99,7 @@ async function main() {
   schedule('lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
   schedule('world-balance', jobs.worldBalance, config.balanceCheckMs);
   schedule('rental', jobs.rental, config.schedulerRentalMs);
+  schedule('redeem-payout', jobs.redeemPayout, config.redeemWorkerIntervalMs);
 }
 
 function schedule(name, fn, intervalMs, immediate = true) {
@@ -235,6 +241,16 @@ async function runRental({ store, config }) {
   } finally {
     await chain?.disconnect?.();
   }
+}
+
+async function runRedeemPayout({ store, config }) {
+  const service = new RedeemPayoutService({
+    store,
+    config,
+    chainFactory: () => createVaraEthChain({ ...config, adminKey: config.redeemTreasuryKey }, { logger: createLogger('redeem-chain') }),
+    logger: createLogger('redeem'),
+  });
+  return service.processPending();
 }
 
 main().catch((error) => {

@@ -27,11 +27,13 @@ export class IndexerProjector {
   }
 
   async applyEvents(events) {
-    const results = [];
-    for (const event of events) {
-      results.push(await this.applyEvent(event));
-    }
-    return results;
+    const normalizedEvents = events.map((event) => normalizeEvent(event, this.now()));
+    return this.store.update((db) => normalizedEvents.map((normalized) => {
+      if (hasEvent(db, normalized.id)) return { applied: false, reason: 'duplicate', event: normalized };
+      db.chainEvents.push(normalized);
+      applyProjection(db, normalized, this.config);
+      return { applied: true, event: normalized };
+    }));
   }
 
   async applySnapshots(snapshots) {

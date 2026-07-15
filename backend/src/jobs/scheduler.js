@@ -14,6 +14,7 @@ import { RedeemPayoutService } from '../modules/redeemPayout/service.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
 import { createLogger, errorFields } from '../logger.js';
 import { BestStateWatcherSupervisor } from './bestStateWatcherSupervisor.js';
+import { SerialJobQueue } from './serialJobQueue.js';
 
 const logger = createLogger('scheduler');
 
@@ -94,17 +95,21 @@ async function main() {
   await runNamed('registry', jobs.registry);
   await bestStateSupervisor.ensureStarted();
 
-  schedule('registry', jobs.registry, config.schedulerRegistryMs, false);
-  schedule('snapshot', jobs.snapshot, config.schedulerSnapshotMs);
-  schedule('lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
-  schedule('world-balance', jobs.worldBalance, config.balanceCheckMs);
-  schedule('rental', jobs.rental, config.schedulerRentalMs);
-  schedule('redeem-payout', jobs.redeemPayout, config.redeemWorkerIntervalMs);
+  const queue = new SerialJobQueue({
+    onSkipped: (name) => logger.warn('job.skipped', { job: name, reason: 'previous_run_still_active_or_queued' }),
+  });
+  schedule(queue, 'registry', jobs.registry, config.schedulerRegistryMs, false);
+  schedule(queue, 'snapshot', jobs.snapshot, config.schedulerSnapshotMs);
+  schedule(queue, 'lifecycle', jobs.lifecycle, config.schedulerSnapshotMs);
+  schedule(queue, 'world-balance', jobs.worldBalance, config.balanceCheckMs);
+  schedule(queue, 'rental', jobs.rental, config.schedulerRentalMs);
+  schedule(queue, 'redeem-payout', jobs.redeemPayout, config.redeemWorkerIntervalMs);
 }
 
-function schedule(name, fn, intervalMs, immediate = true) {
-  if (immediate) runNamed(name, fn);
-  setInterval(() => runNamed(name, fn), intervalMs);
+function schedule(queue, name, fn, intervalMs, immediate = true) {
+  const enqueue = () => queue.enqueue(name, () => runNamed(name, fn));
+  if (immediate) enqueue();
+  setInterval(enqueue, intervalMs);
 }
 
 async function runNamed(name, fn) {

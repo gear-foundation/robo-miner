@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { DatabaseBusyError, PostgresStore } from '../src/db/postgresStore.js';
+import {
+  DatabaseBusyError,
+  DatabaseUnavailableError,
+  PostgresDocumentStore,
+  PostgresStore,
+} from '../src/db/postgresStore.js';
 
 test('PostgresStore applies transaction timeouts before locking the shared document', async () => {
   const pool = new FakePool();
@@ -74,6 +79,104 @@ test('PostgresStore does not retry non-transaction errors', async () => {
   assert.equal(pool.clients.length, 1);
 });
 
+test('PostgresStore recreates its pool and re-runs initialization after primary failover', async () => {
+  const failedPool = new QueryPool({
+    readError: Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' }),
+  });
+  const recoveredPool = new QueryPool({ data: { jobRuns: [{ id: 'after-failover' }] } });
+  const pools = [failedPool, recoveredPool];
+  const store = new PostgresStore({
+    connectionString: 'postgres://database.service/app',
+    poolFactory: () => pools.shift(),
+    updateMaxAttempts: 2,
+    updateRetryBaseMs: 0,
+  });
+
+  const db = await store.read();
+
+  assert.equal(db.jobRuns[0].id, 'after-failover');
+  assert.equal(failedPool.ended, true);
+  assert.equal(recoveredPool.queries.filter((query) => queryText(query).startsWith('CREATE TABLE')).length, 1);
+});
+
+test('PostgresStore does not permanently cache a failed readiness check', async () => {
+  const failedPool = new QueryPool({
+    initError: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+  });
+  const recoveredPool = new QueryPool({ data: { worlds: [{ id: 'world-1' }] } });
+  const pools = [failedPool, recoveredPool];
+  const store = new PostgresStore({
+    connectionString: 'postgres://database.service/app',
+    poolFactory: () => pools.shift(),
+    updateMaxAttempts: 2,
+    updateRetryBaseMs: 0,
+  });
+
+  const db = await store.read();
+
+  assert.equal(db.worlds[0].id, 'world-1');
+  assert.equal(failedPool.ended, true);
+});
+
+test('PostgresStore reconnects and retries a transaction interrupted by failover', async () => {
+  const failoverError = Object.assign(new Error('connection terminated unexpectedly'), { code: '08006' });
+  const failedPool = new FakePool({ failures: [failoverError] });
+  const recoveredPool = new FakePool();
+  const pools = [failedPool, recoveredPool];
+  const store = new PostgresStore({
+    connectionString: 'postgres://database.service/app',
+    poolFactory: () => pools.shift(),
+    updateMaxAttempts: 2,
+    updateRetryBaseMs: 0,
+  });
+
+  const result = await store.update((db) => {
+    db.jobRuns.push({ id: 'recovered-write' });
+    return 'ok';
+  });
+
+  assert.equal(result, 'ok');
+  assert.equal(failedPool.ended, true);
+  assert.equal(failedPool.clients[0].releaseError, failoverError);
+  assert.equal(queryText(recoveredPool.clients[0].queries.at(-1)), 'COMMIT');
+});
+
+test('PostgresStore returns database_unavailable when reconnect attempts are exhausted', async () => {
+  const pools = Array.from({ length: 4 }, () => new QueryPool({
+    initError: Object.assign(new Error('connection terminated unexpectedly'), { code: '08006' }),
+  }));
+  const store = new PostgresStore({
+    connectionString: 'postgres://database.service/app',
+    poolFactory: () => pools.shift(),
+    updateMaxAttempts: 3,
+    updateRetryBaseMs: 0,
+  });
+
+  await assert.rejects(
+    store.read(),
+    (error) => error instanceof DatabaseUnavailableError
+      && error.statusCode === 503
+      && error.databaseCode === '08006',
+  );
+});
+
+test('PostgresDocumentStore also reconnects after primary failover', async () => {
+  const failedPool = new QueryPool({
+    readError: Object.assign(new Error('server closed the connection unexpectedly'), { code: '08006' }),
+  });
+  const recoveredPool = new QueryPool({ data: { status: 'ready' } });
+  const pools = [failedPool, recoveredPool];
+  const store = new PostgresDocumentStore({
+    connectionString: 'postgres://database.service/app',
+    poolFactory: () => pools.shift(),
+    updateMaxAttempts: 2,
+    updateRetryBaseMs: 0,
+  });
+
+  assert.deepEqual(await store.read('redeem:1'), { status: 'ready' });
+  assert.equal(failedPool.ended, true);
+});
+
 function makeStore(pool, overrides = {}) {
   const store = new PostgresStore({
     pool,
@@ -81,6 +184,7 @@ function makeStore(pool, overrides = {}) {
     ...overrides,
   });
   store._ready = Promise.resolve();
+  store._readyPool = pool;
   return store;
 }
 
@@ -88,12 +192,23 @@ class FakePool {
   constructor({ failures = [] } = {}) {
     this.failures = [...failures];
     this.clients = [];
+    this.ended = false;
+  }
+
+  on() {}
+
+  async query() {
+    return { rows: [] };
   }
 
   async connect() {
     const client = new FakeClient(this.failures.shift() || null);
     this.clients.push(client);
     return client;
+  }
+
+  async end() {
+    this.ended = true;
   }
 }
 
@@ -102,6 +217,7 @@ class FakeClient {
     this.failure = failure;
     this.queries = [];
     this.released = false;
+    this.releaseError = null;
   }
 
   async query(text, params = undefined) {
@@ -111,8 +227,42 @@ class FakeClient {
     return { rows: [] };
   }
 
-  release() {
+  release(error = undefined) {
     this.released = true;
+    this.releaseError = error || null;
+  }
+}
+
+class QueryPool {
+  constructor({ data = {}, initError = null, readError = null } = {}) {
+    this.data = data;
+    this.initError = initError;
+    this.readError = readError;
+    this.queries = [];
+    this.ended = false;
+  }
+
+  on() {}
+
+  async query(text, params = undefined) {
+    const query = { text, params };
+    this.queries.push(query);
+    if (String(text).startsWith('CREATE SCHEMA') && this.initError) {
+      const error = this.initError;
+      this.initError = null;
+      throw error;
+    }
+    if (/SELECT data FROM/.test(String(text)) && this.readError) {
+      const error = this.readError;
+      this.readError = null;
+      throw error;
+    }
+    if (/SELECT data FROM/.test(String(text))) return { rows: [{ data: this.data }] };
+    return { rows: [] };
+  }
+
+  async end() {
+    this.ended = true;
   }
 }
 

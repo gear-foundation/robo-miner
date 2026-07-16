@@ -306,7 +306,6 @@ export default class SpectatorScene extends GameScene {
     this.agentNameMap = new Map();
     this.agentNamePollMs = 0;
     this.selectedAgentKey = null;
-    this.selectedAgentDetail = null;
     this.followAgentKey = null;
     this.selectionPulse = null;
     this.rosterOpen = false;
@@ -1190,7 +1189,6 @@ export default class SpectatorScene extends GameScene {
   selectSpectatorAgent(agent, { follow = true } = {}) {
     if (!agent) return;
     this.selectedAgentKey = spectatorAgentKey(agent);
-    this.selectedAgentDetail = null;
     if (follow && canFollowSpectatorAgent(agent)) {
       this.followAgentKey = this.selectedAgentKey;
       this.startSelectionPulse(agent);
@@ -1206,7 +1204,6 @@ export default class SpectatorScene extends GameScene {
 
   clearSpectatorSelection() {
     this.selectedAgentKey = null;
-    this.selectedAgentDetail = null;
     this.followAgentKey = null;
     this.selectionPulse = null;
     this.hideAgentBubble();
@@ -1263,8 +1260,7 @@ export default class SpectatorScene extends GameScene {
     try {
       const detail = await this.rt.inspectAgent(agent.owner);
       if (this._agentInspectRequestId !== requestId || spectatorAgentKey(agent) !== this.selectedAgentKey) return;
-      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
-      this.selectedAgentDetail = { ...detail, agent: synced || this.selectedSpectatorAgent() };
+      this.rt.syncAgentDetail?.(agent.owner, detail);
       this.syncSpectatorRoster();
       this.updateHUD();
     } catch {
@@ -1721,9 +1717,15 @@ export default class SpectatorScene extends GameScene {
 
   toggleSpectatorRoster(open = !this.rosterOpen) {
     this.rosterOpen = Boolean(open);
-    this.rosterEl?.classList.toggle('is-open', this.rosterOpen);
+    const returnFocus = !this.rosterOpen && this.rosterEl?.contains(document.activeElement);
+    if (this.rosterEl) {
+      this.rosterEl.classList.toggle('is-open', this.rosterOpen);
+      this.rosterEl.inert = !this.rosterOpen;
+      this.rosterEl.setAttribute('aria-hidden', String(!this.rosterOpen));
+    }
     this.diggersBtn?.setAttribute('aria-expanded', String(this.rosterOpen));
     this.updateDiggerButton();
+    if (returnFocus) this.diggersBtn?.focus();
   }
 
   updateDiggerButton() {
@@ -1759,8 +1761,7 @@ export default class SpectatorScene extends GameScene {
   }
 
   agentDossierHtml(agent) {
-    const detail = this.selectedAgentDetail || {};
-    const source = detail.agent || agent;
+    const source = agent;
     const status = this.agentRosterStatus(source);
     const chain = Boolean(source.owner);
     const metrics = this.agentRosterMetrics(source);

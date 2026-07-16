@@ -1,7 +1,7 @@
 
 !@sails: 1.0.0-beta.5
 
-service Digger@0x28cc4046ef964fc5 {
+service Digger@0x9c8e51b8857907dd {
     events {
         Forwarded(u64, u32, [u8; 32]),
         Killed([u8; 32]),
@@ -23,6 +23,7 @@ service Digger@0x28cc4046ef964fc5 {
         @query
         Status() -> [u128] throws String;
         Surface() -> [u8; 32] throws String;
+        TradeResourcesForLadders(scrst: u32, bcrst: u32, hcrst: u32) -> [u8; 32] throws String;
         @query
         World() -> ActorId throws String;
     }
@@ -33,6 +34,6 @@ program DiggerProxy {
         Create(owner: ActorId, world: ActorId);
     }
     services {
-        Digger@0x28cc4046ef964fc5,
+        Digger@0x9c8e51b8857907dd,
     }
 }

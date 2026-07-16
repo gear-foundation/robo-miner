@@ -449,7 +449,7 @@ export class DiggerRentalService {
     const queued = db.rentalRequests
       .filter((request) => (
         request.status === 'pending'
-        || (request.status === 'confirmation_pending' && request.programId)
+        || (['confirmation_pending', 'running'].includes(request.status) && request.programId)
       ))
       .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
       .slice(0, limit);
@@ -518,7 +518,7 @@ export class DiggerRentalService {
     return this.store.update((db) => {
       const request = db.rentalRequests.find((item) => item.id === requestId);
       if (!request) return null;
-      const processingMode = request.status === 'confirmation_pending' && request.programId
+      const processingMode = ['confirmation_pending', 'running'].includes(request.status) && request.programId
         ? 'reconcile'
         : request.status === 'pending'
           ? 'deploy'

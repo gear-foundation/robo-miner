@@ -7,6 +7,8 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 
 test('backend Dockerfile ships the proxy IDL, not the world IDL, as digger_proxy.idl', async () => {
   const dockerfile = await readFile(path.join(REPO_ROOT, 'backend/Dockerfile'), 'utf8');
+  const backendProxyIdl = await readFile(path.join(REPO_ROOT, 'backend/src/chain/digger_proxy.idl'), 'utf8');
+  const canonicalProxyIdl = await readFile(path.join(REPO_ROOT, 'skill-pack/assets/idl/digger_proxy.idl'), 'utf8');
 
   assert.match(
     dockerfile,
@@ -16,6 +18,7 @@ test('backend Dockerfile ships the proxy IDL, not the world IDL, as digger_proxy
     dockerfile,
     /frontend\/src\/chain\/world\.idl\s+\/app\/contracts\/target\/wasm32-gear\/release\/digger_proxy\.idl/,
   );
+  assert.equal(backendProxyIdl, canonicalProxyIdl);
 });
 
 test('backend Docker image dispatches component roles through entrypoint', async () => {

@@ -523,6 +523,39 @@ test('scheduler keeps a confirmation-pending proxy retryable when readiness is s
   assert.equal((await store.read()).diggers.length, 1);
 });
 
+test('scheduler reconciles a running request with a known program after worker restart', async () => {
+  const programId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({ store, chain: null, config: CONFIG, now: fixedNow });
+  const queued = await rental.enqueueDiggerRequest({ owner: OWNER, worldId: WORLD });
+  await store.update((db) => {
+    const request = db.rentalRequests[0];
+    request.status = 'running';
+    request.stage = 'init_broadcast';
+    request.programId = programId;
+    request.createTxHash = '0xcreate';
+    request.initTxHash = '0xinit';
+  });
+
+  let deployCalls = 0;
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() { deployCalls += 1; throw new Error('must not redeploy'); },
+      async verifyDiggerReady() {},
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const [result] = await processor.processQueuedDiggerRequests();
+  assert.equal(result.status, 'confirmed');
+  assert.equal(result.programId, programId);
+  assert.equal(deployCalls, 0);
+  assert.equal((await store.read()).rentalRequests[0].status, 'confirmed');
+  assert.equal((await store.read()).diggers.length, 1);
+});
+
 test('daily grant idempotency does not persist the freshly observed executable balance', async () => {
   const programId = '0x7777777777777777777777777777777777777777';
   const observed = 108085080827500n;

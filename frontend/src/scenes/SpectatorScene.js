@@ -1152,7 +1152,7 @@ export default class SpectatorScene extends GameScene {
       this.clearSpectatorSelection();
       return;
     }
-    this.selectSpectatorAgent(agent);
+    this.selectSpectatorAgent(agent, { follow: true });
     this.sayAgentBubble(agent, 6200);
     this.refreshAgentBubbleDetails(agent);
   }
@@ -1187,7 +1187,7 @@ export default class SpectatorScene extends GameScene {
     return findSpectatorAgent(this.rt?.s?.miners, this.followAgentKey);
   }
 
-  selectSpectatorAgent(agent, { follow = false } = {}) {
+  selectSpectatorAgent(agent, { follow = true } = {}) {
     if (!agent) return;
     this.selectedAgentKey = spectatorAgentKey(agent);
     if (follow && canFollowSpectatorAgent(agent)) {
@@ -1779,7 +1779,7 @@ export default class SpectatorScene extends GameScene {
         row.className = 'spec-agent-row';
         row.onclick = () => {
           const current = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === key);
-          if (current) this.selectSpectatorAgent(current);
+          if (current) this.selectSpectatorAgent(current, { follow: canFollowSpectatorAgent(current) });
         };
         this.rosterRows.set(key, row);
       }
@@ -1787,7 +1787,7 @@ export default class SpectatorScene extends GameScene {
       const html = this.agentRosterRowHtml(agent);
       const pressed = String(selected);
       const disabled = String(agent.exited);
-      const title = `Inspect ${this.agentDisplayName(agent)}`;
+      const title = agent.exited ? 'Exited digger, details only' : `Follow ${this.agentDisplayName(agent)}`;
       if (row._spectatorHtml !== html) {
         row.innerHTML = html;
         row._spectatorHtml = html;
@@ -1811,7 +1811,7 @@ export default class SpectatorScene extends GameScene {
     if (!this.rosterDossierEl) return;
     const agent = this.selectedSpectatorAgent();
     if (!agent) {
-      const html = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to inspect</div>';
+      const html = '<div class="spec-dossier-empty">FREE CAMERA · choose a digger to follow</div>';
       if (this._rosterDossierHtml !== html) {
         this.rosterDossierEl.innerHTML = html;
         this._rosterDossierHtml = html;

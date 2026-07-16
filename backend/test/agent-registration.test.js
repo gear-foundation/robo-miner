@@ -429,6 +429,100 @@ test('queued rental preserves a broadcast transaction for safe recovery after a 
   assert.equal(duplicate.requestId, queued.requestId);
 });
 
+test('scheduler reconciles a ready confirmation-pending proxy without deploying another program', async () => {
+  const programId = '0x8888888888888888888888888888888888888888';
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({ store, chain: null, config: CONFIG, now: fixedNow });
+  const queued = await rental.enqueueDiggerRequest({ owner: OWNER, worldId: WORLD });
+  await store.update((db) => {
+    const request = db.rentalRequests[0];
+    request.status = 'confirmation_pending';
+    request.stage = 'init_broadcast';
+    request.programId = programId;
+    request.createTxHash = '0xcreate';
+    request.initTxHash = '0xinit';
+    request.error = 'owner/world readiness query timed out';
+  });
+
+  let deployCalls = 0;
+  let verifyCalls = 0;
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() { deployCalls += 1; throw new Error('must not redeploy'); },
+      async verifyDiggerReady(args) {
+        verifyCalls += 1;
+        assert.deepEqual(args, { programId, owner: OWNER, worldId: WORLD });
+      },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const results = await processor.processQueuedDiggerRequests();
+  assert.deepEqual(results, [{ requestId: queued.requestId, status: 'confirmed', programId }]);
+  assert.equal(deployCalls, 0);
+  assert.equal(verifyCalls, 1);
+
+  const db = await store.read();
+  assert.equal(db.rentalRequests[0].status, 'confirmed');
+  assert.equal(db.rentalRequests[0].error, null);
+  assert.equal(db.diggers.length, 1);
+  assert.equal(db.diggers[0].programId, programId);
+  assert.equal(db.diggers[0].status, 'active');
+  assert.equal(db.fuelGrants.length, 1);
+  assert.equal(db.fuelGrants[0].idempotencyKey, `${queued.requestId}:initial-top-up`);
+  assert.equal(db.jobRuns[0].status, 'ok');
+
+  assert.deepEqual(await processor.processQueuedDiggerRequests(), []);
+  const afterRepeat = await store.read();
+  assert.equal(afterRepeat.diggers.length, 1);
+  assert.equal(afterRepeat.fuelGrants.length, 1);
+});
+
+test('scheduler keeps a confirmation-pending proxy retryable when readiness is still unavailable', async () => {
+  const programId = '0x9999999999999999999999999999999999999999';
+  const store = new MemoryStore();
+  const rental = new DiggerRentalService({ store, chain: null, config: CONFIG, now: fixedNow });
+  const queued = await rental.enqueueDiggerRequest({ owner: OWNER, worldId: WORLD });
+  await store.update((db) => {
+    const request = db.rentalRequests[0];
+    request.status = 'confirmation_pending';
+    request.stage = 'init_broadcast';
+    request.programId = programId;
+    request.createTxHash = '0xcreate';
+    request.initTxHash = '0xinit';
+  });
+
+  let deployCalls = 0;
+  let verifyCalls = 0;
+  const processor = new DiggerRentalService({
+    store,
+    chain: {
+      async deployDigger() { deployCalls += 1; throw new Error('must not redeploy'); },
+      async verifyDiggerReady() {
+        verifyCalls += 1;
+        if (verifyCalls === 1) throw new Error('program reply failed: userspace panic');
+      },
+    },
+    config: CONFIG,
+    now: fixedNow,
+  });
+
+  const first = await processor.processQueuedDiggerRequests();
+  assert.equal(first[0].status, 'confirmation_pending');
+  assert.match(first[0].error, /userspace panic/);
+  assert.equal((await store.read()).rentalRequests[0].status, 'confirmation_pending');
+  assert.equal((await store.read()).diggers.length, 0);
+
+  const second = await processor.processQueuedDiggerRequests();
+  assert.equal(second[0].status, 'confirmed');
+  assert.equal(second[0].programId, programId);
+  assert.equal(deployCalls, 0);
+  assert.equal(verifyCalls, 2);
+  assert.equal((await store.read()).diggers.length, 1);
+});
+
 test('daily grant idempotency does not persist the freshly observed executable balance', async () => {
   const programId = '0x7777777777777777777777777777777777777777';
   const observed = 108085080827500n;

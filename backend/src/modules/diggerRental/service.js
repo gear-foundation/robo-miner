@@ -367,91 +367,53 @@ export class DiggerRentalService {
     }
 
     try {
-      this.logger?.info?.('request.deploy.start', {
-        requestId,
-        owner: request.owner,
-        worldId: request.worldId,
-        seasonId: request.seasonId,
-        targetExecBalance: request.targetExecBalance,
-        codeId: request.codeId,
-      });
-      const deploy = await this.chain.deployDigger({
-        owner: request.owner,
-        worldId: request.worldId,
-        codeId: request.codeId,
-        initialTopUp: BigInt(request.targetExecBalance),
-        onProgress: (progress) => this.recordRequestProgress(requestId, progress),
-      });
+      let deploy;
+      if (request.processingMode === 'reconcile') {
+        this.logger?.info?.('request.reconcile.start', {
+          requestId,
+          programId: request.programId,
+          owner: request.owner,
+          worldId: request.worldId,
+          seasonId: request.seasonId,
+        });
+        deploy = {
+          programId: request.programId,
+          createTxHash: request.createTxHash || null,
+          topUpTxHash: request.topUpTxHash || null,
+          initTxHash: request.initTxHash || null,
+        };
+      } else {
+        this.logger?.info?.('request.deploy.start', {
+          requestId,
+          owner: request.owner,
+          worldId: request.worldId,
+          seasonId: request.seasonId,
+          targetExecBalance: request.targetExecBalance,
+          codeId: request.codeId,
+        });
+        deploy = await this.chain.deployDigger({
+          owner: request.owner,
+          worldId: request.worldId,
+          codeId: request.codeId,
+          initialTopUp: BigInt(request.targetExecBalance),
+          onProgress: (progress) => this.recordRequestProgress(requestId, progress),
+        });
+      }
       await this.chain.verifyDiggerReady({
         programId: deploy.programId,
         owner: request.owner,
         worldId: request.worldId,
       });
-      const completedAt = this.now().toISOString();
-      const programId = normalizeAddress(deploy.programId);
-      await this.store.update((db) => {
-        const liveRequest = db.rentalRequests.find((item) => item.id === requestId);
-        if (!liveRequest) throw new Error(`Queued rental request not found: ${requestId}`);
-        liveRequest.status = 'confirmed';
-        liveRequest.programId = programId;
-        liveRequest.createTxHash = deploy.createTxHash || deploy.txHash || null;
-        liveRequest.topUpTxHash = deploy.topUpTxHash || null;
-        liveRequest.initTxHash = deploy.initTxHash || null;
-        liveRequest.error = null;
-        liveRequest.updatedAt = completedAt;
-
-        db.diggers.push({
-          id: programId,
-          requestId,
-          programId,
-          agentName: generateAgentName(programId),
-          owner: request.owner,
-          seasonId: request.seasonId,
-          worldId: request.worldId,
-          status: 'active',
-          source: 'rental-request',
-          codeId: request.codeId || null,
-          targetExecBalance: request.targetExecBalance,
-          lastRefuelAt: completedAt,
-          createdAt: request.createdAt,
-          updatedAt: completedAt,
-        });
-        db.fuelGrants.push({
-          id: `${requestId}:initial-top-up`,
-          idempotencyKey: `${requestId}:initial-top-up`,
-          type: 'initial-rental',
-          seasonId: request.seasonId,
-          diggerId: programId,
-          programId,
-          targetExecBalance: request.targetExecBalance,
-          balanceBefore: '0',
-          amount: request.targetExecBalance,
-          txHash: liveRequest.topUpTxHash || liveRequest.createTxHash,
-          status: 'confirmed',
-          createdAt: request.createdAt,
-          updatedAt: completedAt,
-        });
-        const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
-        if (jobRun) {
-          jobRun.status = 'ok';
-          jobRun.finishedAt = completedAt;
-          jobRun.programId = programId;
-        }
-      });
-      this.logger?.info?.('request.deploy.ok', {
+      const confirmed = await this.confirmQueuedDiggerRequest(requestId, deploy);
+      this.logger?.info?.(request.processingMode === 'reconcile' ? 'request.reconcile.ok' : 'request.deploy.ok', {
         requestId,
-        programId,
-        createTxHash: deploy.createTxHash || deploy.txHash || null,
-        topUpTxHash: deploy.topUpTxHash || null,
-        initTxHash: deploy.initTxHash || null,
+        programId: confirmed.programId,
+        createTxHash: confirmed.createTxHash,
+        topUpTxHash: confirmed.topUpTxHash,
+        initTxHash: confirmed.initTxHash,
         dryRun: false,
       });
-      return {
-        status: 'confirmed',
-        requestId,
-        programId,
-        agentName: generateAgentName(programId),
-      };
+      return confirmed;
     } catch (error) {
       const failedAt = this.now().toISOString();
       await this.store.update((db) => {
@@ -468,8 +430,9 @@ export class DiggerRentalService {
           jobRun.error = error.message;
         }
       });
-      this.logger?.error?.('request.deploy.failed', {
+      this.logger?.error?.(request.processingMode === 'reconcile' ? 'request.reconcile.failed' : 'request.deploy.failed', {
         requestId,
+        programId: request.programId || null,
         owner: request.owner,
         worldId: request.worldId,
         dryRun: false,
@@ -484,7 +447,10 @@ export class DiggerRentalService {
 
     const db = await this.store.read();
     const queued = db.rentalRequests
-      .filter((request) => request.status === 'pending')
+      .filter((request) => (
+        request.status === 'pending'
+        || (request.status === 'confirmation_pending' && request.programId)
+      ))
       .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
       .slice(0, limit);
     const results = [];
@@ -498,9 +464,10 @@ export class DiggerRentalService {
           programId: result?.programId || null,
         });
       } catch (error) {
+        const latest = (await this.store.read()).rentalRequests.find((item) => item.id === request.id);
         results.push({
           requestId: request.id,
-          status: 'failed',
+          status: latest?.status || 'failed',
           error: error.message,
         });
       }
@@ -551,12 +518,106 @@ export class DiggerRentalService {
     return this.store.update((db) => {
       const request = db.rentalRequests.find((item) => item.id === requestId);
       if (!request) return null;
-      if (request.status !== 'pending') return structuredClone(request);
+      const processingMode = request.status === 'confirmation_pending' && request.programId
+        ? 'reconcile'
+        : request.status === 'pending'
+          ? 'deploy'
+          : null;
+      if (!processingMode) return structuredClone(request);
       request.status = 'running';
       request.updatedAt = this.now().toISOString();
       const jobRun = db.jobRuns.find((item) => item.id === `digger-rental-request:${requestId}`);
       if (jobRun) jobRun.status = 'running';
-      return structuredClone(request);
+      return { ...structuredClone(request), processingMode };
+    });
+  }
+
+  async confirmQueuedDiggerRequest(requestId, deploy) {
+    const completedAt = this.now().toISOString();
+    const programId = normalizeAddress(deploy.programId);
+    return this.store.update((db) => {
+      const request = db.rentalRequests.find((item) => item.id === requestId);
+      if (!request) throw new Error(`Queued rental request not found: ${requestId}`);
+      request.status = 'confirmed';
+      request.programId = programId;
+      request.createTxHash = deploy.createTxHash || deploy.txHash || request.createTxHash || null;
+      request.topUpTxHash = deploy.topUpTxHash || request.topUpTxHash || null;
+      request.initTxHash = deploy.initTxHash || request.initTxHash || null;
+      request.error = null;
+      request.updatedAt = completedAt;
+
+      const diggerRecord = {
+        id: programId,
+        requestId,
+        programId,
+        agentName: generateAgentName(programId),
+        owner: request.owner,
+        seasonId: request.seasonId,
+        worldId: request.worldId,
+        status: 'active',
+        source: 'rental-request',
+        codeId: request.codeId || null,
+        targetExecBalance: request.targetExecBalance,
+        lastRefuelAt: completedAt,
+        createdAt: request.createdAt,
+        updatedAt: completedAt,
+      };
+      const digger = db.diggers.find((item) => (
+        item.requestId === requestId
+        || (item.programId && normalizeStoredAddress(item.programId) === programId)
+      ));
+      if (digger) Object.assign(digger, diggerRecord);
+      else db.diggers.push(diggerRecord);
+
+      const grantId = `${requestId}:initial-top-up`;
+      const grantRecord = {
+        id: grantId,
+        idempotencyKey: grantId,
+        type: 'initial-rental',
+        seasonId: request.seasonId,
+        diggerId: programId,
+        programId,
+        targetExecBalance: request.targetExecBalance,
+        balanceBefore: '0',
+        amount: request.targetExecBalance,
+        txHash: request.topUpTxHash || request.createTxHash,
+        status: 'confirmed',
+        createdAt: request.createdAt,
+        updatedAt: completedAt,
+      };
+      const grant = db.fuelGrants.find((item) => item.idempotencyKey === grantId || item.id === grantId);
+      if (grant) Object.assign(grant, grantRecord);
+      else db.fuelGrants.push(grantRecord);
+
+      const jobId = `digger-rental-request:${requestId}`;
+      const jobRun = db.jobRuns.find((item) => item.id === jobId);
+      if (jobRun) {
+        jobRun.status = 'ok';
+        jobRun.finishedAt = completedAt;
+        jobRun.programId = programId;
+        delete jobRun.error;
+      } else {
+        db.jobRuns.push({
+          id: jobId,
+          job: 'digger-rental-request',
+          mode: 'live',
+          status: 'ok',
+          startedAt: request.createdAt,
+          finishedAt: completedAt,
+          requestId,
+          programId,
+        });
+      }
+
+      return {
+        status: 'confirmed',
+        requestId,
+        programId,
+        agentName: generateAgentName(programId),
+        createTxHash: request.createTxHash,
+        topUpTxHash: request.topUpTxHash,
+        initTxHash: request.initTxHash,
+      };
     });
   }
 

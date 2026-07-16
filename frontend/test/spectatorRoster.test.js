@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canFollowSpectatorAgent,
+  findSpectatorAgent,
   localCargoCount,
   spectatorAgentKey,
   spectatorDepth,
@@ -13,6 +14,16 @@ test('spectator roster keeps chain and local diggers distinct and stable', () =>
     'chain:0xabcd',
   );
   assert.equal(spectatorAgentKey({ id: 4, name: 'local-bot' }), 'local:4');
+});
+
+test('spectator roster resolves the current digger after a snapshot replaces it', () => {
+  const key = spectatorAgentKey({ owner: '0xABCD' });
+  const stale = { owner: '0xabcd', drawX: 4, drawY: 8 };
+  const live = { owner: '0xABCD', drawX: 17, drawY: 22 };
+
+  assert.notEqual(stale, live);
+  assert.equal(findSpectatorAgent([live], key), live);
+  assert.equal(findSpectatorAgent([], key), null);
 });
 
 test('spectator roster derives depth, cargo, and follow eligibility', () => {

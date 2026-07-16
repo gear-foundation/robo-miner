@@ -35,6 +35,13 @@ the browser back button should work for the main surfaces.
 Use `src/router.js` for new navigation. `src/routing.js` remains as a
 compatibility wrapper for older scene code that imports `setRoute`.
 
+## Spectating Diggers
+
+The arena spectator has a **Diggers** control that opens a roster of active
+diggers. Select a row to follow that digger and view its live status, position,
+cargo, banked resources, and executable balance. The roster starts collapsed so
+the mine remains visible, and the selected digger is marked on the map.
+
 ## Wallet
 
 Wallet connection is centralized in `src/chain/wallet.js`.
@@ -126,6 +133,8 @@ Manual browser smoke:
 1. Open `/`, then enter `/menu`.
 2. Connect wallet from the menu button and reopen it to switch account/provider.
 3. Visit `/leaderboard`, `/redeem-res`, `/free-wvara`, and use browser back.
-4. Visit `/arena`, open a local spectator, reload the page, then go back.
+4. Visit `/arena`, open a local spectator, open **Diggers**, and select a
+   moving digger. Confirm the camera follows it, its details update, and the
+   selected-digger marker stays visible. Reload the page, then go back.
 5. If live ids are configured, open `/world/<programId>` and confirm the world
    snapshot loads.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1.0 - 2026-07-14
+
+### Changed
+
+- Open **Diggers** when needed to switch among live diggers; the roster stays collapsed by default and marks the selected digger on the map.
+
+### Fixed
+
+- Kept the map details bubble attached to the live digger after realtime snapshots refresh its position, so it does not drift after a state update.
+
 ## 0.1.0.0 - 2026-07-14
 
 ### Added

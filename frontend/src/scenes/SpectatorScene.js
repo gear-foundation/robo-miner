@@ -14,6 +14,7 @@ import { worldCodeFor, worldLabelFor } from '../chain/worldIdentity.js';
 import { navigateBack } from '../router.js';
 import {
   canFollowSpectatorAgent,
+  findSpectatorAgent,
   localCargoCount,
   spectatorAgentKey,
   spectatorDepth,
@@ -305,7 +306,6 @@ export default class SpectatorScene extends GameScene {
     this.agentNameMap = new Map();
     this.agentNamePollMs = 0;
     this.selectedAgentKey = null;
-    this.selectedAgentDetail = null;
     this.followAgentKey = null;
     this.selectionPulse = null;
     this.rosterOpen = false;
@@ -1125,7 +1125,6 @@ export default class SpectatorScene extends GameScene {
       const dying = !m.alive && m.respawnAtMs != null; // show the squashed corpse until respawn
       if (!m.alive && !dying) continue;
       const digging = !!(m.act && m.act.kind === 'dig') && !dying;
-      // Same dig shake as single-player drawRobot.
       const shake = digging
         ? { x: (Math.floor(time / 55) % 2 === 0) ? 1 : -1, y: (Math.floor(time / 80) % 2 === 0) ? 1 : 0 }
         : { x: 0, y: 0 };
@@ -1161,29 +1160,35 @@ export default class SpectatorScene extends GameScene {
     if (!this.rt?.s?.miners?.length) return null;
     const cam = this.cameras.main;
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
-    return this.rt.s.miners.find((m) => {
-      if (m.exited || !canFollowSpectatorAgent(m)) return false;
+    let nearest = null;
+    let nearestDistance = Infinity;
+    for (const m of this.rt.s.miners) {
+      if (m.exited || !canFollowSpectatorAgent(m)) continue;
       const cx = m.drawX * TILE + TILE / 2;
       const cy = m.drawY * TILE + TILE / 2;
-      return Math.abs(worldPoint.x - cx) <= TILE * 0.62 &&
-        Math.abs(worldPoint.y - cy) <= TILE * 0.74;
-    });
+      const dx = worldPoint.x - cx;
+      const dy = worldPoint.y - cy;
+      if (Math.abs(dx) > TILE * 0.62 || Math.abs(dy) > TILE * 0.74) continue;
+      const distance = dx * dx + dy * dy;
+      if (distance < nearestDistance) {
+        nearest = m;
+        nearestDistance = distance;
+      }
+    }
+    return nearest;
   }
 
   selectedSpectatorAgent() {
-    if (!this.selectedAgentKey) return null;
-    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.selectedAgentKey) || null;
+    return findSpectatorAgent(this.rt?.s?.miners, this.selectedAgentKey);
   }
 
   followSpectatorAgent() {
-    if (!this.followAgentKey) return null;
-    return this.rt?.s?.miners?.find((agent) => spectatorAgentKey(agent) === this.followAgentKey) || null;
+    return findSpectatorAgent(this.rt?.s?.miners, this.followAgentKey);
   }
 
   selectSpectatorAgent(agent, { follow = true } = {}) {
     if (!agent) return;
     this.selectedAgentKey = spectatorAgentKey(agent);
-    this.selectedAgentDetail = null;
     if (follow && canFollowSpectatorAgent(agent)) {
       this.followAgentKey = this.selectedAgentKey;
       this.startSelectionPulse(agent);
@@ -1199,7 +1204,6 @@ export default class SpectatorScene extends GameScene {
 
   clearSpectatorSelection() {
     this.selectedAgentKey = null;
-    this.selectedAgentDetail = null;
     this.followAgentKey = null;
     this.selectionPulse = null;
     this.hideAgentBubble();
@@ -1256,8 +1260,7 @@ export default class SpectatorScene extends GameScene {
     try {
       const detail = await this.rt.inspectAgent(agent.owner);
       if (this._agentInspectRequestId !== requestId || spectatorAgentKey(agent) !== this.selectedAgentKey) return;
-      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
-      this.selectedAgentDetail = { ...detail, agent: synced || this.selectedSpectatorAgent() };
+      this.rt.syncAgentDetail?.(agent.owner, detail);
       this.syncSpectatorRoster();
       this.updateHUD();
     } catch {
@@ -1281,7 +1284,7 @@ export default class SpectatorScene extends GameScene {
     this.agentBubbleSize = null;
     this.agentBubbleEl.removeAttribute('title');
     this.agentBubbleEl.style.display = 'block';
-    this.agentBubbleMiner = agent;
+    this.agentBubbleKey = spectatorAgentKey(agent);
     this.positionAgentBubble();
     clearTimeout(this._agentBubbleTimer);
     this._agentBubbleTimer = setTimeout(() => this.hideAgentBubble(), ms);
@@ -1294,11 +1297,13 @@ export default class SpectatorScene extends GameScene {
     try {
       const detail = await this.rt.inspectAgent(agent.owner);
       if (this._agentInspectRequestId !== requestId) return;
-      if (!this.agentBubbleMiner || !sameDisplayAddress(this.agentBubbleMiner.owner, agent.owner)) return;
-      const synced = this.rt.syncAgentDetail?.(agent.owner, detail);
-      if (synced && sameDisplayAddress(synced.owner, agent.owner)) this.agentBubbleMiner = synced;
+      const key = spectatorAgentKey(agent);
+      if (this.agentBubbleKey !== key) return;
+      this.rt.syncAgentDetail?.(agent.owner, detail);
+      const liveAgent = findSpectatorAgent(this.rt?.s?.miners, key);
+      if (!liveAgent) return this.hideAgentBubble();
       if (this.agentBubbleContentEl) {
-        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(this.agentBubbleMiner, detail);
+        this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(liveAgent, detail);
       }
       this.agentBubbleSize = null;
       this.updateHUD();
@@ -1371,16 +1376,17 @@ export default class SpectatorScene extends GameScene {
 
   hideAgentBubble() {
     if (this.agentBubbleEl) this.agentBubbleEl.style.display = 'none';
-    this.agentBubbleMiner = null;
+    this.agentBubbleKey = null;
     this.agentBubbleSize = null;
     clearTimeout(this._agentBubbleTimer);
   }
 
   positionAgentBubble() {
-    if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleMiner) return;
+    if (!this.agentBubbleEl || this.agentBubbleEl.style.display === 'none' || !this.agentBubbleKey) return;
+    const m = findSpectatorAgent(this.rt?.s?.miners, this.agentBubbleKey);
+    if (!m) return this.hideAgentBubble();
     const cam = this.cameras.main;
     const zoom = cam.zoom || 1;
-    const m = this.agentBubbleMiner;
     const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
     const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
     const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
@@ -1541,6 +1547,22 @@ export default class SpectatorScene extends GameScene {
       g.fillStyle(0xff7a1f, 0.25 * a); g.fillCircle(cx, cy, r);
       g.lineStyle(4, 0xffd14a, a); g.strokeCircle(cx, cy, r);
     }
+    const selected = this.selectedSpectatorAgent();
+    if (selected && canFollowSpectatorAgent(selected)) {
+      const cx = (selected.drawX + 0.5) * TILE;
+      const cy = (selected.drawY + 0.5) * TILE;
+      const inset = TILE * 0.43;
+      const corner = TILE * 0.18;
+      g.lineStyle(3, 0xffdd55, 0.95);
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy - inset, cx - inset + corner, cy - inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy - inset, cx - inset, cy - inset + corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy - inset, cx + inset - corner, cy - inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy - inset, cx + inset, cy - inset + corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy + inset, cx - inset + corner, cy + inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx - inset, cy + inset, cx - inset, cy + inset - corner));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy + inset, cx + inset - corner, cy + inset));
+      g.strokeLineShape(new Phaser.Geom.Line(cx + inset, cy + inset, cx + inset, cy + inset - corner));
+    }
     if (this.selectionPulse) {
       const agent = this.rt?.s?.miners?.find((miner) => spectatorAgentKey(miner) === this.selectionPulse.key);
       if (agent) {
@@ -1629,7 +1651,8 @@ export default class SpectatorScene extends GameScene {
     style.id = 'spec-roster-style';
     style.textContent = `
       #spec-camera-state{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.35px}
-      #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden}
+      #spec-roster{position:fixed;left:12px;top:58px;bottom:12px;width:318px;z-index:21;display:flex;flex-direction:column;box-sizing:border-box;background:#101820;color:#f1e6cf;border:3px solid #000;border-radius:12px;box-shadow:5px 5px 0 rgba(0,0,0,.36);font-family:'Courier New',monospace;overflow:hidden;transform:translateX(calc(-100% - 18px));opacity:0;pointer-events:none;transition:transform .18s cubic-bezier(.16,1,.3,1),opacity .18s ease}
+      #spec-roster.is-open{transform:translateX(0);opacity:1;pointer-events:auto}
       #spec-roster button{font-family:inherit;cursor:pointer;touch-action:manipulation}
       #spec-roster button:focus-visible,#spec-diggers-btn:focus-visible{outline:3px solid #fff;outline-offset:2px}
       #spec-roster-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px 8px;border-bottom:1px solid #2f6a3f;color:#7cffb0;font-size:12px;font-weight:bold;letter-spacing:.65px}
@@ -1655,12 +1678,10 @@ export default class SpectatorScene extends GameScene {
       .spec-dossier-actions{display:flex;gap:7px;margin-top:7px}
       .spec-dossier-actions button{min-height:28px;padding:4px 8px;border:1px solid #000;border-radius:5px;background:#7cffb0;color:#13241a;font-size:11px;font-weight:bold;letter-spacing:.35px;box-shadow:2px 2px 0 rgba(0,0,0,.28);transition-property:transform,filter;transition-duration:.1s}
       .spec-dossier-actions button:active{transform:scale(.96)}
-      #spec-diggers-btn{display:none}
       @media (max-width:760px){
         #spec-hud{height:52px!important;grid-template-rows:42px!important;gap:7px!important;padding:0 8px!important}
         #spec-hud>div:not(#spec-stats){display:none}
         #spec-stats{display:none!important}
-        #spec-diggers-btn{display:block!important}
         #spec-soundbtn,#spec-logbtn{width:40px!important;height:36px!important}
         #spec-soundbtn{margin-left:auto!important}
         #spec-logbtn{margin-left:0!important}
@@ -1689,17 +1710,32 @@ export default class SpectatorScene extends GameScene {
       this.stopSpectatorFollow();
     };
     window.addEventListener('keydown', this._spectatorKeyHandler);
-    // On phones the roster is the spectator mode, not a secondary tool hidden
-    // behind a discovery click. The toolbar button remains available to collapse
-    // it when a viewer wants an uninterrupted map.
-    this.toggleSpectatorRoster(Boolean(window.matchMedia?.('(max-width: 760px)').matches));
+    // Keep the mine unobstructed on entry. The toolbar button opens the roster.
+    this.toggleSpectatorRoster(false);
     this.syncSpectatorRoster();
   }
 
   toggleSpectatorRoster(open = !this.rosterOpen) {
     this.rosterOpen = Boolean(open);
-    this.rosterEl?.classList.toggle('is-open', this.rosterOpen);
+    const returnFocus = !this.rosterOpen && this.rosterEl?.contains(document.activeElement);
+    if (this.rosterEl) {
+      this.rosterEl.classList.toggle('is-open', this.rosterOpen);
+      this.rosterEl.inert = !this.rosterOpen;
+      this.rosterEl.setAttribute('aria-hidden', String(!this.rosterOpen));
+    }
     this.diggersBtn?.setAttribute('aria-expanded', String(this.rosterOpen));
+    this.updateDiggerButton();
+    if (returnFocus) this.diggersBtn?.focus();
+  }
+
+  updateDiggerButton() {
+    if (!this.diggersBtn) return;
+    const count = this.rt?.s?.miners?.length || 0;
+    const label = `DIGGERS ${count} ${this.rosterOpen ? '▾' : '▸'}`;
+    const state = this.rosterOpen ? 'expanded' : 'collapsed';
+    if (this.diggersBtn.textContent !== label) this.diggersBtn.textContent = label;
+    this.diggersBtn.title = `Digger list ${state}. Activate to ${this.rosterOpen ? 'collapse' : 'expand'}.`;
+    this.diggersBtn.setAttribute('aria-label', `Digger list ${state}`);
   }
 
   agentRosterStatus(agent) {
@@ -1725,8 +1761,7 @@ export default class SpectatorScene extends GameScene {
   }
 
   agentDossierHtml(agent) {
-    const detail = this.selectedAgentDetail || {};
-    const source = detail.agent || agent;
+    const source = agent;
     const status = this.agentRosterStatus(source);
     const chain = Boolean(source.owner);
     const metrics = this.agentRosterMetrics(source);
@@ -1774,8 +1809,7 @@ export default class SpectatorScene extends GameScene {
     const alive = miners.filter((agent) => agent.alive).length;
     const rosterCount = `${alive}/${miners.length}`;
     if (this.rosterCountEl && this.rosterCountEl.textContent !== rosterCount) this.rosterCountEl.textContent = rosterCount;
-    const diggerCount = `DIGGERS ${miners.length}`;
-    if (this.diggersBtn && this.diggersBtn.textContent !== diggerCount) this.diggersBtn.textContent = diggerCount;
+    this.updateDiggerButton();
     this.renderSelectedDossier();
   }
 
@@ -1860,7 +1894,7 @@ export default class SpectatorScene extends GameScene {
     this.hudLayout = layout;
 
     if (layout === 'desktop') {
-      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:14px;padding:0 14px';
+      this.hudBar.style.cssText += ';height:46px;display:grid;grid-template-columns:auto auto auto minmax(0,1fr) auto auto auto;align-items:center;gap:10px;padding:0 14px';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:17px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       this.cameraStateEl.style.display = 'block';
@@ -1870,7 +1904,7 @@ export default class SpectatorScene extends GameScene {
       this.logBtn.textContent = 'TX';
       this.logBtn.style.cssText = btnCss('#9bb0a4') + 'font-size:12px;padding:6px 10px;box-shadow:2px 2px 0 rgba(0,0,0,.35)';
     } else if (layout === 'compact') {
-      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
+      this.hudBar.style.cssText += ';height:52px;display:grid;grid-template-columns:42px auto minmax(0,1fr) auto 42px 54px;align-items:center;gap:8px;padding:5px 8px;background:#102033f2;border-bottom:2px solid #000';
       this.worldTitleEl.style.cssText = 'font-weight:bold;color:#ffdd55;font-size:16px;white-space:nowrap';
       this.statsEl.style.cssText = 'justify-self:end;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
       this.cameraStateEl.style.display = 'none';
@@ -1893,17 +1927,17 @@ export default class SpectatorScene extends GameScene {
 
     this.backBtn.style.gridColumn = '1';
     this.backBtn.style.gridRow = '1';
-    this.diggersBtn.style.gridColumn = layout === 'mobile' ? '2' : '';
-    this.diggersBtn.style.gridRow = layout === 'mobile' ? '1' : '';
-    this.worldTitleEl.style.gridColumn = '2';
+    this.diggersBtn.style.gridColumn = '2';
+    this.diggersBtn.style.gridRow = '1';
+    this.worldTitleEl.style.gridColumn = '3';
     this.worldTitleEl.style.gridRow = '1';
-    this.cameraStateEl.style.gridColumn = '3';
+    this.cameraStateEl.style.gridColumn = '4';
     this.cameraStateEl.style.gridRow = '1';
-    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : '4';
+    this.statsEl.style.gridColumn = layout === 'mobile' ? '1 / -1' : layout === 'desktop' ? '5' : '4';
     this.statsEl.style.gridRow = layout === 'mobile' ? '2' : '1';
-    this.soundBtn.style.gridColumn = layout === 'desktop' ? '5' : '4';
+    this.soundBtn.style.gridColumn = layout === 'desktop' ? '6' : layout === 'compact' ? '5' : '4';
     this.soundBtn.style.gridRow = '1';
-    this.logBtn.style.gridColumn = layout === 'desktop' ? '6' : '5';
+    this.logBtn.style.gridColumn = layout === 'desktop' ? '7' : layout === 'compact' ? '6' : '5';
     this.logBtn.style.gridRow = '1';
     this.consoleEl.style.top = layout === 'mobile' ? '76px' : layout === 'compact' ? '52px' : '46px';
     this.updateWorldTitle();

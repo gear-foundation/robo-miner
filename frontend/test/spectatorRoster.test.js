@@ -6,6 +6,7 @@ import {
   localCargoCount,
   spectatorAgentKey,
   spectatorDepth,
+  spectatorViewportPoint,
 } from '../src/scenes/spectatorRoster.js';
 
 test('spectator roster keeps chain and local diggers distinct and stable', () => {
@@ -33,4 +34,16 @@ test('spectator roster derives depth, cargo, and follow eligibility', () => {
   assert.equal(localCargoCount({ cargo: { iron: 2, coal: 4 } }), 6);
   assert.equal(canFollowSpectatorAgent({ drawX: 8, drawY: 9 }), true);
   assert.equal(canFollowSpectatorAgent({ drawX: 8, drawY: 9, exited: true }), false);
+});
+
+test('spectator popup maps world coordinates into the CSS canvas viewport', () => {
+  assert.deepEqual(
+    spectatorViewportPoint(
+      130,
+      70,
+      { x: 10, y: 20, scrollX: 100, scrollY: 50, zoom: 2, width: 400, height: 200 },
+      { left: 30, top: 40, width: 800, height: 400 },
+    ),
+    { x: 170, y: 160 },
+  );
 });

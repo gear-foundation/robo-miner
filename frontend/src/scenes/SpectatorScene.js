@@ -18,6 +18,7 @@ import {
   localCargoCount,
   spectatorAgentKey,
   spectatorDepth,
+  spectatorViewportPoint,
 } from './spectatorRoster.js';
 
 // Live spectator. Extends GameScene to REUSE the real game rendering (tiles,
@@ -1194,12 +1195,12 @@ export default class SpectatorScene extends GameScene {
       this.startSelectionPulse(agent);
     } else {
       this.followAgentKey = null;
+      this.selectionPulse = null;
     }
     this.playAgentChirp();
     if (window.matchMedia?.('(max-width: 760px)').matches) this.toggleSpectatorRoster(true);
     this.syncSpectatorRoster();
     this.updateCameraState();
-    this.refreshSelectedAgentDetails(agent);
   }
 
   clearSpectatorSelection() {
@@ -1253,21 +1254,6 @@ export default class SpectatorScene extends GameScene {
     }
   }
 
-  async refreshSelectedAgentDetails(agent) {
-    if (!agent?.owner || typeof this.rt?.inspectAgent !== 'function') return;
-    const requestId = (this._agentInspectRequestId || 0) + 1;
-    this._agentInspectRequestId = requestId;
-    try {
-      const detail = await this.rt.inspectAgent(agent.owner);
-      if (this._agentInspectRequestId !== requestId || spectatorAgentKey(agent) !== this.selectedAgentKey) return;
-      this.rt.syncAgentDetail?.(agent.owner, detail);
-      this.syncSpectatorRoster();
-      this.updateHUD();
-    } catch {
-      // The snapshot state remains useful if a direct agent query lags.
-    }
-  }
-
   playAgentChirp() {
     const sounds = this.robotTouchSounds?.filter(Boolean) || [];
     if (!sounds.length) return;
@@ -1299,14 +1285,12 @@ export default class SpectatorScene extends GameScene {
       if (this._agentInspectRequestId !== requestId) return;
       const key = spectatorAgentKey(agent);
       if (this.agentBubbleKey !== key) return;
-      this.rt.syncAgentDetail?.(agent.owner, detail);
       const liveAgent = findSpectatorAgent(this.rt?.s?.miners, key);
       if (!liveAgent) return this.hideAgentBubble();
       if (this.agentBubbleContentEl) {
         this.agentBubbleContentEl.innerHTML = this.agentBubbleHtml(liveAgent, detail);
       }
       this.agentBubbleSize = null;
-      this.updateHUD();
       this.positionAgentBubble();
     } catch {
       // Snapshot data is enough for the bubble; a missed query should not make
@@ -1386,33 +1370,43 @@ export default class SpectatorScene extends GameScene {
     const m = findSpectatorAgent(this.rt?.s?.miners, this.agentBubbleKey);
     if (!m) return this.hideAgentBubble();
     const cam = this.cameras.main;
-    const zoom = cam.zoom || 1;
-    const sx = (m.drawX * TILE + TILE / 2 - cam.scrollX) * zoom;
-    const sy = (m.drawY * TILE - 6 - cam.scrollY) * zoom;
-    const robotBottom = ((m.drawY + 1) * TILE - cam.scrollY) * zoom;
-    const side = m.facing === 'left' ? -1 : 1;
+    const canvasRect = this.game.canvas.getBoundingClientRect();
+    const anchor = spectatorViewportPoint(
+      m.drawX * TILE + TILE / 2,
+      m.drawY * TILE - 6,
+      cam,
+      canvasRect,
+    );
+    const robotBottom = spectatorViewportPoint(
+      m.drawX * TILE + TILE / 2,
+      (m.drawY + 1) * TILE,
+      cam,
+      canvasRect,
+    ).y;
     const size = this.agentBubbleSize || {
       width: this.agentBubbleEl.offsetWidth,
       height: this.agentBubbleEl.offsetHeight,
     };
     this.agentBubbleSize = size;
 
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
     const halfWidth = size.width / 2;
-    const minLeft = halfWidth + AGENT_BUBBLE_MARGIN;
-    const maxLeft = Math.max(minLeft, viewportWidth - halfWidth - AGENT_BUBBLE_MARGIN);
-    const left = Phaser.Math.Clamp(sx + side * 36, minLeft, maxLeft);
-    const below = sy - size.height - AGENT_BUBBLE_MARGIN < AGENT_BUBBLE_HUD_CLEARANCE;
+    const minLeft = canvasRect.left + halfWidth + AGENT_BUBBLE_MARGIN;
+    const maxLeft = Math.max(minLeft, canvasRect.right - halfWidth - AGENT_BUBBLE_MARGIN);
+    const left = Phaser.Math.Clamp(anchor.x, minLeft, maxLeft);
+    const minTop = Math.max(
+      canvasRect.top + AGENT_BUBBLE_MARGIN,
+      AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN,
+    );
+    const below = anchor.y - size.height - AGENT_BUBBLE_MARGIN < minTop;
     const belowTop = Phaser.Math.Clamp(
       robotBottom + AGENT_BUBBLE_BELOW_GAP,
-      AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN,
-      Math.max(AGENT_BUBBLE_HUD_CLEARANCE + AGENT_BUBBLE_MARGIN, viewportHeight - size.height - AGENT_BUBBLE_MARGIN),
+      minTop,
+      Math.max(minTop, canvasRect.bottom - size.height - AGENT_BUBBLE_MARGIN),
     );
-    const tailX = Phaser.Math.Clamp(sx - left + halfWidth, 18, Math.max(18, size.width - 18));
+    const tailX = Phaser.Math.Clamp(anchor.x - left + halfWidth, 18, Math.max(18, size.width - 18));
 
     this.agentBubbleEl.style.left = `${left}px`;
-    this.agentBubbleEl.style.top = `${below ? belowTop : sy}px`;
+    this.agentBubbleEl.style.top = `${below ? belowTop : anchor.y}px`;
     this.agentBubbleEl.style.transform = below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)';
     this.agentBubbleEl.style.setProperty('--tail-x', `${tailX}px`);
     this.setAgentBubbleTailPlacement(below);

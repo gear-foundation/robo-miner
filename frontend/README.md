@@ -38,9 +38,10 @@ compatibility wrapper for older scene code that imports `setRoute`.
 ## Spectating Diggers
 
 The arena spectator has a **Diggers** control that opens a roster of active
-diggers. Select a row to follow that digger and view its live status, position,
-cargo, banked resources, and executable balance. The roster starts collapsed so
-the mine remains visible, and the selected digger is marked on the map.
+diggers. Select a row to follow that digger and inspect its live status,
+position, cargo, and banked resources without affecting the digger itself. The
+roster starts collapsed so the mine remains visible, and the selected digger is
+marked on the map.
 
 ## Wallet
 
@@ -133,8 +134,9 @@ Manual browser smoke:
 1. Open `/`, then enter `/menu`.
 2. Connect wallet from the menu button and reopen it to switch account/provider.
 3. Visit `/leaderboard`, `/redeem-res`, `/free-wvara`, and use browser back.
-4. Visit `/arena`, open a local spectator, open **Diggers**, and select a
-   moving digger. Confirm the camera follows it, its details update, and the
-   selected-digger marker stays visible. Reload the page, then go back.
+4. Visit `/arena`, open a local spectator, and select a moving digger. Confirm
+   the camera follows it, the popup remains attached, the digger does not snap,
+   and the selected-digger marker stays visible. Drag or scroll to return to
+   free camera. Reload the page, then go back.
 5. If live ids are configured, open `/world/<programId>` and confirm the world
    snapshot loads.

@@ -704,26 +704,7 @@ export class ChainSource {
       detail.proxyProgramId = balanceResult.value.programId;
       detail.executableBalance = String(balanceResult.value.executableBalance);
     }
-    this.syncAgentDetail(owner, detail);
     return detail;
-  }
-
-  syncAgentDetail(owner, detail = {}) {
-    if (!owner || (!Array.isArray(detail.state) && !Array.isArray(detail.inventory))) return null;
-    const miner = this._mergeAgentRow({
-      owner,
-      state: detail.state,
-      inventory: detail.inventory,
-    });
-    if (miner) {
-      if (detail.executableBalance !== undefined && detail.executableBalance !== null) {
-        miner.executableBalance = String(detail.executableBalance);
-        miner.proxyProgramId = detail.proxyProgramId || miner.proxyProgramId || null;
-      }
-      this._recomputeTeamScore();
-      this._lastAgents = new Map(this.s.miners.map((item) => [item.owner, { ...item }]));
-    }
-    return miner;
   }
 
   async _readSnapshot() {

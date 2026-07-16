@@ -56,7 +56,7 @@ test('chain source keeps realtime animation when the stream is current', async (
   assert.equal(source.snapshotReason, undefined);
 });
 
-test('chain source includes the selected agent proxy executable balance in inspection details', async () => {
+test('chain source inspection returns details without mutating the rendered digger', async () => {
   const source = Object.create(ChainSource.prototype);
   source._program = {
     services: {
@@ -79,14 +79,12 @@ test('chain source includes the selected agent proxy executable balance in inspe
     programId: '0x1111111111111111111111111111111111111111',
     executableBalance: 120_000_000_000_000n,
   });
-  source.syncAgentDetail = (_owner, detail) => {
-    source.syncedDetail = detail;
-    return null;
-  };
+  source.s = { miners: [{ owner: OWNER, tx: 9, ty: 12, drawX: 8.5, drawY: 12 }] };
+  const before = structuredClone(source.s.miners[0]);
 
   const detail = await source.inspectAgent(OWNER);
 
   assert.equal(detail.proxyProgramId, '0x1111111111111111111111111111111111111111');
   assert.equal(detail.executableBalance, '120000000000000');
-  assert.equal(source.syncedDetail.executableBalance, '120000000000000');
+  assert.deepEqual(source.s.miners[0], before);
 });

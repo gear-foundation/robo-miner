@@ -25,6 +25,63 @@ backend/
 
 LP Bonus is intentionally deferred and is not part of the current MVP runtime.
 
+## Backend-mediated RES to WVARA redeem
+
+The player signs an EIP-712 intent; the API verifies the owner, persists an
+idempotent request, asks the Redeem coordinator to burn RES, then transfers
+ERC-20 WVARA from the backend treasury. The scheduler resumes queued requests
+and retries `payout_failed` after burn without burning a second time.
+
+```text
+GET  /api/redeem/config
+POST /api/redeem/request
+GET  /api/redeem/requests?owner=0x...
+GET  /api/redeem/requests/<requestId>
+```
+
+`GET /api/redeem/config` publishes every safe runtime value needed by clients:
+network and chain identity, both program ids, treasury address, rates, unit,
+worker/retry timing, and the complete EIP-712 signing schema. Private keys are
+never included.
+
+Required production settings:
+
+```text
+MAINNET_ADMIN_KEY=0x...
+```
+
+`REDEEM_TREASURY_KEY` is optional. When it is not set, the backend uses the
+active network admin key as the treasury signer. Redeem is always active;
+program ids, rates, units, and worker settings come from the public network
+profile in `src/config/networks.js`. Environment variables may override those
+values for an exceptional deployment, but are not required.
+
+The treasury EOA needs enough ERC-20 WVARA for payouts and ETH for Ethereum
+transaction fees. It must also be enabled through
+`Redeem.Admin.SetBackendRedeemer`; deployment initializes the deploy signer as
+enabled. When `deploy-economy.ts --backend-redeemer` points to another EOA, the
+script authorizes that treasury and removes the deploy signer from the backend
+redeemer role. The backend also verifies the contract unit and all three rates
+before starting a burn, so its `REDEEM_*` rate settings must match the deployed
+contract.
+
+For a cutover that preserves all existing RES balances, deploy only a new
+Redeem coordinator and repoint the existing VMT:
+
+```bash
+pnpm deploy-economy -- \
+  --res-program 0xEXISTING_RES_VMT \
+  --skip-res-init \
+  --scrst-rate 6 --bcrst-rate 30 --hcrst-rate 150 \
+  --backend-redeemer 0xBACKEND_TREASURY
+```
+
+The script creates and initializes Redeem, then calls
+`Vmt.Admin.SetRedeemContract(newRedeem)`. Do not pass `--reserve-top-up` or
+`--smoke`; native reserve is not used in this flow. Update
+`DIGGER_REDEEM_PROGRAM_ID`, deploy backend and frontend, then fund the treasury
+with WVARA.
+
 ## Current module
 
 `modules/gameMaster` contains the current off-chain admin and world factory
@@ -103,7 +160,7 @@ GET /api/diggers?season=season-1&world=world-id&owner=0x...
 POST /api/diggers/request
 GET /api/stats/agents?season=season-1&world=world-id
 GET /api/stats/economy
-GET /api/leaderboard?metric=banked&season=season-1&world=world-id&limit=50
+GET /api/leaderboard?metric=earned&season=season-1&world=world-id&limit=50
 POST /api/social/x/submit
 GET /api/social/x/:owner
 GET /api/manifest
@@ -194,7 +251,20 @@ GET /api/diggers?owner=0xagent&world=0xworld&season=season-1&status=active
 ```
 
 The response includes both the full `diggers[]` list and `digger`, the first
-matching record for "my digger" flows.
+matching record for "my digger" flows. It includes `targetExecBalance` as the
+refill-policy target, but intentionally does not expose `executableBalance`:
+the backend registry is not a live balance oracle.
+
+Read the current executable balance from Vara.eth state instead:
+
+```bash
+vara-wallet --chain vara-eth --network mainnet --json \
+  vara-eth:state read 0xDIGGER_PROGRAM_ID
+```
+
+The authoritative field is `programState.executableBalance` in base units
+(`1 VARA = 10^12`). ETH balance, ERC-20 WVARA balance,
+`programState.balance`, and `targetExecBalance` are different values.
 
 The frontend helper mirrors the same flow:
 
@@ -225,8 +295,10 @@ daily transfer. For every active digger:
 topUp = max(0, DIGGER_DAILY_EXEC_TARGET - currentExecutableBalance)
 ```
 
-Dry-run writes the same audit records as live mode, but it does not block a later
-live run for the same day.
+Dry-run cannot infer a current balance from the registry. Pass
+`--assume-balance <base-units>` to calculate a hypothetical top-up; without it,
+the result is `current_balance_unknown`. Dry-run does not block a later live run
+for the same day.
 
 ```bash
 cd backend
@@ -248,7 +320,8 @@ npm run rental:top-up -- --live
 ```
 
 The job stores diggers, fuel grants, and job-run audit data in
-the backend DB.
+the backend DB. Fuel-grant audit rows may store the chain-observed
+`balanceBefore`; digger registry rows do not store or publish a current balance.
 
 ## Social Verifier Free Fuel
 
@@ -472,7 +545,7 @@ Example payload:
       "programId": "0x936b5395876648772d37e22da57ba37c4e586df2",
       "service": "World",
       "event": "ResourceExtracted",
-      "args": ["1", "0x0000000000000000000000000000000000000000000000000000000000000002", 10, 12, 0, 3]
+      "args": ["1", "0x0000000000000000000000000000000000000000000000000000000000000002", 10, 12, 1, 3]
     }
   ]
 }
@@ -490,10 +563,11 @@ cd contracts
 DIGGER_BACKEND_URL=http://localhost:8787 pnpm run agent-step-events -- --until-resource
 ```
 
-For MVP rewards the leaderboard uses only `banked`: resources brought back to
-the surface. Snapshot reconciliation is the source of truth; legacy agent ingest
-can still project `World.AgentSurfaced` into `agentStats[].banked`.
-`/api/leaderboard` defaults to `metric=banked`.
+The public leaderboard uses `earned`: the cumulative resources brought back to
+the surface. It does not fall when an agent spends banked resources on ladders
+or mints them into RES. Event history supplies cumulative mint/trade accounting,
+while snapshot reconciliation keeps the current `banked` balance accurate.
+`/api/leaderboard` defaults to `metric=earned`.
 
 Run the reconciliation worker next to the API:
 
@@ -517,15 +591,19 @@ Leaderboard rows are aggregated by agent/owner across the selected scope.
 GET /api/leaderboard?metric=live
 GET /api/leaderboard?metric=banked
 GET /api/leaderboard?metric=minted
-GET /api/leaderboard?metric=banked&season=season-1&world=world-id&session=1&summary=true
+GET /api/leaderboard?metric=earned
+GET /api/leaderboard?metric=earned&season=season-1&world=world-id&session=1&summary=true
 ```
 
 Metrics:
 
 - `live`: resources extracted during the session. Fast and exciting, but includes
   inventory that may not be banked yet.
-- `banked`: resources surfaced/banked. Default leaderboard for MVP rewards.
-- `minted`: resources minted into RES. Best for confirmed economy accounting.
+- `banked`: current unspent resources in the world; decreases after ladder trades
+  and RES minting.
+- `minted`: cumulative resources minted into RES.
+- `earned`: cumulative surfaced resources (`banked + minted + ladder spending`).
+  This is the default public leaderboard metric.
 
 Leaderboard score uses display VARA rates:
 `SCRST * 6 + BCRST * 30 + HCRST * 150`.

@@ -28,15 +28,15 @@ Use these current mainnet economy contracts when backend manifest data omits
 economy ids:
 
 ```text
-RES_VMT_PROGRAM_ID=0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
-REDEEM_PROGRAM_ID=0xdb8dae5f6fc193006d428e12ee0c717715c6b887
-ROBO_MINER_RES_VMT_PROGRAM_ID=0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
-ROBO_MINER_REDEEM_PROGRAM_ID=0xdb8dae5f6fc193006d428e12ee0c717715c6b887
+RES_VMT_PROGRAM_ID=0xa359f125d51684bab99b62e143abdd2ff925120b
+REDEEM_PROGRAM_ID=0xc280544e0fec27c904b90368bc95abbcdb508e64
+ROBO_MINER_RES_VMT_PROGRAM_ID=0xa359f125d51684bab99b62e143abdd2ff925120b
+ROBO_MINER_REDEEM_PROGRAM_ID=0xc280544e0fec27c904b90368bc95abbcdb508e64
 ```
 
-Before settlement, still verify the RES VMT with `Vmt/ScrstTokenId`,
-`Vmt/BcrstTokenId`, and `Vmt/HcrstTokenId`, and verify Redeem with
-`Redeem/AvailableReserve`, `Redeem/VaraUnit`, and live rate reads.
+Before settlement, verify the RES VMT token ids and balances on-chain, then read
+rates, unit, signing domain, and current contract ids from
+`GET /api/redeem/config`.
 
 ## Hard Gates
 
@@ -52,7 +52,7 @@ until every prior gate is verified.
 | 5. Registration | `World.Agents()` contains the DiggerProxy ActorId, then `World.AgentOf(agentActorId)` returns a successful agent row. |
 | 6. Session | `World.Session().status === 1` (active). In lobby status `0`, wait and re-check. |
 | 7. Action Loop | Use strict read-after-write by default. An explicit route-checkpoint mode may send a short prevalidated movement segment before re-reading state, but only under the safety limits below. |
-| 8. Settlement | Surface, mint RES, redeem if useful, wait for the L1 `Message` value claim, claim it with the owner wallet, verify the owner's WVARA balance increased, then record success. |
+| 8. Settlement | Surface, mint RES, submit an owner-signed backend redeem intent, wait for backend `confirmed`, verify the owner's WVARA balance increased, then record success. |
 
 If a gate fails, stop the current play loop, report the failed gate and the exact
 query/API response, then retry only the failed gate when safe.
@@ -134,10 +134,9 @@ function from fresh world state before sending a dependent action. See
    from the selected world's live `World/Config()` result. Use indices `10..15`
    as `(scrst_resources, scrst_ladders, bcrst_resources, bcrst_ladders,
    hcrst_resources, hcrst_ladders)`. Never use hard-coded ladder trade rates.
-7. Before planning any RES-to-WVARA redeem, query the current redeem contract:
-   `Redeem/ScrstRate`, `Redeem/BcrstRate`, `Redeem/HcrstRate`,
-   `Redeem/VaraUnit`, and `Redeem/AvailableReserve`. Never use hard-coded
-   resource redeem rates from docs, memory, reports, or local constants.
+7. Before planning any RES-to-WVARA redeem, query
+   `GET /api/redeem/config`. Never use hard-coded resource redeem rates,
+   contract ids, or signing domains from docs, memory, or local constants.
 8. Before any `Drill`, scan the target tile and the tile above it. `STONE` is
    not drillable; route around it. Treat drilling a tile directly below `STONE`
    as unsafe unless the plan proves the falling stone cannot block the route or
@@ -196,23 +195,18 @@ function from fresh world state before sending a dependent action. See
 
 ## Redeem Completion Rule
 
-Treat `Redeem/Redeem` as the start of an asynchronous settlement, not as a
-completed payout. A successful injected reply or Sails `Redeemed` event means
-the reserve/burn flow completed and an outgoing value was created; it does not
-mean the owner wallet received WVARA.
+Use the backend-mediated redeem API described in `references/backend-api.md`.
+The owner signs the exact EIP-712 intent returned by `GET /api/redeem/config`;
+the backend burns RES through `Redeem/RedeemFor` and transfers ERC-20 WVARA
+from its treasury. Never call legacy `Redeem/Redeem` and never wait for or
+claim a Mirror mailbox value in the backend-mediated flow.
 
-Before saying "paid", "exchanged", or "redeemed successfully":
+Before saying "paid", "exchanged", or "redeemed successfully", require both:
 
-1. Wait for the Redeem Mirror's Ethereum `Message` event addressed to
-   `ownerAddress` with the expected payout value.
-2. Extract its `id` as `claimedId`.
-3. Call `vara-eth:mailbox claim <redeemProgramId> <claimedId>` with the owner
-   wallet, never the DiggerProxy.
-4. Wait for the claim receipt.
-5. Re-read the owner's WVARA balance and require the expected increase.
-
-Waiting alone after the `Message` event does not credit the wallet. Read the
-exact bounded polling and claim procedure in `references/workflow.md` Gate 8.
+1. `GET /api/redeem/requests/<requestId>` returns `status: confirmed` and a
+   non-empty `payoutTxHash`.
+2. A fresh owner `vara-eth:wvara balance` read increased by the expected raw
+   payout.
 
 ## Mandatory Safety Rules
 
@@ -223,12 +217,12 @@ exact bounded polling and claim procedure in `references/workflow.md` Gate 8.
   only when fresh `AgentOf(agentActorId).result[2] == 0`, and spend only
   `bankedScrst`, `bankedBcrst`, and `bankedHcrst`; carried inventory must be
   banked with `Surface()` first.
-- Treat live `Redeem/*Rate()` and `Redeem/VaraUnit()` as the source of truth for
-  RES-to-WVARA exchange. Do not copy redeem rates from docs, memory, previous
-  deployments, reports, or local constants.
-- Never report a redeem as paid from the injected reply, reserve reduction,
-  `PendingRedeemCount == 0`, or a Sails `Redeemed` event. Complete the owner
-  mailbox claim and verify the owner WVARA balance increase.
+- Treat `GET /api/redeem/config` rates, unit, EIP-712 domain, and contract ids as
+  the source of truth for backend-mediated RES-to-WVARA exchange.
+- Never call legacy `Redeem/Redeem`, `Redeem/ConfirmRedeem`, or
+  `Redeem/CancelRedeem` as a player. Never submit an unsigned redeem request.
+- Never report payment from `burned` alone. Require backend `confirmed`, a
+  payout transaction hash, and a fresh owner WVARA balance increase.
 - Use backend HTTP discovery only to find matches and rented diggers.
 - Ignore `/matches.register.steps` and other backend write recipes that bypass
   the rented DiggerProxy.

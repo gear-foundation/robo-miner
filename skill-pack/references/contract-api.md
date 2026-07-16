@@ -233,57 +233,23 @@ is explicitly assigned a privileged role. Normal players mint through
 
 ## Redeem
 
-Queries:
+Players do not call the Redeem program directly. The backend treasury is an
+authorized redeemer and calls:
 
 ```text
-Redeem.AvailableReserve()
-Redeem.ReserveBalance()
-Redeem.LockedBalance()
-Redeem.ScrstRate()
-Redeem.BcrstRate()
-Redeem.HcrstRate()
-Redeem.VaraUnit()
-Redeem.PendingRedeemCount()
+Redeem.RedeemFor(requestId, beneficiary, scrst, bcrst, hcrst)
+Redeem.BackendRequestStatus(requestId) -> 0 unknown, 1 pending, 2 burned, 3 canceled
 ```
 
-Player writes:
+`requestId` is the EIP-712 intent hash. The contract uses it as an on-chain
+idempotency key, asks the existing RES VMT to burn the owner's balances, and
+emits `BackendRedeemConfirmed` after burn confirmation. It does not send native
+value and it does not pay WVARA. After status `2`, the backend transfers ERC-20
+WVARA from its treasury to the owner.
 
-```text
-Redeem.Redeem(scrst, bcrst, hcrst)
-Redeem.CancelRedeem(redeemId)
-Redeem.ConfirmRedeem(redeemId)
-```
-
-Rates are multiplied by `VaraUnit()`. Do not hardcode redeem rates in an
-agent; read `ScrstRate()`, `BcrstRate()`, `HcrstRate()`, and `VaraUnit()` from
-the current redeem contract before calculating whether an exchange is worth it.
-
-### Payout finalization
-
-`Redeem.Redeem` is asynchronous across Vara.eth and Ethereum. Its injected
-reply and Sails `Redeemed` event do not prove that WVARA reached the owner. The
-outgoing value becomes an Ethereum-side Mirror mailbox claim.
-
-Use the Redeem program address as the Mirror address and wait for:
-
-```text
-Message(id: bytes32, destination: address indexed, payload: bytes, value: uint128)
-topic0 = 0x9c4ffe7286aed9eb205c8adb12b51219122c7e56c67017f312af0e15f8011773
-```
-
-Require `destination == ownerAddress` and `value == expectedPayout`. The event
-`id` is `claimedId`. Claim it with the owner wallet:
-
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  vara-eth:mailbox claim "$redeemProgramId" "$claimedId"
-```
-
-Only mark payment complete after the claim receipt succeeds and a fresh
-`vara-eth:wvara balance "$ownerAddress"` read shows the expected increase. The
-DiggerProxy is neither the beneficiary nor the signer for this claim.
+Legacy `Redeem.Redeem`, reserve queries, and native-value mailbox settlement
+remain only for compatibility with the old deployment. Do not use them for new
+player redemption.
 
 ## `vara-wallet` Examples
 

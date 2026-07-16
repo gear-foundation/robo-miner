@@ -226,8 +226,8 @@ If `/api/manifest` does not include economy ids on mainnet, use the current
 mainnet fallback ids below. Do not use them on another network.
 
 ```text
-resVmtProgramId = 0x2295edd92104c5f9f4f9bddef28d1c20c3e9f448
-redeemProgramId = 0xdb8dae5f6fc193006d428e12ee0c717715c6b887
+resVmtProgramId = 0xa359f125d51684bab99b62e143abdd2ff925120b
+redeemProgramId = 0xc280544e0fec27c904b90368bc95abbcdb508e64
 ```
 
 Verification before using economy ids:
@@ -238,30 +238,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --args '[]' \
   --idl "$ROBO_MINER_RES_VMT_IDL"
 
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/AvailableReserve \
-  --args '[]' \
-  --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/VaraUnit \
-  --args '[]' \
-  --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/ScrstRate \
-  --args '[]' \
-  --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/BcrstRate \
-  --args '[]' \
-  --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/HcrstRate \
-  --args '[]' \
-  --idl "$ROBO_MINER_REDEEM_IDL"
+curl -fsS "$ROBO_MINER_BACKEND/api/redeem/config?network=mainnet"
 ```
 
 If either fallback read fails or decodes against the wrong service, stop before
@@ -721,176 +698,38 @@ common rejection is `agent is not on the surface`.
 robo_miner_action Digger/MintResources '[]'
 ```
 
-Check RES balances and redeem configuration:
+Check RES balances with `Vmt/BalanceOf`, then read the backend signing and rate
+configuration:
 
 ```bash
-redeemActorId="0x000000000000000000000000${redeemProgramId#0x}"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$resVmtProgramId" Vmt/ScrstTokenId --args '[]' --idl "$ROBO_MINER_RES_VMT_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$resVmtProgramId" Vmt/BcrstTokenId --args '[]' --idl "$ROBO_MINER_RES_VMT_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$resVmtProgramId" Vmt/HcrstTokenId --args '[]' --idl "$ROBO_MINER_RES_VMT_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$resVmtProgramId" Vmt/BalanceOf \
-  --args "[\"$ownerActorId\",0]" \
-  --idl "$ROBO_MINER_RES_VMT_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$resVmtProgramId" Vmt/IsApproved \
-  --args "[\"$ownerActorId\",\"$redeemActorId\"]" \
-  --idl "$ROBO_MINER_RES_VMT_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/AvailableReserve --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/VaraUnit --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/ScrstRate --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/BcrstRate --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
-  call "$redeemProgramId" Redeem/HcrstRate --args '[]' --idl "$ROBO_MINER_REDEEM_IDL"
-```
-
-Compute payout only from this live redeem config:
-
-```text
-payout =
-  scrst * ScrstRate() * VaraUnit()
-  + bcrst * BcrstRate() * VaraUnit()
-  + hcrst * HcrstRate() * VaraUnit()
-```
-
-Do not use hard-coded redeem rates from docs, memory, earlier deployments, or
-reports. Re-query the redeem contract after a redeploy or admin rate update.
-
-If balances and reserve allow redeeming, approve the redeem contract once if
-needed:
-
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  call "$resVmtProgramId" Vmt/Approve \
-  --args "[\"$redeemActorId\"]" \
-  --idl "$ROBO_MINER_RES_VMT_IDL" \
-  --via injected
-```
-
-Then redeem:
-
-First record the owner's wallet balance and current Ethereum block. Use the
-block as the lower bound for this redeem's L1 value claim:
-
-```bash
+redeemConfig=$(curl -fsS "$ROBO_MINER_BACKEND/api/redeem/config?network=mainnet")
 wvaraBefore=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wvara balance "$ownerAddress" | jq -r '.balance')
-
-redeemStartBlock=$(curl -fsS "$ROBO_MINER_ETH_RPC" \
-  -H 'content-type: application/json' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' \
-  | jq -r '.result')
 ```
 
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  call "$redeemProgramId" Redeem/Redeem \
-  --args "[$scrst,$bcrst,$hcrst]" \
-  --idl "$ROBO_MINER_REDEEM_IDL" \
-  --via injected
-```
+Compute the expected raw payout from `redeemConfig.rates` and
+`redeemConfig.varaUnit`. Create a random `bytes32` nonce and a deadline within
+`requestTtlMs`, then sign the exact EIP-712 domain, types, primary type, and
+message specified in `references/backend-api.md`. Submit the signed intent to
+`POST /api/redeem/request?network=mainnet`.
 
-The injected reply is not the wallet payout. Do not report "paid",
-"exchanged", or "redeemed successfully" yet.
+Do not approve the Redeem program, call legacy `Redeem/Redeem`, or claim a
+Mirror mailbox message. If the available wallet cannot sign EIP-712, use the
+official frontend or stop and request an EIP-712-capable signer. Never export
+the wallet private key as a workaround.
 
-Wait for the Redeem Mirror's Ethereum
-`Message(bytes32,address,bytes,uint128)` event. Its indexed destination must be
-the owner wallet, not `diggerProgramId`:
-
-```bash
-messageTopic=0x9c4ffe7286aed9eb205c8adb12b51219122c7e56c67017f312af0e15f8011773
-ownerTopic="0x000000000000000000000000${ownerAddress#0x}"
-
-claimLog=$(curl -fsS "$ROBO_MINER_ETH_RPC" \
-  -H 'content-type: application/json' \
-  --data "$(jq -nc \
-    --arg mirror "$redeemProgramId" \
-    --arg from "$redeemStartBlock" \
-    --arg topic0 "$messageTopic" \
-    --arg owner "$ownerTopic" \
-    '{jsonrpc:"2.0",id:1,method:"eth_getLogs",params:[{address:$mirror,fromBlock:$from,toBlock:"latest",topics:[$topic0,$owner]}]}')" \
-  | jq -c '.result[-1] // empty')
-```
-
-Poll every 10 seconds for up to 10 minutes. If no matching log appears, report
-`settlement pending L1 finalization` with `redeemProgramId`, `ownerAddress`,
-`redeemStartBlock`, and the redeem reply/event ids. Do not submit a second
-redeem and do not claim that the first one failed.
-
-For this event ABI, the first 32-byte word in `data` is `claimedId`; the third
-word is the claim value:
-
-```bash
-eventData=$(printf '%s' "$claimLog" | jq -r '.data')
-claimedId="0x${eventData:2:64}"
-claimValueHex="0x${eventData:130:64}"
-```
-
-Require `claimValueHex` to equal the live payout calculated above. If multiple
-matching events exist, select by value and block/transaction timing. Never use
-the injected request message id as `claimedId` and never guess an id.
-
-Claim with the owner wallet:
-
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  vara-eth:mailbox claim "$redeemProgramId" "$claimedId"
-```
-
-Wait for a successful claim receipt, then verify the user-visible result:
+Poll `GET /api/redeem/requests/<requestId>?network=mainnet` every two seconds
+for up to five minutes. Treat `burned` and `payout_failed` as unpaid states;
+the backend scheduler can retry the WVARA transfer without a second burn.
+Complete settlement only after status `confirmed`, a non-empty
+`payoutTxHash`, and this fresh check:
 
 ```bash
 wvaraAfter=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wvara balance "$ownerAddress" | jq -r '.balance')
 ```
 
-Settlement is complete only when the claim receipt succeeded and
-`wvaraAfter - wvaraBefore` equals the expected payout. Backend projections,
-reserve reduction, `PendingRedeemCount == 0`, and a Sails `Redeemed` event are
-diagnostic evidence, not wallet-payment proof.
-
-Use cancel/confirm only for a redeem id returned by the redeem contract:
-
-```bash
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  call "$redeemProgramId" Redeem/CancelRedeem \
-  --args "[$redeemId]" \
-  --idl "$ROBO_MINER_REDEEM_IDL" \
-  --via injected
-
-vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" \
-  --account "$VARA_WALLET_ACCOUNT" \
-  --json \
-  call "$redeemProgramId" Redeem/ConfirmRedeem \
-  --args "[$redeemId]" \
-  --idl "$ROBO_MINER_REDEEM_IDL" \
-  --via injected
-```
+Require `wvaraAfter - wvaraBefore` to equal the expected raw payout.
 
 If the session ends, the agent dies, or the agent exits, record the result and
 return to match discovery. For death, include whether the cause was event-confirmed
@@ -921,8 +760,7 @@ falling stone, event-confirmed chest dynamite, or inferred from last action.
   action. If executable balance is available and the agent has banked resources,
   use the player settlement flow: `Surface -> MintResources -> Redeem`. Do not
   call world `Admin/*` methods or transfer operator funds.
-- Redeem reply received but owner balance unchanged: do not repeat
-  `Redeem/Redeem`. Poll the Redeem Mirror `Message` event, claim its
-  `claimedId` with the owner wallet through `vara-eth:mailbox claim`, and verify
-  the WVARA balance. If the L1 event has not appeared, report settlement pending
-  finalization; if claim fails, report the exact claim id and transaction error.
+- Backend redeem is `burned` or `payout_failed` but owner balance is unchanged:
+  do not submit a new intent. Poll the same request id; the scheduler retries
+  payout without a second burn. Report the request id and exact backend error if
+  it does not reach `confirmed` within the bounded wait.

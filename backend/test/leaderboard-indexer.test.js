@@ -318,11 +318,21 @@ test('resource extraction uses the contract resource kind ids 1, 2, and 3', asyn
 
   const stats = (await store.read()).agentStats[0];
   assert.deepEqual(stats.extracted, { scrst: 1, bcrst: 1, hcrst: 1 });
+  assert.equal(store.updateCalls, 1);
+});
+
+test('empty indexer batches do not start a database update', async () => {
+  const store = new MemoryStore();
+  const projector = new IndexerProjector({ store, config: CONFIG });
+
+  assert.deepEqual(await projector.applyEvents([]), []);
+  assert.equal(store.updateCalls, 0);
 });
 
 class MemoryStore {
   constructor(initial = {}) {
     this.db = normalizeDb(initial);
+    this.updateCalls = 0;
   }
 
   async read() {
@@ -330,6 +340,7 @@ class MemoryStore {
   }
 
   async update(mutator) {
+    this.updateCalls += 1;
     const db = await this.read();
     const result = await mutator(db);
     this.db = normalizeDb(db);

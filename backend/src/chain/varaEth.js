@@ -1,3 +1,61 @@
+export function createFailoverVaraEthProvider(Provider, endpoints, { requestTimeoutMs = 15_000, logger = null } = {}) {
+  const urls = [...new Set((endpoints || []).map((value) => String(value || '').trim()).filter(Boolean))];
+  if (urls.length === 0) throw new Error('At least one Vara.eth WS endpoint is required');
+  const providers = urls.map((url) => new Provider(url, {
+    autoConnect: false,
+    reconnectAttempts: 1,
+    requestTimeout: requestTimeoutMs,
+  }));
+  let activeIndex = 0;
+
+  const candidates = () => providers.map((_, offset) => {
+    const index = (activeIndex + offset) % providers.length;
+    return { provider: providers[index], index };
+  });
+
+  async function tryProviders(operation, label) {
+    let lastError = null;
+    for (const { provider, index } of candidates()) {
+      try {
+        await withTimeoutOrThrow(provider.connect(), requestTimeoutMs, `${label} connect ${urls[index]}`);
+        const result = await operation(provider);
+        if (activeIndex !== index) logger?.warn?.('rpc.failover', { from: urls[activeIndex], to: urls[index], operation: label });
+        activeIndex = index;
+        return result;
+      } catch (error) {
+        if (!isRetryableVaraRpcError(error)) throw error;
+        lastError = error;
+        logger?.warn?.('rpc.endpoint.failed', { endpoint: urls[index], operation: label, error: error.message });
+        await disconnectProvider(provider);
+      }
+    }
+    throw new Error(`${label} failed on all Vara.eth endpoints: ${lastError?.message || 'unknown error'}`);
+  }
+
+  return {
+    get isConnected() { return providers[activeIndex]?.isConnected || false; },
+    get connectionState() { return providers[activeIndex]?.connectionState || 'disconnected'; },
+    get url() { return urls[activeIndex]; },
+    connect: () => tryProviders(() => undefined, 'Vara.eth WS connect'),
+    send: (method, parameters, options) => tryProviders(
+      (provider) => provider.send(method, parameters, { ...options, timeout: options?.timeout || requestTimeoutMs }),
+      method,
+    ),
+    subscribe: (method, unsubscribeMethod, parameters, callback) => tryProviders(
+      (provider) => provider.subscribe(method, unsubscribeMethod, parameters, callback),
+      method,
+    ),
+    async disconnect() {
+      await Promise.all(providers.map((provider) => disconnectProvider(provider)));
+    },
+  };
+}
+
+function isRetryableVaraRpcError(error) {
+  const message = String(error?.message || error || '');
+  return /timed? out|timeout|websocket|connection|connect after|disconnected|closed unexpectedly|network|econn|socket|fetch failed/i.test(message);
+}
+
 export async function createVaraEthChain(config, { logger = null } = {}) {
   if (!config.adminKey) throw new Error('admin key is required for live digger rental top-up (set MAINNET_ADMIN_KEY / TESTNET_ADMIN_KEY)');
 
@@ -16,10 +74,153 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
   const publicClient = createPublicClient({ transport });
   const walletClient = createWalletClient({ account, transport });
   const signer = walletClientToSigner(walletClient);
-  const api = await createVaraEthApi(new WsVaraEthProvider(config.varaEthWs), publicClient, config.routerAddress, signer);
+  const varaProvider = createFailoverVaraEthProvider(WsVaraEthProvider, config.varaEthWsEndpoints || [config.varaEthWs], {
+    requestTimeoutMs: Number(config.varaEthRequestTimeoutMs || 15_000),
+    logger,
+  });
+  const api = await createVaraEthApi(varaProvider, publicClient, config.routerAddress, signer);
 
   return {
     account: account.address,
+    async readWvaraBalance(address) {
+      return BigInt(await api.eth.wvara.balanceOf(normalizeAddress(address, 'WVARA account')));
+    },
+    async transferWvara(address, amount, { onBroadcast = null } = {}) {
+      const recipient = normalizeAddress(address, 'WVARA recipient');
+      const value = BigInt(amount);
+      if (value <= 0n) throw new Error(`WVARA transfer amount must be positive, got ${amount}`);
+      const balance = BigInt(await api.eth.wvara.balanceOf(account.address));
+      if (balance < value) throw new Error(`Not enough treasury WVARA: need ${value}, balance ${balance}`);
+      const tx = await api.eth.wvara.transfer(recipient, value);
+      let receipt;
+      let txHash = null;
+      if (typeof tx.send === 'function' && typeof tx.getReceipt === 'function') {
+        txHash = await tx.send();
+        await onBroadcast?.(txHash);
+        receipt = await tx.getReceipt();
+      } else {
+        receipt = await sendAndWait(tx, 'WVARA transfer');
+        txHash = receipt?.transactionHash || receipt?.hash || null;
+        await onBroadcast?.(txHash);
+      }
+      return {
+        receipt,
+        txHash: receipt?.transactionHash || receipt?.hash || txHash,
+      };
+    },
+    async readTransactionReceipt(txHash) {
+      try {
+        return await publicClient.getTransactionReceipt({ hash: normalizeHex32(txHash, 'transaction hash') });
+      } catch (error) {
+        if (/not found|could not be found|unknown transaction/i.test(error?.message || '')) return null;
+        throw error;
+      }
+    },
+    async readResBalances(programId, owner) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_res_vmt' });
+      const query = sails.services.Vmt.queries.BalanceOf;
+      const actor = actorIdFromAddress(normalizeAddress(owner, 'RES owner'));
+      const [scrst, bcrst, hcrst] = await Promise.all(['0', '1', '2'].map((tokenId) => querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query,
+        args: [actor, tokenId],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      })));
+      return { scrst: BigInt(scrst), bcrst: BigInt(bcrst), hcrst: BigInt(hcrst) };
+    },
+    async readRedeemConfig(programId) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const queries = sails.services.Redeem.queries;
+      const read = (query) => querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query,
+        args: [],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      const [varaUnit, scrst, bcrst, hcrst] = await Promise.all([
+        read(queries.VaraUnit),
+        read(queries.ScrstRate),
+        read(queries.BcrstRate),
+        read(queries.HcrstRate),
+      ]);
+      return {
+        varaUnit: BigInt(varaUnit),
+        rates: { scrst: BigInt(scrst), bcrst: BigInt(bcrst), hcrst: BigInt(hcrst) },
+      };
+    },
+    async readBackendRedeemStatus(programId, requestId) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const result = await querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query: sails.services.Redeem.queries.BackendRequestStatus,
+        args: [normalizeHex32(requestId, 'redeem request id')],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      return BigInt(result);
+    },
+    async requestBackendRedeem({ programId, requestId, owner, scrst, bcrst, hcrst, timeoutMs = 180000 }) {
+      const sails = await loadSailsContract({ readFile, path, SailsProgram, SailsIdlParser, rootDir: config.rootDir, contract: 'digger_redeem' });
+      const normalizedRequestId = normalizeHex32(requestId, 'redeem request id');
+      const existing = await querySails({
+        api,
+        accountAddress: account.address,
+        programId,
+        query: sails.services.Redeem.queries.BackendRequestStatus,
+        args: [normalizedRequestId],
+        ReplyCode,
+        bytesToHex,
+        sails,
+      });
+      let txHash = null;
+      if (BigInt(existing) === 0n) {
+        const payload = sails.services.Redeem.functions.RedeemFor.encodePayload(
+          normalizedRequestId,
+          actorIdFromAddress(normalizeAddress(owner, 'redeem beneficiary')),
+          BigInt(scrst).toString(),
+          BigInt(bcrst).toString(),
+          BigInt(hcrst).toString(),
+        );
+        const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
+        const result = await sendMirrorMessageAndWaitForReceipt({
+          mirror,
+          payload,
+          value: 0n,
+          label: 'Redeem.RedeemFor',
+          logger,
+          programId,
+        });
+        txHash = result.receipt?.transactionHash || result.receipt?.hash || result.txHash || null;
+      }
+      const deadline = Date.now() + Number(timeoutMs);
+      while (Date.now() < deadline) {
+        const status = BigInt(await querySails({
+          api,
+          accountAddress: account.address,
+          programId,
+          query: sails.services.Redeem.queries.BackendRequestStatus,
+          args: [normalizedRequestId],
+          ReplyCode,
+          bytesToHex,
+          sails,
+        }));
+        if (status === 2n) return { status, txHash };
+        if (status === 3n) throw new Error(`Redeem burn was canceled for request ${normalizedRequestId}`);
+        await delay(1_000);
+      }
+      throw new Error(`Timed out waiting for RES burn confirmation for request ${normalizedRequestId}`);
+    },
     async readExecutableBalance(programId) {
       const mirror = mirrorClient(getMirrorClient, programId, publicClient, signer);
       const state = await readProgramState(api, mirror);
@@ -40,9 +241,16 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
       const topUpTx = await mirror.executableBalanceTopUp(topUp);
       return sendAndWait(topUpTx, 'executableBalanceTopUp');
     },
-    async deployDigger({ owner, worldId, codeId, initialTopUp = 0n }) {
+    async deployDigger({ owner, worldId, codeId, initialTopUp = 0n, onProgress = null }) {
       const startedAt = Date.now();
       const topUp = BigInt(initialTopUp);
+      const reportProgress = async (progress) => {
+        try {
+          await onProgress?.(progress);
+        } catch (error) {
+          logger?.error?.('deploy.progress.persist_failed', { ...progress, error: error.message });
+        }
+      };
       logger?.info?.('deploy.start', {
         owner,
         worldId,
@@ -104,7 +312,14 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         initialExecutableBalance: topUp.toString(),
         elapsedMs: Date.now() - startedAt,
       });
-      const createReceipt = await createTx.sendAndWaitForReceipt();
+      const receiptTimeoutMs = Number(config.diggerDeployReceiptTimeoutMs || 120_000);
+      const createTxHash = typeof createTx.send === 'function'
+        ? await withTimeoutOrThrow(createTx.send(), receiptTimeoutMs, 'create program broadcast')
+        : null;
+      await reportProgress({ stage: 'create_broadcast', createTxHash });
+      const createReceipt = typeof createTx.getReceipt === 'function'
+        ? await withTimeoutOrThrow(createTx.getReceipt(), receiptTimeoutMs, 'create program receipt')
+        : await withTimeoutOrThrow(createTx.sendAndWaitForReceipt(), receiptTimeoutMs, 'create program receipt');
       if (topUp > 0n) topUpReceipt = createReceipt;
       logger?.info?.('deploy.create_program.receipt', {
         txHash: createReceipt.transactionHash || createReceipt.hash || null,
@@ -113,6 +328,7 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         elapsedMs: Date.now() - startedAt,
       });
       const programId = normalizeAddress(await createTx.getProgramId(), 'ProgramCreated.actorId');
+      await reportProgress({ stage: 'create_confirmed', createTxHash: createReceipt.transactionHash || createReceipt.hash || createTxHash, programId });
       logger?.info?.('deploy.program_id.resolved', {
         programId,
         elapsedMs: Date.now() - startedAt,
@@ -153,6 +369,8 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         logger,
         programId,
         startedAt,
+        timeoutMs: receiptTimeoutMs,
+        onBroadcast: async (initTxHash) => reportProgress({ stage: 'init_broadcast', programId, initTxHash }),
       });
       logger?.info?.('deploy.wait_mirror.skipped', {
         programId,
@@ -164,7 +382,7 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
         programId,
         codeId: normalizedCodeId,
         topUp: topUp.toString(),
-        createTxHash: createReceipt.transactionHash || createReceipt.hash || null,
+        createTxHash: createReceipt.transactionHash || createReceipt.hash || createTxHash || null,
         topUpTxHash: topUpReceipt?.transactionHash || topUpReceipt?.hash || null,
         initTxHash: initResult.receipt.transactionHash || initResult.receipt.hash || initResult.txHash || null,
         createStatus: createReceipt.status,
@@ -201,6 +419,21 @@ export async function createVaraEthChain(config, { logger = null } = {}) {
       closeViemWebSocket(walletClient);
     },
   };
+}
+
+async function querySails({ api, accountAddress, programId, query, args, ReplyCode, bytesToHex, sails }) {
+  const payload = query.encodePayload(...args);
+  const response = await api.provider.send('program_calculateReplyForHandle', [
+    null,
+    accountAddress,
+    normalizeAddress(programId, 'program id'),
+    payload,
+    0n,
+  ]);
+  const reply = response.reply || response;
+  assertSuccessReply(reply.replyCode || reply.code, { ReplyCode, bytesToHex, sails, payload: reply.payload });
+  if (!reply.payload) throw new Error('program state query returned no payload');
+  return query.decodeResult(reply.payload);
 }
 
 async function disconnectProvider(provider) {
@@ -297,6 +530,8 @@ async function sendMirrorMessageAndWaitForReceipt({
   logger = null,
   programId,
   startedAt = Date.now(),
+  timeoutMs = 120_000,
+  onBroadcast = null,
 }) {
   const tx = await mirror.sendMessage(payload, value);
   logger?.info?.('deploy.init.send.start', {
@@ -306,10 +541,13 @@ async function sendMirrorMessageAndWaitForReceipt({
     elapsedMs: Date.now() - startedAt,
   });
 
-  const txHash = typeof tx.send === 'function' ? await tx.send() : null;
+  const txHash = typeof tx.send === 'function'
+    ? await withTimeoutOrThrow(tx.send(), timeoutMs, `${label} broadcast`)
+    : null;
+  await onBroadcast?.(txHash);
   const receipt = typeof tx.getReceipt === 'function'
-    ? await tx.getReceipt()
-    : await sendAndWait(tx, label);
+    ? await withTimeoutOrThrow(tx.getReceipt(), timeoutMs, `${label} receipt`)
+    : await withTimeoutOrThrow(sendAndWait(tx, label), timeoutMs, `${label} receipt`);
   const message = typeof tx.getMessage === 'function' ? await tx.getMessage() : null;
   logger?.info?.('deploy.init.receipt', {
     programId,
@@ -425,6 +663,12 @@ async function withTimeout(promise, timeoutMs, label) {
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+async function withTimeoutOrThrow(promise, timeoutMs, label) {
+  const result = await withTimeout(promise, timeoutMs, label);
+  if (result === null) throw new Error(`${label} timed out after ${Number(timeoutMs || 180000)}ms`);
+  return result;
 }
 
 function assertSuccessReply(code, { ReplyCode, bytesToHex, sails, payload } = {}) {

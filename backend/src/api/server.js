@@ -12,6 +12,7 @@ import { DiggerRegistryService } from '../modules/diggerRegistry/service.js';
 import { DiggerRentalService } from '../modules/diggerRental/service.js';
 import { InjectedIngestService } from '../modules/indexer/injectedIngest.js';
 import { LeaderboardService } from '../modules/leaderboard/service.js';
+import { RedeemPayoutService } from '../modules/redeemPayout/service.js';
 import { SocialVerifierService } from '../modules/socialVerifier/service.js';
 import { discoveryFromManifest } from '../modules/worldRegistry/discovery.js';
 import { WorldRegistryService } from '../modules/worldRegistry/service.js';
@@ -64,6 +65,16 @@ function bundleFor(networkParam) {
   const network = KNOWN_NETWORKS.includes(requested) ? requested : DEFAULT_NETWORK;
   let bundle = bundleCache.get(network);
   if (!bundle) {
+    const networkPrefix = network.toUpperCase();
+    const economyEnv = network === DEFAULT_NETWORK
+      ? {
+          DIGGER_RES_VMT_PROGRAM_ID: process.env.DIGGER_RES_VMT_PROGRAM_ID || process.env.RES_VMT_PROGRAM_ID || '',
+          DIGGER_REDEEM_PROGRAM_ID: process.env.DIGGER_REDEEM_PROGRAM_ID || process.env.REDEEM_PROGRAM_ID || '',
+        }
+      : {
+          DIGGER_RES_VMT_PROGRAM_ID: process.env[`${networkPrefix}_DIGGER_RES_VMT_PROGRAM_ID`] || '',
+          DIGGER_REDEEM_PROGRAM_ID: process.env[`${networkPrefix}_DIGGER_REDEEM_PROGRAM_ID`] || '',
+        };
     // Clear every env value that pins a network identity so the chosen network's
     // profile wins (env holds only the process-default network's). Endpoints come
     // from the profile; world/proxy program ids must NOT leak across networks
@@ -82,6 +93,9 @@ function bundleFor(networkParam) {
       DIGGER_PROGRAM_IDS: '',
       DIGGER_PROXY_PROGRAM_IDS: '',
       DIGGER_PROXY_PROGRAM_ID: '',
+      RES_VMT_PROGRAM_ID: '',
+      REDEEM_PROGRAM_ID: '',
+      ...economyEnv,
     });
     const netStore = createStore(netConfig);
     bundle = {
@@ -91,6 +105,12 @@ function bundleFor(networkParam) {
       registry: new WorldRegistryService({ store: netStore, config: netConfig }),
       diggerRegistry: new DiggerRegistryService({ store: netStore, config: netConfig }),
       leaderboardService: new LeaderboardService({ store: netStore, config: netConfig }),
+      redeemPayoutService: new RedeemPayoutService({
+        store: netStore,
+        config: netConfig,
+        chainFactory: () => createVaraEthChain({ ...netConfig, adminKey: netConfig.redeemTreasuryKey }, { logger: createLogger(`redeem-chain:${network}`) }),
+        logger: createLogger(`redeem:${network}`),
+      }),
       adminService: new AdminService({
         store: netStore,
         config: netConfig,
@@ -127,6 +147,7 @@ const server = http.createServer(async (req, res) => {
     const registry = net.registry;
     const diggerRegistry = net.diggerRegistry;
     const leaderboardService = net.leaderboardService;
+    const redeemPayoutService = net.redeemPayoutService;
     const adminService = net.adminService;
     if (url.pathname.startsWith('/api/admin/') && !authorizedAdmin(req)) {
       logger.warn('admin.unauthorized', { method: req.method, path: url.pathname });
@@ -152,6 +173,27 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/season/current') {
       return json(res, 200, await registry.getCurrentSeason());
+    }
+    if (req.method === 'GET' && url.pathname === '/api/redeem/config') {
+      return json(res, 200, redeemPayoutService.publicConfig());
+    }
+    if (req.method === 'POST' && url.pathname === '/api/redeem/request') {
+      const record = await redeemPayoutService.submit(await readJsonBody(req));
+      runRedeemInBackground(redeemPayoutService, record.requestId);
+      return json(res, record.status === 'confirmed' ? 200 : 202, record);
+    }
+    if (req.method === 'GET' && url.pathname === '/api/redeem/requests') {
+      return json(res, 200, {
+        requests: await redeemPayoutService.list({
+          owner: url.searchParams.get('owner') || null,
+          limit: limitParam(url, 200, 50),
+        }),
+      });
+    }
+    if (req.method === 'GET' && url.pathname.startsWith('/api/redeem/requests/')) {
+      const requestId = decodeURIComponent(url.pathname.slice('/api/redeem/requests/'.length));
+      const record = await redeemPayoutService.get(requestId);
+      return record ? json(res, 200, record) : json(res, 404, { error: 'redeem_request_not_found' });
     }
     if (req.method === 'GET' && url.pathname === '/api/worlds/live') {
       return json(res, 200, { worlds: await registry.getLiveWorlds() });
@@ -387,6 +429,16 @@ function runDiggerDeployInBackground(requestId) {
       });
     } finally {
       await chain?.disconnect?.();
+    }
+  });
+}
+
+function runRedeemInBackground(service, requestId) {
+  setImmediate(async () => {
+    try {
+      await service.processRequest(requestId);
+    } catch (error) {
+      logger.error('redeem.request.background.failed', { requestId, ...errorFields(error) });
     }
   });
 }

@@ -1,0 +1,31 @@
+{
+  "deployedAt": "2026-07-15T09:45:29.101Z",
+  "account": "0x766270Abf5DDe72D374b3120c8AEdc651Ee3f184",
+  "resVmt": {
+    "programId": "0xa359f125d51684bab99b62e143abdd2ff925120b",
+    "actorId": "0x000000000000000000000000a359f125d51684bab99b62e143abdd2ff925120b",
+    "codeId": "0x630055bb8b164c2b62cb5a1e5af1b2a83f4b12041b61375ffffe3f5799327aef",
+    "initialMinter": "0x766270Abf5DDe72D374b3120c8AEdc651Ee3f184",
+    "initialMinterActor": "0x000000000000000000000000766270Abf5DDe72D374b3120c8AEdc651Ee3f184",
+    "extraMinters": [],
+    "extraMinterActors": [],
+    "redeemContract": "0xc280544e0fec27c904b90368bc95abbcdb508e64",
+    "redeemContractActor": "0x000000000000000000000000c280544e0fec27c904b90368bc95abbcdb508e64"
+  },
+  "redeem": {
+    "programId": "0xc280544e0fec27c904b90368bc95abbcdb508e64",
+    "actorId": "0x000000000000000000000000c280544e0fec27c904b90368bc95abbcdb508e64",
+    "codeId": "0x1feb26a3b24fbb444941c5e481be2d2ae62a85e902903a2011ae3a841ff3975d",
+    "resContract": "0xa359f125d51684bab99b62e143abdd2ff925120b",
+    "resContractActor": "0x000000000000000000000000a359f125d51684bab99b62e143abdd2ff925120b",
+    "varaUnit": "1000000000000",
+    "rates": {
+      "scrst": "6",
+      "bcrst": "30",
+      "hcrst": "150"
+    },
+    "reserveTopUp": "0",
+    "backendRedeemer": "0x766270Abf5DDe72D374b3120c8AEdc651Ee3f184"
+  },
+  "smoke": false
+}

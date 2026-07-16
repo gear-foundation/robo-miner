@@ -201,4 +201,4 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 
 If balances unexpectedly appear under `agentActorId`, query both `ownerActorId`
 and `agentActorId` with `vara-wallet` and stop before redeeming. The deployed
-proxy is not the wallet signer for `Vmt/Approve` or `Redeem/Redeem`.
+proxy is not the EIP-712 signer for a backend redeem intent; the owner wallet is.

@@ -302,9 +302,9 @@ Drill adjacent/current resource tile
   -> optionally TradeResourcesForLadders(scrst,bcrst,hcrst) from y=0 only
   -> MintResources()
   -> RES VMT balance increases for owner ActorId
-  -> Redeem.Redeem(scrst, bcrst, hcrst)
-  -> wait for Redeem Mirror L1 Message value claim
-  -> owner wallet claims claimedId from the mailbox
+  -> sign and submit backend redeem intent
+  -> backend RedeemFor burns RES, then treasury transfers ERC-20 WVARA
+  -> wait for backend request status confirmed
   -> verify owner WVARA balance increased
 ```
 
@@ -314,22 +314,17 @@ require `Admin/*` methods.
 
 Before redeeming:
 
-1. Query VMT token ids, owner balances, and approval with `vara-wallet`.
-2. Query redeem reserve and rates with `vara-wallet`.
-3. Call `Vmt/Approve(redeemActorId)` with `vara-wallet --via injected` if the
-   redeem contract is not approved.
-4. Call `Redeem/Redeem(scrst,bcrst,hcrst)` with `vara-wallet --via injected`
-   only for amounts the owner actually holds and the reserve can cover.
-5. Treat the redeem reply as pending settlement, not a wallet payout.
-6. Wait for the Ethereum `Message` event addressed to `ownerAddress`, extract
-   its `id`, and claim it with `vara-eth:mailbox claim` using the owner wallet.
-7. Report success only after both the claim receipt and owner WVARA balance
-   increase are verified. A reduced reserve or Sails `Redeemed` event is not
-   sufficient.
+1. Query VMT token ids and owner balances with `vara-wallet`.
+2. Read rates, unit, contract ids, and EIP-712 schema from
+   `GET /api/redeem/config`.
+3. Sign and submit the backend intent described in `backend-api.md` only for
+   amounts the owner holds.
+4. Poll the same request id through `burning`, `burned`, and `paying`.
+5. Report success only after backend `confirmed`, a payout transaction hash,
+   and a matching owner WVARA balance increase.
 
-Rates are deployment configuration, not skill constants. Read
-`Redeem.ScrstRate()`, `Redeem.BcrstRate()`, `Redeem.HcrstRate()`, and
-`Redeem.VaraUnit()` from the current redeem contract before estimating payout.
+Rates are deployment configuration, not skill constants. Read them from the
+current backend redeem config before estimating payout.
 
 ## Multiplayer Awareness
 

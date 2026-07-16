@@ -24,5 +24,9 @@ export function createDocumentStore(config) {
   return new PostgresDocumentStore({
     connectionString: config.databaseUrl,
     schema: config.databaseSchema,
+    connectionTimeoutMs: config.databaseConnectionTimeoutMs,
+    queryTimeoutMs: config.databaseQueryTimeoutMs,
+    updateMaxAttempts: config.databaseUpdateMaxAttempts,
+    updateRetryBaseMs: config.databaseUpdateRetryBaseMs,
   });
 }

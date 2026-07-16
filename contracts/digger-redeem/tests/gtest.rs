@@ -2,7 +2,8 @@ use ::digger_redeem_client::{
     DiggerRedeemClient as _, DiggerRedeemClientCtors as _, admin::Admin as _, redeem::Redeem as _,
 };
 use ::digger_res_vmt_client::{
-    DiggerResVmtClient as _, DiggerResVmtClientCtors as _, vmt::Vmt as _,
+    DiggerResVmtClient as _, DiggerResVmtClientCtors as _, admin::Admin as ResAdmin,
+    vmt::Vmt as _,
 };
 use sails_rs::futures::StreamExt;
 use sails_rs::{client::*, gtest::*, prelude::*};
@@ -26,6 +27,7 @@ const SCRST_ID: u128 = 0;
 const BCRST_ID: u128 = 1;
 const HCRST_ID: u128 = 2;
 const TEST_ACCOUNT_BALANCE: u128 = 100_000 * VARA_UNIT;
+const BACKEND_REQUEST_ID: [u8; 32] = [7; 32];
 
 #[tokio::test]
 async fn redeem_burns_res_in_vmt_before_paying_vara() {
@@ -108,6 +110,320 @@ async fn redeem_burns_res_in_vmt_before_paying_vara() {
     assert_eq!(locked_after_payout, Ok(0));
 
     drop(env);
+}
+
+#[tokio::test]
+async fn backend_redeemer_burns_res_without_native_payout() {
+    let (_env, redeem, res) = deploy_pair("backend-redeem-flow").await;
+    let mut vmt = res.vmt();
+    let mint_result: sails_rs::Result<(), sails_rs::String> = vmt
+        .mint_resources(PLAYER_ID.into(), SCRST, BCRST, HCRST)
+        .with_actor_id(MINTER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(mint_result, Ok(()));
+
+    let mut redeem_service = redeem.redeem();
+    let mut redeem_events = redeem_service.listen().await.unwrap();
+    let redeem_id: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(
+            BACKEND_REQUEST_ID,
+            PLAYER_ID.into(),
+            SCRST,
+            BCRST,
+            HCRST,
+        )
+        .await
+        .unwrap();
+    assert_eq!(redeem_id, Ok(1));
+    assert_eq!(
+        redeem_events.next().await.unwrap(),
+        (
+            redeem.id(),
+            ::digger_redeem_client::redeem::events::RedeemEvents::BackendRedeemRequested(
+                BACKEND_REQUEST_ID,
+                1,
+                actor_bytes(PLAYER_ID),
+                SCRST,
+                BCRST,
+                HCRST,
+                EXPECTED_PAYOUT,
+            )
+        )
+    );
+    assert_eq!(
+        redeem_events.next().await.unwrap(),
+        (
+            redeem.id(),
+            ::digger_redeem_client::redeem::events::RedeemEvents::BackendRedeemConfirmed(
+                BACKEND_REQUEST_ID,
+                1,
+                actor_bytes(PLAYER_ID),
+                SCRST,
+                BCRST,
+                HCRST,
+                EXPECTED_PAYOUT,
+            )
+        )
+    );
+
+    let status: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .backend_request_status(BACKEND_REQUEST_ID)
+        .await
+        .unwrap();
+    let total_paid: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_paid().await.unwrap();
+    let player_scrst: sails_rs::Result<u128, sails_rs::String> =
+        vmt.balance_of(PLAYER_ID.into(), SCRST_ID).await.unwrap();
+    let player_bcrst: sails_rs::Result<u128, sails_rs::String> =
+        vmt.balance_of(PLAYER_ID.into(), BCRST_ID).await.unwrap();
+    let player_hcrst: sails_rs::Result<u128, sails_rs::String> =
+        vmt.balance_of(PLAYER_ID.into(), HCRST_ID).await.unwrap();
+
+    assert_eq!(status, Ok(2));
+    assert_eq!(total_paid, Ok(0));
+    assert_eq!(player_scrst, Ok(0));
+    assert_eq!(player_bcrst, Ok(0));
+    assert_eq!(player_hcrst, Ok(0));
+
+    let duplicate: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        duplicate,
+        Err("backend redeem request already exists".into())
+    );
+}
+
+#[tokio::test]
+async fn backend_redeem_rejects_unauthorized_caller() {
+    let (_env, redeem, _res) = deploy_pair("backend-redeem-guard").await;
+    let mut redeem_service = redeem.redeem();
+    let result: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), 1, 0, 0)
+        .with_actor_id(OTHER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(result, Err("caller is not backend redeemer".into()));
+}
+
+#[tokio::test]
+async fn backend_redeemer_role_can_be_granted_used_and_revoked() {
+    let (_env, redeem, res) = deploy_pair("backend-role-lifecycle").await;
+    let mut admin = redeem.admin();
+    let initial: sails_rs::Result<Vec<ActorId>, sails_rs::String> =
+        admin.backend_redeemers().await.unwrap();
+    assert_eq!(initial, Ok(vec![ADMIN_ID.into()]));
+
+    let unauthorized: sails_rs::Result<bool, sails_rs::String> = admin
+        .set_backend_redeemer(OTHER_ID.into(), true)
+        .with_actor_id(PLAYER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(unauthorized, Err("caller is not admin".into()));
+    let zero: sails_rs::Result<bool, sails_rs::String> = admin
+        .set_backend_redeemer(ActorId::zero(), true)
+        .await
+        .unwrap();
+    assert_eq!(zero, Err("backend redeemer cannot be zero address".into()));
+    let granted: sails_rs::Result<bool, sails_rs::String> = admin
+        .set_backend_redeemer(OTHER_ID.into(), true)
+        .await
+        .unwrap();
+    assert_eq!(granted, Ok(true));
+    let granted_twice: sails_rs::Result<bool, sails_rs::String> = admin
+        .set_backend_redeemer(OTHER_ID.into(), true)
+        .await
+        .unwrap();
+    assert_eq!(granted_twice, Ok(false));
+
+    let mut vmt = res.vmt();
+    let minted: sails_rs::Result<(), sails_rs::String> = vmt
+        .mint_resources(PLAYER_ID.into(), 1, 0, 0)
+        .with_actor_id(MINTER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(minted, Ok(()));
+    let mut redeem_service = redeem.redeem();
+    let by_new_backend: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([8; 32], PLAYER_ID.into(), 1, 0, 0)
+        .with_actor_id(OTHER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(by_new_backend, Ok(1));
+
+    let revoked: sails_rs::Result<bool, sails_rs::String> = admin
+        .set_backend_redeemer(ADMIN_ID.into(), false)
+        .await
+        .unwrap();
+    assert_eq!(revoked, Ok(true));
+    let admin_still_admin: sails_rs::Result<bool, sails_rs::String> =
+        admin.is_admin(ADMIN_ID.into()).await.unwrap();
+    assert_eq!(admin_still_admin, Ok(true));
+    let backend_revoked: sails_rs::Result<bool, sails_rs::String> =
+        admin.is_backend_redeemer(ADMIN_ID.into()).await.unwrap();
+    assert_eq!(backend_revoked, Ok(false));
+    let rejected_after_revoke: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([9; 32], PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(rejected_after_revoke, Err("caller is not backend redeemer".into()));
+}
+
+#[tokio::test]
+async fn backend_redeem_validates_request_beneficiary_amounts_pause_and_overflow() {
+    let (_env, redeem, _res) = deploy_pair("backend-input-guards").await;
+    let mut redeem_service = redeem.redeem();
+
+    let zero_request: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([0; 32], PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(zero_request, Err("backend request id cannot be zero".into()));
+    let zero_beneficiary: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([1; 32], ActorId::zero(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(zero_beneficiary, Err("beneficiary cannot be zero address".into()));
+    let empty: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([2; 32], PLAYER_ID.into(), 0, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(empty, Err("at least one RES amount must be greater than zero".into()));
+    let overflow: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([3; 32], PLAYER_ID.into(), u128::MAX, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(overflow, Err("SCRST payout overflow".into()));
+
+    let mut admin = redeem.admin();
+    let paused: sails_rs::Result<(), sails_rs::String> = admin.pause().await.unwrap();
+    assert_eq!(paused, Ok(()));
+    let while_paused: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for([4; 32], PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(while_paused, Err("redeem is paused".into()));
+
+    for request_id in [[0; 32], [1; 32], [2; 32], [3; 32], [4; 32]] {
+        let status: sails_rs::Result<u128, sails_rs::String> = redeem_service
+            .backend_request_status(request_id)
+            .await
+            .unwrap();
+        assert_eq!(status, Ok(0));
+    }
+    let pending: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.pending_redeem_count().await.unwrap();
+    assert_eq!(pending, Ok(0));
+}
+
+#[tokio::test]
+async fn backend_redeem_cancels_when_owner_has_insufficient_res_and_cannot_reuse_id() {
+    let (_env, redeem, res) = deploy_pair("backend-insufficient-res").await;
+    let mut vmt = res.vmt();
+    let minted: sails_rs::Result<(), sails_rs::String> = vmt
+        .mint_resources(PLAYER_ID.into(), 1, 0, 0)
+        .with_actor_id(MINTER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(minted, Ok(()));
+
+    let mut redeem_service = redeem.redeem();
+    let accepted: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), 2, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(accepted, Ok(1));
+    let status: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .backend_request_status(BACKEND_REQUEST_ID)
+        .await
+        .unwrap();
+    assert_eq!(status, Ok(3));
+    let pending: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.pending_redeem_count().await.unwrap();
+    assert_eq!(pending, Ok(0));
+    let player_balance: sails_rs::Result<u128, sails_rs::String> =
+        vmt.balance_of(PLAYER_ID.into(), SCRST_ID).await.unwrap();
+    assert_eq!(player_balance, Ok(1));
+    let duplicate: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(duplicate, Err("backend redeem request already exists".into()));
+}
+
+#[tokio::test]
+async fn backend_redeem_cancels_cleanly_when_vmt_is_paused() {
+    let (_env, redeem, res) = deploy_pair("backend-paused-vmt").await;
+    let mut vmt = res.vmt();
+    let minted: sails_rs::Result<(), sails_rs::String> = vmt
+        .mint_resources(PLAYER_ID.into(), 1, 0, 0)
+        .with_actor_id(MINTER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(minted, Ok(()));
+    let mut vmt_admin = res.admin();
+    let paused: sails_rs::Result<(), sails_rs::String> = vmt_admin.pause().await.unwrap();
+    assert_eq!(paused, Ok(()));
+
+    let mut redeem_service = redeem.redeem();
+    let accepted: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), 1, 0, 0)
+        .await
+        .unwrap();
+    assert_eq!(accepted, Ok(1));
+    let status: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .backend_request_status(BACKEND_REQUEST_ID)
+        .await
+        .unwrap();
+    assert_eq!(status, Ok(3));
+    let balance: sails_rs::Result<u128, sails_rs::String> =
+        vmt.balance_of(PLAYER_ID.into(), SCRST_ID).await.unwrap();
+    assert_eq!(balance, Ok(1));
+}
+
+#[tokio::test]
+async fn backend_redeem_never_mutates_native_reserve_or_total_paid() {
+    let (_env, redeem, res) = deploy_pair("backend-native-accounting").await;
+    let mut redeem_service = redeem.redeem();
+    let deposited: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .deposit_reserve()
+        .with_value(RESERVE_VALUE)
+        .await
+        .unwrap();
+    assert_eq!(deposited, Ok(RESERVE_VALUE));
+    let mut vmt = res.vmt();
+    let minted: sails_rs::Result<(), sails_rs::String> = vmt
+        .mint_resources(PLAYER_ID.into(), SCRST, BCRST, HCRST)
+        .with_actor_id(MINTER_ID.into())
+        .await
+        .unwrap();
+    assert_eq!(minted, Ok(()));
+
+    let accepted: sails_rs::Result<u128, sails_rs::String> = redeem_service
+        .redeem_for(BACKEND_REQUEST_ID, PLAYER_ID.into(), SCRST, BCRST, HCRST)
+        .await
+        .unwrap();
+    assert_eq!(accepted, Ok(1));
+    let reserve: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.reserve_balance().await.unwrap();
+    let locked: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.locked_balance().await.unwrap();
+    let total_paid: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_paid().await.unwrap();
+    let total_scrst: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_redeemed_scrst().await.unwrap();
+    let total_bcrst: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_redeemed_bcrst().await.unwrap();
+    let total_hcrst: sails_rs::Result<u128, sails_rs::String> =
+        redeem_service.total_redeemed_hcrst().await.unwrap();
+    assert_eq!(reserve, Ok(RESERVE_VALUE));
+    assert_eq!(locked, Ok(0));
+    assert_eq!(total_paid, Ok(0));
+    assert_eq!(total_scrst, Ok(SCRST));
+    assert_eq!(total_bcrst, Ok(BCRST));
+    assert_eq!(total_hcrst, Ok(HCRST));
 }
 
 #[tokio::test]

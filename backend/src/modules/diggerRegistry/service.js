@@ -41,14 +41,16 @@ export class DiggerRegistryService {
         status: status || existing?.status || 'active',
         source,
         targetExecBalance: existing?.targetExecBalance || targetExecBalance,
-        executableBalance: existing?.executableBalance || '0',
-        executableBalanceObservedAt: existing?.executableBalanceObservedAt || null,
         lastRefuelAt: existing?.lastRefuelAt || null,
         createdAt: existing?.createdAt || now,
         updatedAt: now,
       };
 
-      if (existing) Object.assign(existing, next);
+      if (existing) {
+        Object.assign(existing, next);
+        delete existing.executableBalance;
+        delete existing.executableBalanceObservedAt;
+      }
       else db.diggers.push(next);
 
       return next;
@@ -79,12 +81,12 @@ export class DiggerRegistryService {
 
 function publicDigger(digger) {
   const named = withAgentName(digger);
-  const { executableBalance, executableBalanceObservedAt, ...publicFields } = named;
-  return {
-    ...publicFields,
-    lastObservedExecutableBalance: executableBalanceObservedAt ? executableBalance : null,
-    lastObservedExecutableBalanceAt: executableBalanceObservedAt || null,
-  };
+  const {
+    executableBalance: _legacyExecutableBalance,
+    executableBalanceObservedAt: _legacyExecutableBalanceObservedAt,
+    ...publicFields
+  } = named;
+  return publicFields;
 }
 
 export function normalizeAddress(address) {

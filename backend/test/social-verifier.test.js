@@ -50,6 +50,8 @@ test('social repost verifier creates a dry-run fuel grant for owner digger', asy
   assert.equal(db.fuelGrants[0].type, 'social-x');
   assert.equal(db.fuelGrants[0].programId, DIGGER);
   assert.equal(db.fuelGrants[0].amount, (60n * VARA).toString());
+  assert.equal(db.fuelGrants[0].balanceBefore, null);
+  assert.equal(Object.hasOwn(db.diggers[0], 'executableBalance'), false);
 });
 
 test('social verifier rejects duplicate weekly wallet task', async () => {
@@ -82,7 +84,8 @@ test('social verifier rejects duplicate weekly wallet task', async () => {
 });
 
 test('social verifier live mode tops up executable balance through chain client', async () => {
-  const store = new MemoryStore(seedDigger({ executableBalance: '1000' }));
+  const observedBalance = 33n * VARA;
+  const store = new MemoryStore(seedDigger({ executableBalance: '120000000000000' }));
   const calls = [];
   const service = new SocialVerifierService({
     store,
@@ -90,8 +93,12 @@ test('social verifier live mode tops up executable balance through chain client'
     xVerifier: new FakeXVerifier('timurmedov'),
     now: fixedNow,
     chainFactory: async () => ({
+      async readExecutableBalance(programId) {
+        calls.push({ type: 'read', programId });
+        return observedBalance;
+      },
       async topUpExecutableBalance(programId, amount) {
-        calls.push({ programId, amount });
+        calls.push({ type: 'top-up', programId, amount });
         return { transactionHash: '0xtx', status: 'success' };
       },
       async disconnect() {},
@@ -106,10 +113,14 @@ test('social verifier live mode tops up executable balance through chain client'
   });
 
   assert.equal(result.status, 'confirmed');
-  assert.deepEqual(calls, [{ programId: DIGGER, amount: 120n * VARA }]);
+  assert.deepEqual(calls, [
+    { type: 'read', programId: DIGGER },
+    { type: 'top-up', programId: DIGGER, amount: 120n * VARA },
+  ]);
 
   const db = await store.read();
-  assert.equal(db.diggers[0].executableBalance, '1000');
+  assert.equal(Object.hasOwn(db.diggers[0], 'executableBalance'), false);
+  assert.equal(db.fuelGrants[0].balanceBefore, observedBalance.toString());
   assert.equal(db.fuelGrants[0].txHash, '0xtx');
 });
 

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { CHAIN, redeemReady } from '../chain/config.js';
-import { RESOURCES, RedeemClient, formatVara, payoutFor } from '../chain/redeem.js';
+import { RESOURCES, RedeemClient, payoutFor } from '../chain/redeem.js';
 import { connectWallet as connectBrowserWallet, startWalletDiscovery, subscribeWallet } from '../chain/wallet.js';
 import { btnCss, wireBtn } from './arenaUI.js';
 import { navigateBack } from '../router.js';
@@ -49,8 +49,9 @@ export default class RedeemScene extends Phaser.Scene {
     title.style.cssText = 'text-align:center;margin:8px 0 22px';
     title.innerHTML = `
       <div style="font-size:42px;font-weight:bold;color:#ffdd55;text-shadow:3px 3px 0 #000">RES REDEEM</div>
-      <div style="margin-top:4px;font-size:16px;color:#fff;text-shadow:2px 2px 0 #000">SCRST × 6 · BCRST × 30 · HCRST × 150</div>
+      <div id="redeem-rates" style="margin-top:4px;font-size:16px;color:#fff;text-shadow:2px 2px 0 #000">Loading live rates…</div>
     `;
+    this.ratesEl = title.querySelector('#redeem-rates');
     root.appendChild(title);
 
     const panel = document.createElement('main');
@@ -120,7 +121,7 @@ export default class RedeemScene extends Phaser.Scene {
     quote.style.cssText = 'flex:1 1 280px;border:3px solid #000;background:#261a0f;border-radius:8px;padding:12px;min-height:72px';
     quote.innerHTML = `
       <div style="font-size:13px;color:#cdd3da;font-weight:bold">PAYOUT</div>
-      <div id="redeem-payout" style="font-size:30px;color:#7CFFB0;font-weight:bold;margin-top:6px">0 VARA</div>
+      <div id="redeem-payout" style="font-size:30px;color:#7CFFB0;font-weight:bold;margin-top:6px">0 WVARA</div>
     `;
     this.payoutEl = quote.querySelector('#redeem-payout');
     const submit = wireBtn(document.createElement('button'));
@@ -188,7 +189,7 @@ export default class RedeemScene extends Phaser.Scene {
       const validation = this.validateForm();
       if (validation) throw new Error(validation);
       const result = await this.client.redeem(this.amounts);
-      this.status = `Redeem sent: ${shortHash(result.txHash || result.messageId || '')}`;
+      this.status = `WVARA paid: ${shortHash(result.payoutTxHash || result.requestId || '')}`;
       await this.refresh();
     }, (error) => {
       const msg = error?.message || String(error);
@@ -224,8 +225,6 @@ export default class RedeemScene extends Phaser.Scene {
     for (const res of RESOURCES) {
       if (amounts[res.key] > (this.state.balances[res.key] || 0n)) return `Not enough ${res.label}.`;
     }
-    const quote = payoutFor(amounts, this.state.rates, this.state.varaUnit);
-    if (quote.raw > this.state.reserve) return 'Reserve is not enough for this redeem.';
     return null;
   }
 
@@ -247,13 +246,16 @@ export default class RedeemScene extends Phaser.Scene {
       if (this.balanceEls[res.key]) this.balanceEls[res.key].textContent = String(balances[res.key] || 0n);
     }
 
-    let quote = { raw: 0n, display: '0 VARA' };
+    let quote = { raw: 0n, display: '0 WVARA' };
     try {
       quote = this.state ? payoutFor(this.readAmounts(), this.state.rates, this.state.varaUnit) : quote;
     } catch {
-      quote = { raw: 0n, display: '0 VARA' };
+      quote = { raw: 0n, display: '0 WVARA' };
     }
     this.payoutEl.textContent = quote.display;
+    this.ratesEl.textContent = this.state
+      ? `SCRST × ${this.state.rates.scrst} · BCRST × ${this.state.rates.bcrst} · HCRST × ${this.state.rates.hcrst}`
+      : 'Live rates load after wallet connection';
 
     const validation = this.validateForm();
     this.submitBtn.disabled = this.busy || Boolean(validation);

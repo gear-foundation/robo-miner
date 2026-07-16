@@ -4,7 +4,15 @@
 
 Program **digger-redeem** for the Digger Vara.eth campaign, written in [Sails](https://github.com/gear-tech/sails) with the `ethexe` feature enabled.
 
-This contract is the VARA redeem reserve and the player-facing exchange entrypoint. RES balances live in the separate `digger-res-vmt` VMT contract.
+This contract coordinates RES burns. RES balances live in the separate
+`digger-res-vmt` VMT contract. The current production path is backend-mediated:
+an owner signs an EIP-712 intent, an authorized backend calls
+`redeem_for(request_id, beneficiary, amounts)`, and the backend transfers ERC-20
+WVARA after the contract confirms the burn.
+
+`redeem(scrst,bcrst,hcrst)` and its native-value reserve remain for legacy
+deployment compatibility. They send native Vara.eth value, not ERC-20 WVARA,
+and must not be used by the new frontend or backend payout flow.
 
 - redeem rate config is required constructor configuration: `vara_unit`, `scrst_rate`, `bcrst_rate`, `hcrst_rate`;
 - `vara_unit` is the number of minimal units in `1` display VARA. On Vara.eth this is normally `1_000_000_000_000`;
@@ -14,9 +22,14 @@ This contract is the VARA redeem reserve and the player-facing exchange entrypoi
 - `redeem.redeem(scrst, bcrst, hcrst)`, called by the player with the RES amount they want to exchange;
 - an internal pending redemption flow: `digger-redeem` locks reserve, asks `digger-res-vmt.vmt.burn_for_redeem` to burn RES VMT balances, then pays only after `confirm_redeem`;
 - `confirm_redeem` and `cancel_redeem`, callable only by the configured RES contract;
+- `redeem_for`, callable only by an enabled backend redeemer, with a unique
+  32-byte request id and no native reserve mutation or native payout;
+- `backend_request_status(request_id)`: `0` unknown, `1` pending, `2` burn
+  confirmed, `3` canceled;
+- `set_backend_redeemer(account, enabled)`, callable by an admin;
 - admin controls for pause/unpause, rate updates, RES contract updates, reserve withdrawal, and manual stuck-pending recovery.
 
-The user-facing flow is:
+The legacy direct flow is:
 
 1. The admin deploys `digger-redeem`, then deploys `digger-res-vmt`.
 2. The admin sets `digger-redeem.admin.set_res_contract(digger_res_vmt_program_id)`.
@@ -31,7 +44,9 @@ The user-facing flow is:
 
 - `admin`: deployer/controller that can configure the RES contract, update rates, pause/unpause, and withdraw unlocked reserve.
 - `res_contract`: the only actor allowed to call `confirm_redeem` and `cancel_redeem`.
-- `player`: calls `redeem(scrst, bcrst, hcrst)` to exchange already banked RES for VARA.
+- `backend_redeemer`: calls `redeem_for` for an owner-signed request; the
+  backend separately pays ERC-20 WVARA.
+- `player`: legacy-only caller of `redeem(scrst, bcrst, hcrst)`.
 
 ### Rates And Reserve
 
@@ -161,6 +176,13 @@ The redeem service emits:
 - `RedeemRequested(redeem_id, player, scrst, bcrst, hcrst, payout)`;
 - `Redeemed(player, scrst, bcrst, hcrst, payout)`;
 - `RedeemCanceled(redeem_id, player, scrst, bcrst, hcrst, payout)`.
+- `BackendRedeemRequested(request_id, redeem_id, player, scrst, bcrst, hcrst, payout)`;
+- `BackendRedeemConfirmed(request_id, redeem_id, player, scrst, bcrst, hcrst, payout)`;
+- `BackendRedeemCanceled(request_id, redeem_id, player, scrst, bcrst, hcrst, payout)`.
+
+Backend request ids are never reusable, including after cancellation. This is
+intentional replay protection. A paused VMT rejects the burn and calls back
+`cancel_redeem`, so the request reaches status `3` instead of remaining pending.
 
 The program workspace includes the following packages:
 - `digger-redeem` is the package allowing to build WASM binary for the program and IDL file for it.

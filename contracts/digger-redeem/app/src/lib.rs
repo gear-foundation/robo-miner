@@ -21,6 +21,7 @@ impl Rates {
 
 pub struct RedeemState {
     admins: BTreeMap<ActorId, bool>,
+    backend_redeemers: BTreeMap<ActorId, bool>,
     res_contract: ActorId,
     vara_unit: u128,
     rates: Rates,
@@ -32,16 +33,19 @@ pub struct RedeemState {
     total_redeemed_hcrst: u128,
     next_redeem_id: u128,
     pending_redemptions: BTreeMap<u128, PendingRedeem>,
+    backend_request_statuses: BTreeMap<[u8; 32], u128>,
     paused: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct PendingRedeem {
+    backend_request_id: Option<[u8; 32]>,
     beneficiary: ActorId,
     scrst: u128,
     bcrst: u128,
     hcrst: u128,
     payout: u128,
+    uses_reserve: bool,
 }
 
 impl RedeemState {
@@ -53,9 +57,12 @@ impl RedeemState {
     ) -> Self {
         let mut admins = BTreeMap::new();
         admins.insert(admin, true);
+        let mut backend_redeemers = BTreeMap::new();
+        backend_redeemers.insert(admin, true);
 
         Self {
             admins,
+            backend_redeemers,
             res_contract,
             vara_unit,
             rates,
@@ -67,6 +74,7 @@ impl RedeemState {
             total_redeemed_hcrst: 0,
             next_redeem_id: 1,
             pending_redemptions: BTreeMap::new(),
+            backend_request_statuses: BTreeMap::new(),
             paused: false,
         }
     }
@@ -102,6 +110,19 @@ fn active_admins(admins: &BTreeMap<ActorId, bool>) -> Vec<ActorId> {
 fn ensure_res_contract(state: &RedeemState, caller: ActorId) -> Result<(), String> {
     if state.res_contract != caller {
         return Err("caller is not RES contract".into());
+    }
+
+    Ok(())
+}
+
+fn ensure_backend_redeemer(state: &RedeemState, caller: ActorId) -> Result<(), String> {
+    if !state
+        .backend_redeemers
+        .get(&caller)
+        .copied()
+        .unwrap_or(false)
+    {
+        return Err("caller is not backend redeemer".into());
     }
 
     Ok(())
@@ -216,6 +237,9 @@ pub enum RedeemEvents {
     Redeemed([u8; 32], u128, u128, u128, u128),
     RedeemRequested(u128, [u8; 32], u128, u128, u128, u128),
     RedeemCanceled(u128, [u8; 32], u128, u128, u128, u128),
+    BackendRedeemRequested([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
+    BackendRedeemConfirmed([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
+    BackendRedeemCanceled([u8; 32], u128, [u8; 32], u128, u128, u128, u128),
 }
 
 #[event]
@@ -234,6 +258,7 @@ pub enum AdminEvents {
     FundsWithdrawn([u8; 32], u128, u128),
     PendingRedeemForceCanceled(u128, [u8; 32], u128, u128, u128, u128),
     PendingRedeemForcePaid(u128, [u8; 32], u128, u128, u128, u128),
+    BackendRedeemerUpdated([u8; 32], u128),
 }
 
 pub struct RedeemService<'a> {
@@ -293,11 +318,13 @@ impl RedeemService<'_> {
             state.pending_redemptions.insert(
                 redeem_id,
                 PendingRedeem {
+                    backend_request_id: None,
                     beneficiary: caller,
                     scrst,
                     bcrst,
                     hcrst,
                     payout,
+                    uses_reserve: true,
                 },
             );
 
@@ -324,22 +351,105 @@ impl RedeemService<'_> {
     }
 
     #[export(unwrap_result)]
+    pub fn redeem_for(
+        &mut self,
+        request_id: [u8; 32],
+        beneficiary: ActorId,
+        scrst: u128,
+        bcrst: u128,
+        hcrst: u128,
+    ) -> Result<u128, String> {
+        if request_id == [0; 32] {
+            return Err("backend request id cannot be zero".into());
+        }
+        if beneficiary == ActorId::zero() {
+            return Err("beneficiary cannot be zero address".into());
+        }
+
+        let caller = Syscall::message_source();
+        let (redeem_id, res_contract, payout) = {
+            let mut state = self.state.borrow_mut();
+
+            ensure_not_paused(&state)?;
+            ensure_backend_redeemer(&state, caller)?;
+            if state.backend_request_statuses.contains_key(&request_id) {
+                return Err("backend redeem request already exists".into());
+            }
+
+            let payout = calculate_payout(state.vara_unit, &state.rates, scrst, bcrst, hcrst)?;
+            let redeem_id = state.next_redeem_id;
+            state.next_redeem_id = state
+                .next_redeem_id
+                .checked_add(1)
+                .ok_or_else(|| "redeem id overflow".to_string())?;
+            state.pending_redemptions.insert(
+                redeem_id,
+                PendingRedeem {
+                    backend_request_id: Some(request_id),
+                    beneficiary,
+                    scrst,
+                    bcrst,
+                    hcrst,
+                    payout,
+                    uses_reserve: false,
+                },
+            );
+            state.backend_request_statuses.insert(request_id, 1);
+
+            (redeem_id, state.res_contract, payout)
+        };
+
+        self.emit_event(RedeemEvents::BackendRedeemRequested(
+            request_id,
+            redeem_id,
+            beneficiary.into_bytes(),
+            scrst,
+            bcrst,
+            hcrst,
+            payout,
+        ))
+        .expect("failed to emit backend redeem request event");
+
+        let payload = encode_burn_for_redeem_call(
+            redeem_id,
+            beneficiary,
+            scrst,
+            bcrst,
+            hcrst,
+        );
+        if let Err(_error) = msg::send_bytes(res_contract, payload, 0) {
+            let mut state = self.state.borrow_mut();
+            state.pending_redemptions.remove(&redeem_id);
+            state.backend_request_statuses.remove(&request_id);
+            return Err("failed to send RES burn request".into());
+        }
+
+        Ok(redeem_id)
+    }
+
+    #[export(unwrap_result)]
     pub fn confirm_redeem(&mut self, redeem_id: u128) -> Result<u128, String> {
         let caller = Syscall::message_source();
         let (pending, synced) = {
             let mut state = self.state.borrow_mut();
 
             ensure_res_contract(&state, caller)?;
-            let synced = state.sync_reserve_balance();
             let pending = state
                 .pending_redemptions
                 .remove(&redeem_id)
                 .ok_or_else(|| "redeem request not found".to_string())?;
+            let synced = if pending.uses_reserve {
+                state.sync_reserve_balance()
+            } else {
+                0
+            };
 
             (pending, synced)
         };
 
-        if let Err(_error) = msg::send(pending.beneficiary, (), pending.payout) {
+        if pending.uses_reserve
+            && let Err(_error) = msg::send(pending.beneficiary, (), pending.payout)
+        {
             let mut state = self.state.borrow_mut();
             state.pending_redemptions.insert(redeem_id, pending.clone());
             return Err("failed to send payout".into());
@@ -347,11 +457,16 @@ impl RedeemService<'_> {
 
         {
             let mut state = self.state.borrow_mut();
-            state.locked_balance -= pending.payout;
-            state.total_paid = state
-                .total_paid
-                .checked_add(pending.payout)
-                .ok_or_else(|| "total paid overflow".to_string())?;
+            if pending.uses_reserve {
+                state.locked_balance -= pending.payout;
+                state.total_paid = state
+                    .total_paid
+                    .checked_add(pending.payout)
+                    .ok_or_else(|| "total paid overflow".to_string())?;
+            }
+            if let Some(request_id) = pending.backend_request_id {
+                state.backend_request_statuses.insert(request_id, 2);
+            }
             state.total_redeemed_scrst = state
                 .total_redeemed_scrst
                 .checked_add(pending.scrst)
@@ -366,7 +481,7 @@ impl RedeemService<'_> {
                 .ok_or_else(|| "total redeemed HCRST overflow".to_string())?;
         }
 
-        if synced > 0 {
+        if pending.uses_reserve && synced > 0 {
             self.emit_event(RedeemEvents::ReserveSynced(
                 synced,
                 self.state.borrow().reserve_balance,
@@ -374,14 +489,27 @@ impl RedeemService<'_> {
             .expect("failed to emit reserve sync event");
         }
 
-        self.emit_event(RedeemEvents::Redeemed(
-            pending.beneficiary.into_bytes(),
-            pending.scrst,
-            pending.bcrst,
-            pending.hcrst,
-            pending.payout,
-        ))
-        .expect("failed to emit redeem event");
+        if let Some(request_id) = pending.backend_request_id {
+            self.emit_event(RedeemEvents::BackendRedeemConfirmed(
+                request_id,
+                redeem_id,
+                pending.beneficiary.into_bytes(),
+                pending.scrst,
+                pending.bcrst,
+                pending.hcrst,
+                pending.payout,
+            ))
+            .expect("failed to emit backend redeem confirmation event");
+        } else {
+            self.emit_event(RedeemEvents::Redeemed(
+                pending.beneficiary.into_bytes(),
+                pending.scrst,
+                pending.bcrst,
+                pending.hcrst,
+                pending.payout,
+            ))
+            .expect("failed to emit redeem event");
+        }
 
         Ok(pending.payout)
     }
@@ -399,7 +527,7 @@ impl RedeemService<'_> {
                 .ok_or_else(|| "redeem request not found".to_string())?
         };
 
-        {
+        if pending.uses_reserve {
             let mut state = self.state.borrow_mut();
             state.locked_balance -= pending.payout;
             state.reserve_balance = state
@@ -408,15 +536,32 @@ impl RedeemService<'_> {
                 .ok_or_else(|| "reserve balance overflow".to_string())?;
         }
 
-        self.emit_event(RedeemEvents::RedeemCanceled(
-            redeem_id,
-            pending.beneficiary.into_bytes(),
-            pending.scrst,
-            pending.bcrst,
-            pending.hcrst,
-            pending.payout,
-        ))
-        .expect("failed to emit redeem cancel event");
+        if let Some(request_id) = pending.backend_request_id {
+            self.state
+                .borrow_mut()
+                .backend_request_statuses
+                .insert(request_id, 3);
+            self.emit_event(RedeemEvents::BackendRedeemCanceled(
+                request_id,
+                redeem_id,
+                pending.beneficiary.into_bytes(),
+                pending.scrst,
+                pending.bcrst,
+                pending.hcrst,
+                pending.payout,
+            ))
+            .expect("failed to emit backend redeem cancel event");
+        } else {
+            self.emit_event(RedeemEvents::RedeemCanceled(
+                redeem_id,
+                pending.beneficiary.into_bytes(),
+                pending.scrst,
+                pending.bcrst,
+                pending.hcrst,
+                pending.payout,
+            ))
+            .expect("failed to emit redeem cancel event");
+        }
 
         Ok(())
     }
@@ -444,6 +589,17 @@ impl RedeemService<'_> {
     #[export(unwrap_result)]
     pub fn pending_redeem_count(&self) -> Result<u128, String> {
         Ok(self.state.borrow().pending_redemptions.len() as u128)
+    }
+
+    #[export(unwrap_result)]
+    pub fn backend_request_status(&self, request_id: [u8; 32]) -> Result<u128, String> {
+        Ok(self
+            .state
+            .borrow()
+            .backend_request_statuses
+            .get(&request_id)
+            .copied()
+            .unwrap_or(0))
     }
 
     #[export(unwrap_result)]
@@ -493,11 +649,16 @@ impl RedeemService<'_> {
         };
 
         let mut state = self.state.borrow_mut();
-        state.locked_balance -= pending.payout;
-        state.reserve_balance = state
-            .reserve_balance
-            .checked_add(pending.payout)
-            .ok_or_else(|| "reserve balance overflow".to_string())?;
+        if pending.uses_reserve {
+            state.locked_balance -= pending.payout;
+            state.reserve_balance = state
+                .reserve_balance
+                .checked_add(pending.payout)
+                .ok_or_else(|| "reserve balance overflow".to_string())?;
+        }
+        if let Some(request_id) = pending.backend_request_id {
+            state.backend_request_statuses.remove(&request_id);
+        }
 
         Ok(())
     }
@@ -537,6 +698,22 @@ impl AdminService<'_> {
     }
 
     #[export(unwrap_result)]
+    pub fn backend_redeemers(&self) -> Result<Vec<ActorId>, String> {
+        Ok(active_admins(&self.state.borrow().backend_redeemers))
+    }
+
+    #[export(unwrap_result)]
+    pub fn is_backend_redeemer(&self, account: ActorId) -> Result<bool, String> {
+        Ok(self
+            .state
+            .borrow()
+            .backend_redeemers
+            .get(&account)
+            .copied()
+            .unwrap_or(false))
+    }
+
+    #[export(unwrap_result)]
     pub fn is_paused(&self) -> Result<bool, String> {
         Ok(self.state.borrow().paused)
     }
@@ -556,6 +733,42 @@ impl AdminService<'_> {
         .expect("failed to emit RES contract update event");
 
         Ok(())
+    }
+
+    #[export(unwrap_result)]
+    pub fn set_backend_redeemer(
+        &mut self,
+        account: ActorId,
+        enabled: bool,
+    ) -> Result<bool, String> {
+        if account == ActorId::zero() {
+            return Err("backend redeemer cannot be zero address".into());
+        }
+
+        let caller = Syscall::message_source();
+        let mut state = self.state.borrow_mut();
+        ensure_admin(&state, caller)?;
+        let current = state
+            .backend_redeemers
+            .get(&account)
+            .copied()
+            .unwrap_or(false);
+        if current == enabled {
+            return Ok(false);
+        }
+
+        if enabled {
+            state.backend_redeemers.insert(account, true);
+        } else {
+            state.backend_redeemers.remove(&account);
+        }
+        self.emit_event(AdminEvents::BackendRedeemerUpdated(
+            account.into_bytes(),
+            if enabled { 1 } else { 0 },
+        ))
+        .expect("failed to emit backend redeemer update event");
+
+        Ok(true)
     }
 
     #[export(unwrap_result)]
@@ -725,11 +938,16 @@ impl AdminService<'_> {
 
         {
             let mut state = self.state.borrow_mut();
-            state.locked_balance -= pending.payout;
-            state.reserve_balance = state
-                .reserve_balance
-                .checked_add(pending.payout)
-                .ok_or_else(|| "reserve balance overflow".to_string())?;
+            if pending.uses_reserve {
+                state.locked_balance -= pending.payout;
+                state.reserve_balance = state
+                    .reserve_balance
+                    .checked_add(pending.payout)
+                    .ok_or_else(|| "reserve balance overflow".to_string())?;
+            }
+            if let Some(request_id) = pending.backend_request_id {
+                state.backend_request_statuses.insert(request_id, 3);
+            }
         }
 
         self.emit_event(AdminEvents::PendingRedeemForceCanceled(
@@ -752,10 +970,15 @@ impl AdminService<'_> {
             let mut state = self.state.borrow_mut();
 
             ensure_admin(&state, caller)?;
-            state
+            let pending = state
                 .pending_redemptions
-                .remove(&redeem_id)
-                .ok_or_else(|| "redeem request not found".to_string())?
+                .get(&redeem_id)
+                .cloned()
+                .ok_or_else(|| "redeem request not found".to_string())?;
+            if !pending.uses_reserve {
+                return Err("backend redeem cannot be force-paid with native value".into());
+            }
+            state.pending_redemptions.remove(&redeem_id).expect("checked above")
         };
 
         {

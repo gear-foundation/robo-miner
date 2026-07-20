@@ -33,6 +33,7 @@ export default class LandingScene extends Phaser.Scene {
         </a>
         <nav class="landing-nav" aria-label="Quick links">
           <a href="#flow">Flow</a>
+          <a href="#survival">Survival</a>
           <a href="#skills">Skills</a>
           <a href="#tech">Tech</a>
           <a href="#economy">Economy</a>
@@ -63,10 +64,26 @@ export default class LandingScene extends Phaser.Scene {
             <p>The campaign is built as a simple loop: start a digger, mine resources, bank them, then choose whether to keep competing or redeem.</p>
           </div>
           <div class="flow-strip">
-            ${flowStep('01', 'Start', 'Open the miner menu and enter the agent arena.')}
-            ${flowStep('02', 'Mine', 'Agents move through a live shaft and pick up RES crystals.')}
+            ${flowStep('01', 'Start', 'Open the miner menu and enter the agent arena. Your digger starts with 120 wVARA of fuel and spends a little per action.')}
+            ${flowStep('02', 'Mine', 'Agents move through a live shaft, drill, and collect crystals (SCRST, BCRST, HCRST).')}
             ${flowStep('03', 'Bank', 'A surfaced digger locks in extracted RES for the player.')}
             ${flowStep('04', 'Redeem', 'Backend verifies a signed intent, burns RES, and transfers WVARA.')}
+          </div>
+        </section>
+
+        <section id="survival" class="section-band survival-band">
+          <div class="section-heading">
+            <p class="eyebrow">Survival rules</p>
+            <h2>What keeps your digger alive underground.</h2>
+            <p>An agent that ignores these dies on its first run. Teach them to your agent before it descends.</p>
+          </div>
+          <div class="survival-grid">
+            ${survivalRule('01', 'Ladders take you up.', `Going down is free — the digger drills and falls. Climbing back costs one ladder per level. Before digging deep, count the ladders needed to return. Not enough? Surface and buy more first (<strong>0.5 SCRST each</strong>).`, 'ladder')}
+            ${survivalRule('02', 'Watch the fall.', 'Stepping into an empty cell drops the digger through every empty cell below it. A step to the side can become a long fall. Check what is under the digger before every move.', 'fall')}
+            ${survivalRule('03', 'Stone can crush you.', 'Do not dig a cell that has stone above it and then step into it — the stone falls and kills the digger. Digging under stone is safe as long as the digger does not stand there; the stone just drops into the empty space. When unsure, go around.', 'stone')}
+            ${survivalRule('04', 'Chests are a risk.', `A chest gives bonus ladders, but there is a <strong>10% chance of dynamite</strong> — it kills the digger instantly and everything it carries is lost. Banked crystals stay safe. Open a chest only with an empty backpack or when out of ladders, never with a full load.`, 'chest')}
+            ${survivalRule('05', 'Bank early.', 'Carried crystals are lost on death. Banked crystals are safe. Full backpack or low on fuel → surface now.', 'bank')}
+            ${survivalRule('06', 'One shaft, shared ladders.', "Dig one main vertical shaft with side tunnels. Climb other agents' ladders when you find them — it saves your own.", 'shaft')}
           </div>
         </section>
 
@@ -146,6 +163,10 @@ export default class LandingScene extends Phaser.Scene {
               ${socialPill('Limit', '1 claim per task weekly')}
             </div>
             <p class="social-copy">Repost the official campaign post, or quote it with campaign context such as Digger, Vara, mining, agent, or RES. The verifier rejects reused posts, reused handles, and duplicate weekly claims.</p>
+          </div>
+          <div class="refuel-note">
+            <h3>When free fuel runs out.</h3>
+            <p>Every action spends a little wVARA from the digger's executable balance. When it runs low, the agent sells some banked crystals for wVARA and tops the balance back up — this is how a digger keeps running without new social tasks. Keep a small reserve so the digger never gets stuck with a full backpack and no fuel.</p>
           </div>
           <div class="social-flow" aria-label="Social verifier flow">
             ${socialStep('01', 'Post', 'Repost or quote on X.')}
@@ -246,6 +267,19 @@ function flowStep(number, title, text) {
   return `
     <article class="flow-step">
       <span>${number}</span>
+      <h3>${title}</h3>
+      <p>${text}</p>
+    </article>
+  `;
+}
+
+function survivalRule(number, title, text, tone) {
+  return `
+    <article class="survival-rule ${tone}">
+      <div class="survival-rule-head">
+        <span>${number}</span>
+        <i aria-hidden="true"></i>
+      </div>
       <h3>${title}</h3>
       <p>${text}</p>
     </article>
@@ -365,6 +399,22 @@ function injectLandingStyles() {
     .flow-step:not(:last-child):after{content:'';position:absolute;right:-17px;top:50%;width:18px;height:4px;background:var(--gold);border-top:2px solid #000;border-bottom:2px solid #000;transform:translateY(-50%);z-index:2}
     .flow-step span{display:inline-block;margin-bottom:18px;color:var(--mintText);background:var(--mint);border:3px solid #000;padding:4px 8px;font-weight:900;font-size:12px;text-shadow:none}
     .flow-step p,.tech-row p,.faq-item p,.economy-note{color:var(--body);line-height:1.5;font-size:14px}
+    .survival-band{border-top:1px solid rgba(255,216,90,.18);border-bottom:1px solid rgba(118,246,165,.16)}
+    .survival-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+    .survival-rule{position:relative;min-height:260px;padding:18px;background:linear-gradient(155deg,#192633,#0f171f 72%);border:3px solid #000;box-shadow:6px 6px 0 rgba(0,0,0,.42);overflow:hidden}
+    .survival-rule:after{content:'';position:absolute;right:-42px;bottom:-52px;width:132px;height:132px;border:18px solid rgba(255,216,90,.05);transform:rotate(45deg);pointer-events:none}
+    .survival-rule-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+    .survival-rule-head>span{display:inline-block;color:var(--goldText);background:var(--gold);border:3px solid #000;padding:4px 8px;font-weight:900;font-size:12px;text-shadow:none}
+    .survival-rule-head i{position:relative;display:block;width:34px;height:34px;background:#111b24;border:3px solid #000;box-shadow:0 0 16px rgba(255,216,90,.18)}
+    .survival-rule.ladder i:before{content:'';position:absolute;inset:4px 8px;border-left:3px solid var(--gold);border-right:3px solid var(--gold);background:repeating-linear-gradient(to bottom,transparent 0 5px,var(--gold) 5px 8px)}
+    .survival-rule.fall i:before{content:'↓';position:absolute;inset:0;display:grid;place-items:center;color:var(--cyan);font-style:normal;font-size:25px;font-weight:900}
+    .survival-rule.stone i:before{content:'';position:absolute;inset:6px;background:#8ea0ad;border:3px solid #000;transform:rotate(45deg)}
+    .survival-rule.chest i:before{content:'';position:absolute;left:5px;right:5px;bottom:5px;height:16px;background:var(--violet);border:3px solid #000;box-shadow:inset 0 6px 0 rgba(255,255,255,.2)}
+    .survival-rule.bank i:before{content:'';position:absolute;left:5px;right:5px;bottom:5px;height:18px;background:var(--mint);border:3px solid #000;clip-path:polygon(0 35%,50% 0,100% 35%,100% 100%,0 100%)}
+    .survival-rule.shaft i:before{content:'';position:absolute;left:13px;top:3px;bottom:3px;width:3px;background:var(--gold);box-shadow:-7px 8px 0 var(--cyan),7px 14px 0 var(--mint)}
+    .survival-rule h3{margin-bottom:10px;color:#ffe37a;font-size:20px}
+    .survival-rule p{position:relative;z-index:1;color:var(--body);line-height:1.56;font-size:14px}
+    .survival-rule strong{color:var(--bright);background:rgba(255,216,90,.14);padding:1px 3px}
     .split-band{display:grid;grid-template-columns:minmax(0,1fr) minmax(330px,500px);gap:30px;align-items:center}
     .contracts-band{display:grid;grid-template-columns:1fr;gap:26px;align-items:center}
     .contracts-band .section-copy{max-width:860px}
@@ -399,6 +449,9 @@ function injectLandingStyles() {
     .social-pill{display:inline-flex;align-items:center;gap:9px;padding:8px 12px;border:2px solid rgba(118,246,165,.62);background:rgba(14,22,30,.8);color:#e5f1f8;font-size:14px;line-height:1.2}
     .social-pill b{color:var(--mint);font-size:12px;text-transform:uppercase}
     .social-copy{max-width:760px;margin:0 auto;color:var(--body);line-height:1.58;font-size:15px}
+    .refuel-note{max-width:960px;margin:0 auto 34px;padding:18px 20px;background:linear-gradient(90deg,rgba(118,246,165,.12),rgba(94,215,240,.06));border:3px solid #000;border-left:7px solid var(--mint);box-shadow:5px 5px 0 rgba(0,0,0,.4)}
+    .refuel-note h3{margin-bottom:8px;color:var(--mint);font-size:19px}
+    .refuel-note p{color:var(--body);line-height:1.58;font-size:15px}
     .social-flow{max-width:1040px;margin:0 auto;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;align-items:start;border-top:2px solid rgba(255,216,90,.48)}
     .social-step{position:relative;padding:24px 18px 0;text-align:left}
     .social-step:before{content:'';position:absolute;top:-7px;left:18px;width:12px;height:12px;background:var(--gold);border:2px solid #000}
@@ -436,9 +489,11 @@ function injectLandingStyles() {
     .faq-item[open] summary b{background:var(--mint);font-size:0}
     .faq-item[open] summary b:before{content:'-';font-size:24px}
     .faq-item p{padding:0 18px 18px;color:var(--body);line-height:1.55;font-size:15px}
+    @media (max-width:1100px){.landing-nav{gap:12px}.landing-nav a{font-size:11px}}
     @media (max-width:920px){
       .landing-nav{gap:12px}.landing-nav a{font-size:12px}
       .flow-strip,.split-band,.contracts-band,.skills-layout,.skill-steps,.resource-grid,.social-flow,.faq-grid{grid-template-columns:1fr}
+      .survival-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
       .social-flow{gap:14px;border-top:0}
       .social-step{padding:0 0 0 24px;border-left:2px solid rgba(255,216,90,.48)}
       .social-step:before{top:2px;left:-7px}.social-step:not(:last-child):after{display:none}
@@ -451,6 +506,7 @@ function injectLandingStyles() {
       .landing-hero{width:100vw;padding:86px 16px 160px;place-items:start center}.hero-bg{background-position:42% bottom}.hero-content{width:calc(100vw - 32px);max-width:calc(100vw - 32px);margin-top:5vh;overflow:hidden}
       h1{font-size:clamp(52px,17vw,68px)}.tagline{width:min(100%,270px);max-width:100%;font-size:15px;line-height:1.45;overflow-wrap:break-word}
       .section-band{padding:62px 16px}.hero-actions{width:calc(100vw - 32px);max-width:calc(100vw - 32px);margin-left:auto;margin-right:auto}.pixel-btn{width:100%;max-width:250px}
+      .survival-grid{grid-template-columns:1fr}.survival-rule{min-height:0}
       .faq-item summary{font-size:16px}
     }
   `;

@@ -219,7 +219,8 @@ Vmt.HcrstTokenId()
 Vmt.IsApproved(accountActorId, operatorActorId)
 ```
 
-Writes available in IDL:
+RES VMT writes exist in the IDL but are not part of the normal live-player
+workflow:
 
 ```text
 Vmt.Approve(operatorActorId)
@@ -229,7 +230,8 @@ Vmt.BatchTransferFrom(fromActorId, toActorId, ids, amounts)
 
 `Vmt.MintResources` and admin functions are not player actions unless the agent
 is explicitly assigned a privileged role. Normal players mint through
-`World.MintResources()`.
+`World.MintResources()`. Do not use `Vmt.Approve` for the backend-mediated
+redeem path; the owner signs the backend EIP-712 intent instead.
 
 ## Redeem
 
@@ -237,8 +239,8 @@ Players do not call the Redeem program directly. The backend treasury is an
 authorized redeemer and calls:
 
 ```text
-Redeem.RedeemFor(requestId, beneficiary, scrst, bcrst, hcrst)
-Redeem.BackendRequestStatus(requestId) -> 0 unknown, 1 pending, 2 burned, 3 canceled
+RedeemFor(requestId, beneficiary, scrst, bcrst, hcrst)
+BackendRequestStatus(requestId) -> 0 unknown, 1 pending, 2 burned, 3 canceled
 ```
 
 `requestId` is the EIP-712 intent hash. The contract uses it as an on-chain
@@ -246,10 +248,6 @@ idempotency key, asks the existing RES VMT to burn the owner's balances, and
 emits `BackendRedeemConfirmed` after burn confirmation. It does not send native
 value and it does not pay WVARA. After status `2`, the backend transfers ERC-20
 WVARA from its treasury to the owner.
-
-Legacy `Redeem.Redeem`, reserve queries, and native-value mailbox settlement
-remain only for compatibility with the old deployment. Do not use them for new
-player redemption.
 
 ## `vara-wallet` Examples
 
@@ -300,7 +298,7 @@ robo_miner_action Digger/Drill '[1]'
 robo_miner_action Digger/PlaceLadder '[4]'
 ```
 
-Supported proxy action methods:
+Supported DiggerProxy action methods:
 
 ```text
 Digger.MoveAgent(direction)
@@ -310,14 +308,10 @@ Digger.Surface()
 Digger.TradeResourcesForLadders(scrst,bcrst,hcrst)
 Digger.Exit()
 Digger.MintResources()
-Vmt.Approve(redeemActorId)
-Redeem.Redeem(scrst, bcrst, hcrst)
-Redeem.CancelRedeem(redeemId)
-Redeem.ConfirmRedeem(redeemId)
 ```
 
 `Digger.TradeResourcesForLadders` forwards the same world preconditions: use it
 only from the surface and only for already banked resources.
 
-Never print wallet secrets or `PASSPHRASE`. Prefer secret store/env
-injection.
+Never print wallet secrets or `PASSPHRASE`. Do not put secrets in `.env`, argv,
+or logs; env injection is acceptable only during one-time wallet provisioning.

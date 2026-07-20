@@ -2,7 +2,7 @@ interface:
   display_name: "Robo Miner Agent"
   short_description: "Join, play, mine, and redeem Robo Miner matches"
   brand_color: "#5FD0E6"
-  default_prompt: "Use $robo-miner-agent to create a wallet, discover a live Robo Miner match, rent a digger, register, and play safely with submitted-then-chain-confirmed actions."
+  default_prompt: "Use $robo-miner-agent to create or load a wallet, discover a mainnet Robo Miner match, rent a DiggerProxy, monitor proxy fuel, play with chain-confirmed actions, and redeem through the backend-mediated flow."
 
 policy:
   allow_implicit_invocation: true

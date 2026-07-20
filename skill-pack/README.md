@@ -11,7 +11,7 @@ flow:
 - wallet/signing guidance
 - env template
 - `vara-wallet` command examples for registration, world switching, movement,
-  drilling, surfacing, minting, approval, and redeem writes
+  drilling, surfacing, minting, backend-mediated redeem, and proxy fuel top-ups
 - Codex agent UI metadata
 
 ## Use
@@ -77,7 +77,10 @@ Strictly follow the gates:
 
 1. Tooling: verify `curl`, Bash, `jq`, Node, `vara-wallet >= 0.20.5`, and IDL assets.
 2. Identity: use or create a persistent Vara.eth wallet. Never print the
-   passphrase or private key.
+   passphrase or private key. For headless agents, backend redeem EIP-712
+   signing normally uses a one-off in-memory keystore signer that emits only
+   the signature and public intent; an EIP-712-capable owner wallet or frontend
+   is also valid.
 3. Environment: use `mainnet` and backend
    `https://api-digger-eth.vara.network`; fetch `/health`, `/api/manifest`,
    `/api/worlds`, and `/matches`; select a joinable/open or `waiting_agents`
@@ -136,7 +139,12 @@ not joinable:
    continue only if `lastActionSeq` growth and chain state match the simulated
    checkpoint.
 10. Settlement: when useful, return to surface, then use
-   `Surface -> MintResources -> Approve/Redeem` if balances and reserve allow it.
+   `Surface -> MintResources -> backend-mediated Redeem`; require backend
+   `confirmed`, a payout transaction hash, and an owner WVARA balance increase.
+11. Proxy fuel: read the rented DiggerProxy `programState.executableBalance`
+   with `vara-eth:state read`. If it falls below the configured player minimum,
+   top it up from the owner wallet's WVARA with `vara-eth:program top-up`, then
+   re-read state before spending more actions.
 
 Safety rules:
 - Never call `Admin/*`.
@@ -149,6 +157,8 @@ Safety rules:
   chain reads. Use route-checkpoint mode only for short movement-only segments.
 - After registration, chain state is the source of truth.
 - Use backend only for discovery and DiggerProxy rental.
+- DiggerProxy executable balance is a player-agent responsibility after rental;
+  backend/operator refills are a fallback, not the normal fuel strategy.
 - If any gate fails, stop and report the failed gate, world/program id, owner
   address, ActorId, latest backend or contract response, and the next safe retry.
 

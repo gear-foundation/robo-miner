@@ -5,7 +5,7 @@ the requested wallet owner and world. The requested owner address becomes the
 proxy owner after backend converts it to `ownerActorId`; the returned
 `programId` is the digger program address. The proxy owns the in-world agent key
 and forwards player actions to DiggerWorld. It is the preferred live-game path
-because the backend can rent, fund, and track the digger.
+because the backend can rent and track the digger, and may seed initial fuel.
 
 Use `assets/idl/digger_proxy.idl` directly with `vara-wallet`. Do not
 substitute `digger_world.idl` as the proxy IDL; it is not the DiggerProxy

@@ -123,9 +123,9 @@ that require an ActorId.
 Do not use helper CLIs or arbitrary scripts for signed game actions. The
 reviewed bundled `scripts/robo-miner-action.sh` is the exception for supported
 DiggerProxy registration, world switching, and play-loop actions; it delegates
-each signed call to `vara-wallet`. VMT approve and redeem calls go directly
-through `vara-wallet`. Use backend HTTP requests with `curl` for discovery and
-digger rental.
+each signed call to `vara-wallet`. VMT balance reads go through `vara-wallet`;
+redeem settlement goes through the backend-mediated EIP-712 flow. Use backend
+HTTP requests with `curl` for discovery, digger rental, and redeem submission.
 
 ## Persistent Vara.eth Agent Session
 
@@ -205,11 +205,56 @@ robo_miner_action Digger/MoveAgent '[2]'
 
 Read-only calls do not need `--account`, `--passphrase`, or `--via injected`.
 
+## Backend Redeem EIP-712 Signing
+
+Backend-mediated settlement signs EIP-712 typed data, not `personal_sign` or an
+ad hoc hash. Always fetch the current config first:
+
+```text
+GET /api/redeem/config?network=mainnet
+```
+
+Sign exactly the returned `domain`, `types`, `primaryType`, and the locally
+constructed `message` described in `backend-api.md`. Acceptable owner-signing
+paths are, in the order most useful for live agents:
+
+1. A one-off, operator-controlled local signer that decrypts the Vara.eth
+   keystore only in memory. This is the expected headless-agent path when the
+   available wallet CLI cannot sign typed data.
+2. The official Robo Miner frontend or another EIP-712-capable wallet bound to
+   `ownerAddress`.
+
+The one-off signer is a first-class settlement signing path, but it is allowed
+only for settlement. Its safe shape is:
+
+1. Read the local encrypted Vara.eth V3 keystore for `VARA_WALLET_ACCOUNT`.
+2. Read the local `0600` passphrase file.
+3. Decrypt the keystore only in process memory.
+4. Call a typed-data signer such as `signTypedData` with the exact backend
+   `domain`, `types`, `primaryType`, and `message`.
+5. Recover or verify the signer address and require it to equal `ownerAddress`.
+6. Emit or submit only the public redeem intent fields plus `signature`.
+7. Drop mutable key material after signing when the crypto library exposes a
+   clearable buffer.
+
+Do not feed a private key from `vara-eth:wallet keys` into a script. That
+command is permitted only as a passphrase check with stdout redirected to
+`/dev/null`. Never print, log, export, store, put in argv/env, or commit the
+private key. Never reuse a one-off settlement signer as the DiggerProxy action
+runner.
+
+Abort before signing if the recovered signer would not be `ownerAddress`, if
+the EIP-712 domain chain or verifying contract differs from
+`GET /api/redeem/config`, or if the message fields no longer match the RES
+balances and rates that will be submitted.
+
 ## Balance and Fuel Diagnostics
 
-The backend deploys the DiggerProxy, funds its initial executable balance, and
-may refill it on the backend's daily schedule. Separately, a player can convert
-earned resources to WVARA through the settlement path:
+The backend deploys the DiggerProxy and may fund an initial executable balance.
+After rental, the player agent is responsible for monitoring and topping up its
+own DiggerProxy fuel from the owner wallet's WVARA. Backend refills are a
+fallback, not the normal live-agent fuel strategy. Separately, a player can
+convert earned resources to WVARA through the settlement path:
 
 ```text
 Surface -> MintResources -> Redeem
@@ -255,9 +300,40 @@ If `Digger/Owner` does not equal `ownerActorId`, stop because this wallet does
 not own the proxy. If `Digger/World` does not equal the selected world ActorId,
 request or reuse a digger for the correct world.
 
-If the proxy executable balance is depleted, report the balance/fuel gate
-failure and wait for backend refill or operator action. Do not call world
-`Admin/*`, do not use admin top-up methods, and do not transfer operator funds.
+Configure a minimum and target fuel budget in raw units
+(`1 VARA = 1000000000000`). Reasonable mainnet defaults are:
+
+```bash
+ROBO_MINER_PROXY_MIN_EXEC_BALANCE="${ROBO_MINER_PROXY_MIN_EXEC_BALANCE:-2000000000000}"       # 2 VARA
+ROBO_MINER_PROXY_TARGET_EXEC_BALANCE="${ROBO_MINER_PROXY_TARGET_EXEC_BALANCE:-120000000000000}" # 120 VARA
+```
+
+Before registration, before a play loop, after settlement, and after any
+fuel-like write failure:
+
+1. Read `programState.executableBalance`.
+2. If it is below `ROBO_MINER_PROXY_MIN_EXEC_BALANCE`, compute
+   `topUpAmount = ROBO_MINER_PROXY_TARGET_EXEC_BALANCE - executableBalance`.
+3. Read the owner WVARA balance and require it to be at least `topUpAmount`.
+4. Submit the player-funded top-up with the owner wallet:
+
+```bash
+vara-wallet \
+  --chain vara-eth \
+  --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --json \
+  vara-eth:program top-up "$diggerProgramId" \
+  --amount "$topUpAmount"
+```
+
+5. Re-read `vara-eth:state read "$diggerProgramId"` and verify
+   `programState.executableBalance` increased by the expected amount.
+
+Do not call world `Admin/*`, do not use admin top-up methods, and do not
+transfer operator funds. If the owner wallet lacks WVARA and the agent has
+banked or minted resources, complete the settlement flow first; if it has no
+resources to redeem, stop and report the fuel gate.
 
 If the owner wallet is short on WVARA but the agent has banked resources, use
 the settlement flow from `workflow.md` to `Surface`, `MintResources`, and submit
@@ -276,5 +352,9 @@ and the owner WVARA increase; `burned` alone is not payment.
 - `ownerActorId` is derived from `ownerAddress`.
 - Signed DiggerProxy writes use `robo_miner_action`, which delegates to the
   named-wallet `vara-eth:session` injected-submission path.
-- Redeem settlement uses an EIP-712-capable owner signer and verifies backend
-  `confirmed` plus the owner WVARA balance before reporting success.
+- DiggerProxy fuel is checked from `programState.executableBalance` and topped
+  up from owner WVARA with `vara-eth:program top-up` whenever it falls below
+  the configured player minimum.
+- Redeem settlement uses the one-off in-memory keystore signer or another
+  EIP-712-capable owner signer, then verifies backend `confirmed` plus the owner
+  WVARA balance before reporting success.

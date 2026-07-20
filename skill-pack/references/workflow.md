@@ -238,7 +238,7 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   --args '[]' \
   --idl "$ROBO_MINER_RES_VMT_IDL"
 
-curl -fsS "$ROBO_MINER_BACKEND/api/redeem/config?network=mainnet"
+curl -fsS "$ROBO_MINER_BACKEND_URL/api/redeem/config?network=mainnet"
 ```
 
 If either fallback read fails or decodes against the wrong service, stop before
@@ -330,6 +330,45 @@ vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 
 Gate 4 is complete only when `Digger.Owner()` equals `ownerActorId` and
 `Digger.World()` equals the selected `worldId` converted to ActorId.
+
+Then verify the proxy fuel budget. Read only `programState.executableBalance`
+from `vara-eth:state read`; backend `targetExecBalance`, WVARA balances, ETH
+balances, and `programState.balance` are not current execution fuel.
+
+```bash
+proxyState=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  vara-eth:state read "$diggerProgramId")
+executableBalance=$(printf '%s' "$proxyState" | jq -r '.programState.executableBalance')
+
+ROBO_MINER_PROXY_MIN_EXEC_BALANCE="${ROBO_MINER_PROXY_MIN_EXEC_BALANCE:-2000000000000}"
+ROBO_MINER_PROXY_TARGET_EXEC_BALANCE="${ROBO_MINER_PROXY_TARGET_EXEC_BALANCE:-120000000000000}"
+```
+
+If `executableBalance` is below the minimum, top up from the owner wallet's
+WVARA to the target before spending actions:
+
+```bash
+topUpAmount=$((ROBO_MINER_PROXY_TARGET_EXEC_BALANCE - executableBalance))
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  vara-eth:wvara balance "$ownerAddress"
+
+vara-wallet \
+  --chain vara-eth \
+  --network "$VARA_ETH_NETWORK" \
+  --account "$VARA_WALLET_ACCOUNT" \
+  --json \
+  vara-eth:program top-up "$diggerProgramId" \
+  --amount "$topUpAmount"
+
+vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
+  vara-eth:state read "$diggerProgramId"
+```
+
+The post-top-up `programState.executableBalance` must increase by the expected
+amount before continuing. If the owner WVARA balance is insufficient and the
+agent has banked or minted resources, complete settlement first. If there are
+no redeemable resources, stop at Gate 4 and report the fuel shortage.
 
 ## Read Response Shape
 
@@ -702,7 +741,7 @@ Check RES balances with `Vmt/BalanceOf`, then read the backend signing and rate
 configuration:
 
 ```bash
-redeemConfig=$(curl -fsS "$ROBO_MINER_BACKEND/api/redeem/config?network=mainnet")
+redeemConfig=$(curl -fsS "$ROBO_MINER_BACKEND_URL/api/redeem/config?network=mainnet")
 wvaraBefore=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
   vara-eth:wvara balance "$ownerAddress" | jq -r '.balance')
 ```
@@ -713,10 +752,12 @@ Compute the expected raw payout from `redeemConfig.rates` and
 message specified in `references/backend-api.md`. Submit the signed intent to
 `POST /api/redeem/request?network=mainnet`.
 
-Do not approve the Redeem program, call legacy `Redeem/Redeem`, or claim a
-Mirror mailbox message. If the available wallet cannot sign EIP-712, use the
-official frontend or stop and request an EIP-712-capable signer. Never export
-the wallet private key as a workaround.
+Do not perform direct player Redeem program writes or claim a Mirror mailbox
+message. For headless agents, use the one-off in-memory keystore signer
+described in `wallet-and-signing.md`; an official frontend or another
+EIP-712-capable owner wallet is also valid. The one-off signer is
+settlement-only: never export, print, log, store, or reuse the wallet private
+key as a workaround.
 
 Poll `GET /api/redeem/requests/<requestId>?network=mainnet` every two seconds
 for up to five minutes. Treat `burned` and `payout_failed` as unpaid states;
@@ -730,6 +771,11 @@ wvaraAfter=$(vara-wallet --chain vara-eth --network "$VARA_ETH_NETWORK" --json \
 ```
 
 Require `wvaraAfter - wvaraBefore` to equal the expected raw payout.
+
+After a successful redeem, re-check the DiggerProxy
+`programState.executableBalance`. If it is below
+`ROBO_MINER_PROXY_MIN_EXEC_BALANCE`, top it up from the newly available owner
+WVARA before returning to discovery or starting another action loop.
 
 If the session ends, the agent dies, or the agent exits, record the result and
 return to match discovery. For death, include whether the cause was event-confirmed
@@ -755,11 +801,12 @@ falling stone, event-confirmed chest dynamite, or inferred from last action.
   --json vara-eth:state read "$diggerProgramId"`. Read only
   `programState.executableBalance`; backend `targetExecBalance`, ETH, WVARA,
   `programState.balance`, and `vara-wallet balance` are not current execution
-  fuel. If the proxy
-  executable balance is depleted, report it and wait for backend refill/operator
-  action. If executable balance is available and the agent has banked resources,
-  use the player settlement flow: `Surface -> MintResources -> Redeem`. Do not
-  call world `Admin/*` methods or transfer operator funds.
+  fuel. If the proxy executable balance is below the configured minimum, top it
+  up from the owner wallet's WVARA with `vara-eth:program top-up`, then re-read
+  state and verify the increase. If owner WVARA is insufficient and the agent
+  has banked resources, use the player settlement flow:
+  `Surface -> MintResources -> Redeem`, then top up. Do not call world
+  `Admin/*` methods, backend admin endpoints, or transfer operator funds.
 - Backend redeem is `burned` or `payout_failed` but owner balance is unchanged:
   do not submit a new intent. Poll the same request id; the scheduler retries
   payout without a second burn. Report the request id and exact backend error if

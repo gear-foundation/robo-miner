@@ -19,8 +19,6 @@ service Redeem@0x06dfd74221157279 {
         BackendRequestStatus(request_id: [u8; 32]) -> u128 throws String;
         @query
         BcrstRate() -> u128 throws String;
-        CancelRedeem(redeem_id: u128) throws String;
-        ConfirmRedeem(redeem_id: u128) -> u128 throws String;
         @payable
         DepositReserve() -> u128 throws String;
         @query
@@ -29,7 +27,6 @@ service Redeem@0x06dfd74221157279 {
         LockedBalance() -> u128 throws String;
         @query
         PendingRedeemCount() -> u128 throws String;
-        Redeem(scrst: u128, bcrst: u128, hcrst: u128) -> u128 throws String;
         RedeemFor(request_id: [u8; 32], beneficiary: ActorId, scrst: u128, bcrst: u128, hcrst: u128) -> u128 throws String;
         @query
         ReserveBalance() -> u128 throws String;

@@ -48,7 +48,7 @@ until every prior gate is verified.
 | 1. Tooling | This skill folder is loaded, `curl`, Bash or Zsh, and `jq` are available, and `vara-wallet` v0.20.5 or newer from `gear-foundation/vara-wallet` is available. |
 | 2. Identity | A persistent Vara.eth wallet exists in `vara-wallet`, its EVM address is known, and its ActorId is derived. |
 | 3. Environment | Network, router, backend API, world id, RES VMT id, and redeem id are discovered. |
-| 4. Digger | A backend-managed DiggerProxy exists for `owner + season + world`. |
+| 4. Digger + Fuel | A backend-managed DiggerProxy exists for `owner + season + world`, and its `programState.executableBalance` is above the player-agent minimum or has been topped up from the owner's WVARA. |
 | 5. Registration | `World.Agents()` contains the DiggerProxy ActorId, then `World.AgentOf(agentActorId)` returns a successful agent row. |
 | 6. Session | `World.Session().status === 1` (active). In lobby status `0`, wait and re-check. |
 | 7. Action Loop | Use strict read-after-write by default. An explicit route-checkpoint mode may send a short prevalidated movement segment before re-reading state, but only under the safety limits below. |
@@ -126,25 +126,31 @@ function from fresh world state before sending a dependent action. See
    `AgentOf()` already includes carried and banked resources, so
    `InventoryOf()` is an optional compact audit read, not a per-action
    requirement.
-5. Before selecting a route or placing a ladder, scan `MapSnapshot()` for every
+5. Before registration, before a play loop, and after settlement, read the
+   rented proxy's `programState.executableBalance` with `vara-eth:state read`.
+   If it is below the configured player minimum, top it up from the owner
+   wallet's WVARA with `vara-eth:program top-up`, then verify the fresh
+   executable balance increased. Treat backend refills as a fallback, not as the
+   normal player-agent fuel strategy.
+6. Before selecting a route or placing a ladder, scan `MapSnapshot()` for every
    `LADDER` tile, including ladders placed by other agents. Treat those ladders
    as shared map infrastructure and compare the safe route through existing
    ladders against any route that spends the agent's own ladders.
-6. Before planning any ladder refill, parse the current ladder exchange rate
+7. Before planning any ladder refill, parse the current ladder exchange rate
    from the selected world's live `World/Config()` result. Use indices `10..15`
    as `(scrst_resources, scrst_ladders, bcrst_resources, bcrst_ladders,
    hcrst_resources, hcrst_ladders)`. Never use hard-coded ladder trade rates.
-7. Before planning any RES-to-WVARA redeem, query
+8. Before planning any RES-to-WVARA redeem, query
    `GET /api/redeem/config`. Never use hard-coded resource redeem rates,
    contract ids, or signing domains from docs, memory, or local constants.
-8. Before any `Drill`, scan the target tile and the tile above it. `STONE` is
+9. Before any `Drill`, scan the target tile and the tile above it. `STONE` is
    not drillable; route around it. Treat drilling a tile directly below `STONE`
    as unsafe unless the plan proves the falling stone cannot block the route or
    crush the agent.
    Drilling a resource tile collects that resource immediately: after world
    acceptance, update the target cell to `EMPTY` and increment carried inventory.
    Do not plan an extra `MoveAgent` into the resource cell just to pick it up.
-9. Choose an execution verification mode:
+10. Choose an execution verification mode:
    - Strict mode is the default: send exactly one proxy write, then prove world
      execution by re-reading `World.AgentOf(agentActorId).result[12]`.
    - Route-checkpoint mode is optional and must be deliberate. Use it only for a
@@ -160,14 +166,14 @@ function from fresh world state before sending a dependent action. See
      `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `MintResources`,
      `Exit`, VMT/redeem writes, chest risk, stone-adjacent uncertainty, low HP,
      full backpack, or any plan that depends on optimistic map mutation.
-10. In strict mode, choose exactly one supported proxy action: `MoveAgent`,
+11. In strict mode, choose exactly one supported proxy action: `MoveAgent`,
    `Drill`,
    `PlaceLadder`, `Surface`, `TradeResourcesForLadders`, `Exit`, or
    `MintResources`. Before sending it, record the current
    `World.AgentOf(agentActorId).result[12]` as `preActionSeq`. Send it through
    `robo_miner_action`; it submits through the persistent session and proves
    the action only after the same sequence increases on-chain.
-11. In route-checkpoint mode, record the starting `AgentOf`, `MapSnapshot`, and
+12. In route-checkpoint mode, record the starting `AgentOf`, `MapSnapshot`, and
    `preActionSeq`, send at most the configured checkpoint interval of
    prevalidated `MoveAgent` actions, then re-read `AgentOf`, `Session`, and
    `MapSnapshot`. Use a small checkpoint interval by default. Larger movement
@@ -177,29 +183,35 @@ function from fresh world state before sending a dependent action. See
    the simulated, gravity-adjusted checkpoint state and `lastActionSeq`
    increased by the expected amount. If it does not match, discard the
    optimistic route and fall back to strict mode.
-12. Treat the DiggerProxy response as forwarding evidence only. It can return
+13. Treat the DiggerProxy response as forwarding evidence only. It can return
    success even when the world rejects or ignores the action. After a strict
    proxy write, or after a route-checkpoint segment, re-read
    `World.AgentOf(agentActorId)`. The strict action is world-applied only if
    `lastActionSeq` (`result[12]`) increased above `preActionSeq`; a checkpoint
    segment is accepted only if `lastActionSeq` growth and refreshed state both
    match the simulated segment.
-13. If `lastActionSeq` did not increase, do not update local position,
+14. If `lastActionSeq` did not increase, do not update local position,
    inventory, ladders, or map from the intended action. Re-read `Session()`,
    `MapSnapshot()`, and `AgentOf()`, then replan or report the rejection.
-14. Replan from fresh state. Never assume the previous plan is still valid after
+15. Replan from fresh state. Never assume the previous plan is still valid after
    another agent may have moved, drilled, placed a ladder, died, or triggered
    falling stones.
-15. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
+16. If `AgentOf(agentActorId).result[0] == 3` or `hp == 0`, stop immediately,
    report the agent death, and do not send more game actions for that digger.
 
 ## Redeem Completion Rule
 
 Use the backend-mediated redeem API described in `references/backend-api.md`.
 The owner signs the exact EIP-712 intent returned by `GET /api/redeem/config`;
-the backend burns RES through `Redeem/RedeemFor` and transfers ERC-20 WVARA
-from its treasury. Never call legacy `Redeem/Redeem` and never wait for or
-claim a Mirror mailbox value in the backend-mediated flow.
+the backend burns RES through `RedeemFor` and transfers ERC-20 WVARA
+from its treasury. Do not perform direct player Redeem program writes, and do
+not wait for or claim a Mirror mailbox value in the backend-mediated flow.
+
+For headless agents, the expected signing path is the one-off in-memory
+keystore signer described in `references/wallet-and-signing.md`; the official
+frontend or another EIP-712-capable owner wallet is also valid. The one-off
+signer is settlement-only and must never print, export, store, or reuse the
+wallet private key.
 
 Before saying "paid", "exchanged", or "redeemed successfully", require both:
 
@@ -219,8 +231,13 @@ Before saying "paid", "exchanged", or "redeemed successfully", require both:
   banked with `Surface()` first.
 - Treat `GET /api/redeem/config` rates, unit, EIP-712 domain, and contract ids as
   the source of truth for backend-mediated RES-to-WVARA exchange.
-- Never call legacy `Redeem/Redeem`, `Redeem/ConfirmRedeem`, or
-  `Redeem/CancelRedeem` as a player. Never submit an unsigned redeem request.
+- Treat DiggerProxy executable balance as the player-agent's responsibility
+  after rental. Read only `programState.executableBalance`; when it is below
+  the configured minimum, top up from the owner wallet's WVARA and verify the
+  post-top-up state before spending actions. Backend/operator refills are a
+  fallback, not the default fuel plan.
+- Never perform direct player Redeem program writes. Never submit an unsigned
+  redeem request.
 - Never report payment from `burned` alone. Require backend `confirmed`, a
   payout transaction hash, and a fresh owner WVARA balance increase.
 - Use backend HTTP discovery only to find matches and rented diggers.

@@ -70,9 +70,11 @@ Statuses are `queued`, `burning`, `burned`, `paying`, `payout_failed`,
 retries `payout_failed` without burning again. Report payment only after
 `confirmed`, a non-empty `payoutTxHash`, and a fresh owner WVARA balance increase.
 
-Do not call legacy `Redeem/Redeem`, approve the Redeem program, or perform a
-Mirror mailbox claim. If the available wallet tool cannot sign EIP-712, use the
-official frontend or stop and request an EIP-712-capable signer; never export a
+Do not perform direct player Redeem program writes or perform a Mirror mailbox
+claim. For headless agents, the expected signing path is the one-off in-memory
+keystore signer from `wallet-and-signing.md`; an official frontend or another
+EIP-712-capable owner wallet is also valid. The one-off signer may submit only
+the public redeem intent plus `signature`; never export, print, log, or store a
 private key merely to work around missing signing support.
 
 ## Source-Of-Truth Precedence
@@ -142,8 +144,9 @@ Expected behavior:
 agent requests digger
   -> backend deploys a separate DiggerProxy program for owner + world
   -> backend initializes DiggerProxy.Create(ownerActorId, worldActorId)
-  -> backend funds initial executable balance
-  -> backend may refill executable balance on its daily schedule
+  -> backend may fund initial executable balance
+  -> player agent monitors and tops up executable balance from owner WVARA
+  -> backend may refill executable balance as a fallback
   -> backend stores owner + season + world -> diggerProgramId
   -> backend returns programId, the DiggerProxy program address
 ```
@@ -159,6 +162,12 @@ vara-wallet --chain vara-eth --network mainnet --json \
 
 Read `programState.executableBalance` from that response. Do not substitute
 ETH, ERC-20 WVARA, `programState.balance`, or cached backend metadata.
+
+After rental, proxy fuel is a player-agent responsibility. If the current
+`executableBalance` is below the configured player minimum, the agent should
+top up the rented DiggerProxy from the owner wallet's WVARA with
+`vara-wallet vara-eth:program top-up`, then re-read state to verify the
+increase. Do not call backend admin endpoints for normal player fuel.
 
 Duplicate rule: one active/planned digger per `owner + season + world`. If the
 same owner asks again, backend should return the existing `programId`.
